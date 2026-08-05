@@ -1,0 +1,30 @@
+# v0.0.204 scope — playground-rocky:parent:main（Q3 治理：去 squad 相关 mappers/reminders）
+# 个人对话主 session；不读 squad 上下文。extends default。
+extends: default
+scopeId: playground-rocky:parent:main
+name: Playground Rocky Main
+description: 个人对话主 session scope（Q3 治理：去 squad_role/team_roster/memory_group/parent_task + squad_* 5 项 reminder）
+
+groups:
+  - id: system-prompt
+    points:
+      - pointId: system_prompt_mapper
+        # Q3 治理：去掉 squad_role / team_roster / memory_group / parent_task（playground 无 squad/group 上下文）
+        impls:
+          - identity
+          - rules
+          - tool_guidance
+          - skills
+          - agent_profile
+          - context_files
+          - memory_user
+          - memory_session
+      - pointId: system_reminder
+        # Q3 治理：去掉 squad_charter/squad_tasks/squad_board/squad_workspace/squad_team_status 5 项
+        impls:
+          - env
+          - time
+          - workspace
+          - tool_error
+          - todo
+          - reachable_agents

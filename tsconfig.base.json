@@ -1,0 +1,16 @@
+{
+  "//": "共享 compilerOptions 基座，各 workspace extends 此文件。参考 specs/tech/app/package/[P0]tool_chain.md §4.2",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": []
+  }
+}

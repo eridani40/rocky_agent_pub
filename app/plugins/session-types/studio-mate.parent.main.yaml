@@ -1,0 +1,33 @@
+# v0.0.204 studio-mate:parent:main profile
+# 等价 TOOL_POLICY['studio-mate'].bound（含 agent + presence + panorama，无 goal）
+id: studio-mate:parent:main
+extends: default
+toolBound:
+  - send_message
+  - team
+  - todo
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+  - bash
+  - skill
+  - agent
+  - memory
+  - skill_manage
+  - memory_manage
+  - web_search
+  - web_fetch
+  - browser
+  - see_image
+  - cron
+  - ask-question
+  - computer
+  - presence
+  - panorama
+  - history_search
+  - history_get_context
+modelHints:
+  readsSquadDefault: true
+skillSource: member-overlay

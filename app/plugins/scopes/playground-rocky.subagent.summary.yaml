@@ -1,0 +1,7 @@
+# v0.0.204 scope — playground-rocky:subagent:summary（summary runKind；空=继承 summary 基座）
+# 补全矩阵：subagent.main extends default 触发 0.6 compact → 产 summary run → 必须有对应 summary scope，
+# 否则 scopeIdOf 落 default（真 compact）→ 递归爆炸。本文件旁路（reject_should_compact + side_run_builder + in_memory）。
+extends: summary
+scopeId: playground-rocky:subagent:summary
+name: playground-rocky:subagent:summary
+description: summary run scope（手动/自动同 profile；空=继承 summary 基座 reject_should_compact + side_run_builder + in_memory store）

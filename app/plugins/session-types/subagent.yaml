@@ -1,0 +1,33 @@
+# session type profile — subagent 基座（派生子 agent 共性）
+# 参考: specs/tech/agent/session/[P0]session_type_profile.md §4（系统基座四个之一）
+#
+# 各 biz 的 <biz>-<role>:subagent:main profile 显式 extends 本基座（系统基座允许跨 biz 被继承，
+# 与 default/summary/consolidate 同待遇）；业务 profile 之间禁止跨 biz extends（validator 硬失败）。
+# toolBound = subagent 共性工具集（19 工具：基础探索 + a2a 回报
+#   + skill_manage/memory_manage，无 agent/cron/team）。
+# 两资产工具：subagent 主 run 不主动整理资产，带上是为 consolidate 旁路 run 复用 main
+#   snapshot.tools 时与 consolidate 基座 toolBound 交集非空（能真提炼，不空跑）——
+#   各 *.subagent.main scope 未覆写 post_compact（继承 default memory_skill_consolidation）。
+
+id: subagent
+extends: default
+toolBound:
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+  - bash
+  - skill
+  - memory
+  - web_search
+  - web_fetch
+  - browser
+  - see_image
+  - send_message
+  - computer
+  - ask-question
+  - history_search
+  - history_get_context
+  - skill_manage
+  - memory_manage

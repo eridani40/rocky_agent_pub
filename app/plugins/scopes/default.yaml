@@ -1,0 +1,146 @@
+# v0.0.179 scope 文件（impl 列表模型）
+# 规则：
+#   - 在 impls 数组里 = active；不在 = inactive（membership 即启用）
+#   - 数组顺序即 order（list 类型 EP 不关心顺序，ordered/exclusive 按此序）
+#   - exclusive EP：impls 数组恰好 1 项（validator 启动期校验）
+#   - impls 数组元素：纯字符串 = active + 无 configValues；
+#                    对象 {implId, configValues} = active + 有 configValues 覆盖 manifest 默认
+#   - configValues 只在非默认值时写（默认走 manifest configSchema.default）
+#   - point 节点存在 = 该 scope 配置此 EP（per-EP 继承判定用）
+#   - scope 节点未出现某 EP = 继承 default 全量列表（per-EP fallback）
+
+scopeId: default
+name: Default
+description: 默认基线 scope（全 17 EP 激活）
+
+groups:
+  - id: context-ingest
+    points:
+      - pointId: context_ingest_handler
+        impls:
+          - query_truncate
+          - tool_result_truncate
+          - system_reminder_injector
+          - store_sink
+          - search_indexing
+      - pointId: system_reminder
+        impls:
+          - env
+          - time
+          - workspace
+          - tool_error
+          - todo
+          - reachable_agents
+          - squad_workspace
+          - squad_team_status
+          - squad_task
+
+  - id: context-assemble
+    points:
+      - pointId: context_assemble_mapper
+        impls:
+          - transcript_reader
+          - summary_reader
+      - pointId: context_assemble_reducer
+        # v0.0.173 重构：6 个清理 reducer 迁到 context_clean_view_reducer EP
+        # （snapshot 永远 rebuild 确定性纯函数，不被清理污染）
+        impls:
+          - base_builder
+      - pointId: context_clean_view_reducer
+        # v0.0.173 新增：喂 LLM 前的清理视图链（深克隆后跑，原 snapshot 不被触碰）
+        # 顺序与原 assemble 链一致（保 reducer 依赖：think_remove 在 empty_message 前；role_merge 在最后）
+        # v0.0.207 头插 dedup_tool_result（必须排在 orphan_tool_call 之前：
+        # dedup 先去重 → orphan 才能正确判配对；否则见双 result 都当 paired 全留，T3 兜底失效）
+        # v0.0.256 第 4 位插 bubble_text_before_tool_call（orphan 先配对过滤+message 级邻接，
+        # bubble 再处理配对齐全但 content 内 block 乱序：text 冒泡到 tool_call 前，修 provider 400）
+        impls:
+          - dedup_tool_result
+          - snip_handler
+          - orphan_tool_call
+          - bubble_text_before_tool_call
+          - think_remove
+          - fill_empty_text
+          - empty_message
+          - role_merge
+
+  - id: context-compact
+    points:
+      - pointId: context_should_compact
+        impls:
+          - implId: threshold_should_compact
+            configValues:
+              compactRatio: 0.6
+      - pointId: context_do_compact
+        impls:
+          - summary_do_compact
+      - pointId: context_post_compact
+        impls:
+          - memory_skill_consolidation
+          - noop_post_compact
+
+  - id: context-engine
+    points:
+      - pointId: session_store
+        impls:
+          - persistent_session_store
+
+  - id: system-prompt
+    points:
+      - pointId: system_prompt_mapper
+        impls:
+          - identity
+          - rules
+          - tool_guidance
+          - skills
+          - agent_profile
+          - context_files
+          - memory_user
+          - memory_session
+          - memory_group
+          - squad_role
+          - team_roster
+          - parent_task
+      - pointId: system_prompt_reducer
+        impls:
+          - tier_sort
+          - dedup
+          - budget_truncate
+
+  - id: provider
+    points:
+      - pointId: llm_provider
+        impls:
+          - anthropic_compatible
+      - pointId: llm_protocol
+        impls:
+          - anthropic_messages
+
+  - id: web
+    points:
+      # v0.0.72.bugs: web_search_provider 从 exclusive 改 list（多 impl 共存，按 app_config.type 单点路由）
+      - pointId: web_search_provider
+        impls:
+          - zhipu_coding_plan
+          - zhipu_api
+
+  # v0.0.141.see_img: see_image_provider list EP（多 vender 共存，按 app_config.see_image.type 单点路由）
+  - id: vision
+    points:
+      - pointId: see_image_provider
+        impls:
+          - minimax_m3
+          - zhipu_image
+
+  # v0.0.166.skill_market: skill_market_provider exclusive EP（同一时刻一个市场源生效，列表唯一项即生效源）
+  - id: skill-market
+    points:
+      - pointId: skill_market_provider
+        impls:
+          - skills_sh
+
+  # v0.0.206: channel 接入 scope 激活模型（plugin scope D6 已删）——default.yaml 配了才可用，不配 = 关
+  - id: channel
+    points:
+      - pointId: channel
+        impls:
+          - feishu

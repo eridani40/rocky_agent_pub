@@ -1,0 +1,143 @@
+# compact_model_directive — v0.0.158 studio 手动 compact 主战场（修前必 400 修后必 202）
+# 覆盖版本：v0.0.158（删「独立 summary 模型」层 + 收敛 resolveConfigBySid 唯一入口 + chat/compact 同链）
+#           v0.0.235（forked usage 回归门：compact「整理」分区 token > 0）
+# 覆盖契约：
+#   POST /session/:id/compact（studio session）→ 202 + {ok:true}（v0.0.158 关键回归门）：
+#     修前 studio 走 summary 分链 + INV-A5 禁 app_config fallback + squad.summaryModelDefault 未配 → 必 400
+#     修后 chat/compact 同链，走 squad.modelDefault → 必 202
+#   GET /session/:id/usage → SessionUsageView（v0.0.235 关键回归门）：
+#     修前 runReActLoop RunResult.usage 恒 {} → fork-1 caller accumulateUsage 拿空 → forked 分区归 0（空对象）
+#     修后 RunResult.usage 真实聚合每轮 callLLM Σ → forked.input_total_tokens / output_total_tokens >= 1
+#   forked 出站不变量（保留自 v0.0.155 case）：
+#     ① request.tools 为空（NO_TOOLS 约束，enableToolWhitelist=true, toolWhitelist=[]）
+#        只能间接通过 forked response 不含 tool_use 行为面证明
+#     ③ 纯 directive（forked input 不含 seed marker 复述 transcript）——同样只能靠 forked 路径本身保证
+#   summary content 非空（走 squad.modelDefault 链，不再走 default_models.summary）
+# 一进一出：出旧 playground + default_models.summary fallback 断言；进 studio + squad.modelDefault 同链
+# 注：POST /squad 事务同建 leader member + leader session（role=leader / biz=studio / 绑 squadId+memberId），
+#     无需额外 POST /session；leader session 就是我们要手动 compact 的目标 studio session
+# 帧序：帧 0 = 主 run LLM 出站（studio session leader）；帧 1 = compact forked LLM 出站（fire-and-forget）
+case: compact_model_directive
+module: compact
+timeout: 180
+
+setup:
+  - name: 建 squad（含 modelDefault，事务同建 leader member + leader session role=leader/biz=studio）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "v158-compact-model-directive"
+          description: "AT case for studio manual compact (v0.0.158)"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "leader-01"
+        status: [200, 201]
+    save:
+      squadId: .id
+      leaderSid: .members[0].sessionId
+    check:
+      - .id exists
+      - .leaderId exists
+      - .modelDefault == "MiniMax-M3"
+      - .members[0].sessionId exists
+      - .members[0].role == "leader"
+
+  - name: 验 leader session 为 studio 会话（biz=studio + 绑 squadId/memberId）
+    requests:
+      - GET /session/{leaderSid}
+    check:
+      - .id exists
+      - .biz == "studio"
+      - .role == "leader"
+      - .squadId exists
+      - .memberId exists
+      - .state == "idle"
+
+steps:
+  - name: 订阅 agent_loop 流（主 run 事件；命名流 as=main 整 case 内唯一）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{leaderSid}_amt:main", as: main }
+
+  - name: 订阅 session_panel 流（监听 summary_task_update）
+    sse:
+      sub:
+        - { topic: session_panel, group: "session_id:{leaderSid}", as: panel }
+
+  - name: 主 run 一轮产生可压缩 transcript（帧 0 = 主 run 出站；走 squad.modelDefault 链解 chat 模型）
+    requests:
+      - method: POST
+        path: /session/{leaderSid}/run
+        body:
+          content: "用一句话回答：今天天气怎么样"
+        status: [200]
+    check:
+      - .state == "idle"
+      - .stopReason == "no_tool_call"
+
+  - name: 等 run_end（确认 transcript 已产生 + SSE 事件流收全）
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 1"
+      timeout: 15
+    check:
+      - main.count(type=run_start) == 1
+      - main.count(type=run_end) == 1
+      - main.absent(type=error)
+
+  # ── 本版本关键回归门 ──
+  # 修前：studio session 手动 compact → 走 summary 分链 + INV-A5 禁 app_config fallback
+  #       + squad.summaryModelDefault 未配 → resolveModel 空 → 抛 MODEL_NOT_CONFIGURED → 400
+  # 修后：chat/compact 同链 → 走 squad.modelDefault → 正常 resolve → 202 + fire-and-forget
+  - name: 手动触发 compact（本版本主战场：修后必 202 + {ok:true}；帧 1 = forked LLM 出站）
+    requests:
+      - method: POST
+        path: /session/{leaderSid}/compact
+        body: {}
+        status: [202]
+    check:
+      - .ok == true
+
+  - name: poll summary 非 null（compact forked LLM 完成信号，timeout 60s 覆盖真 LLM 耗时）
+    poll:
+      request: GET /session/{leaderSid}/summary
+      until: .summary != null
+      every: 1
+      timeout: 60
+    check:
+      - .summary exists
+
+  # ── v0.0.235 forked usage 关键回归门 ──
+  # compact fork-1 run 完成 → caller accumulateUsage(sid,'forked', RunResult.usage Σ)
+  # 修前：runReActLoop RunResult.usage 恒 {} → caller 拿空 → forked 分区归 0（空对象，input_total_tokens 缺失）
+  # 修后：RunResult.usage 真实聚合每轮 callLLM → forked.input_total_tokens / output_total_tokens >= 1
+  # poll（非单 GET）覆盖「summary 写入（run 内）→ RunResult 聚合（run 末）→ caller accumulateUsage（run 后）」的滞后窗口
+  # 断 forked 而非 total：total 含 current（主 run），bug 在时也 >0，无法区分；forked 才是本版本修复的精确判别
+  - name: poll forked usage 累计非 0（v0.0.235 核心：compact「整理」分区 token > 0）
+    poll:
+      request: GET /session/{leaderSid}/usage
+      until: .forked.input_total_tokens >= 1
+      every: 1
+      timeout: 20
+    check:
+      - .forked.input_total_tokens >= 1
+      - .forked.output_total_tokens >= 1
+
+  - name: 验 summary.content 非空文本（走 squad.modelDefault 链正常产出 summary）
+    requests:
+      - GET /session/{leaderSid}/summary
+    check:
+      - .summary exists
+      - .summary.content exists
+
+  - name: 验 summary_task_update SSE 事件序列（compact 任务 CAS 成功即 emit，至少 1 帧）
+    check:
+      - panel.count(type=summary_task_update) >= 1
+
+teardown:
+  - name: 硬删 squad（级联删所有 session/member/办公室目录，防止 name 冲突）
+    requests:
+      - method: DELETE
+        path: /squad/{squadId}
+        status: [200, 204]

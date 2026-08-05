@@ -1,0 +1,33 @@
+/**
+ * squad-panel —— 关键实现示意（生产实现见 section-squad-panel.tsx + component-{intro,members,manage}-tab.tsx）
+ * 头部 + 4 tab 栏 + 按 tab 路由内容（intro/members/admin 实跑，goals 占位 banner）。
+ */
+type Tab = 'intro' | 'goals' | 'members' | 'admin';
+const TABS: { id: Tab; label: string; testid: string }[] = [
+  { id: 'intro', label: '介绍', testid: 'squad-tab-intro' },
+  { id: 'goals', label: '目标', testid: 'squad-tab-goals' },
+  { id: 'members', label: '成员', testid: 'squad-tab-members' },
+  { id: 'admin', label: '管理', testid: 'squad-tab-admin' },
+];
+
+export function SquadPanel({ name, tab, onTabChange }: { name: string; tab: Tab; onTabChange: (t: Tab) => void }) {
+  return (
+    <main data-testid="studio-main" className="flex flex-1 flex-col overflow-y-auto">
+      <div className="border-b border-border px-8 pb-4 pt-6">
+        <div className="text-[20px] font-bold tracking-tight text-fg">{name}</div>
+        <div className="mt-0.5 font-mono text-xs text-muted">squad · 团队看板</div>
+      </div>
+      <div className="max-w-[920px] px-8 pb-10 pt-5">
+        <div className="mb-5 flex gap-1 border-b border-border">
+          {TABS.map((t) => (
+            <button key={t.id} data-testid={t.testid} onClick={() => onTabChange(t.id)}
+              className={'-mb-px border-b-2 px-3.5 py-2 text-[13px] font-semibold ' + (tab === t.id ? 'border-accent text-accent' : 'border-transparent text-muted-2')}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {/* tab 内容路由：intro→IntroTab / goals→PlaceholderBanner / members→MembersTab / admin→ManageTab */}
+      </div>
+    </main>
+  );
+}

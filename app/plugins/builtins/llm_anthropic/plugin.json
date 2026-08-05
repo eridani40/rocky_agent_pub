@@ -1,0 +1,19 @@
+{
+  "id": "llm_anthropic",
+  "label": "__MSG_plugin.builtin.llm_anthropic.label__",
+  "description": "__MSG_plugin.builtin.llm_anthropic.description__",
+  "extImpls": [
+    {
+      "implId": "anthropic_compatible",
+      "point": "llm_provider",
+      "impl": "./provider.ts",
+      "description": "__MSG_plugin.builtin.llm_anthropic.impl.anthropic_compatible.description__"
+    },
+    {
+      "implId": "anthropic_messages",
+      "point": "llm_protocol",
+      "impl": "./protocol.ts",
+      "description": "__MSG_plugin.builtin.llm_anthropic.impl.anthropic_messages.description__"
+    }
+  ]
+}

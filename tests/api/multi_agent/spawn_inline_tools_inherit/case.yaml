@@ -1,0 +1,100 @@
+# spawn_inline_tools_inherit — inline spawn 不传 tools → subagent 应继承 bound 全集（非空）能用工具
+# v0.0.222 修复验证：agent-tool.ts:330 去 `?? []`，spawn 不传 tools 时 resolveToolSet 走
+#   `undefined → new Set(bound)` 全集分支（subagent profile toolBound 含 read 等 19 工具），
+#   而非旧的 `undefined ?? [] = []` 空集。
+# 触发条件（命中修复路径，区别于 agent_spawn_sync 用 templateRef=explorer）：
+#   parent LLM 调 agent 工具做 **inline spawn（不带 templateRef）+ 不传 tools 参数** →
+#   eff.tools = input.tools ?? template?.tools = undefined ?? undefined = undefined → 修复路径。
+# 断言面：subagent 实际用 read 读到 marker 文件内容（transcript 含 marker token）→ 间接证明
+#   subagent 有 read 可用 = 继承了 bound 全集（旧 bug 空集下 subagent 无工具读不到）。
+# 真调 minimax；429/529/503 → skipped 不阻塞。
+case: spawn_inline_tools_inherit
+module: multi_agent
+timeout: 150
+
+setup:
+  - name: 建 parent session（playground，带 provider/model）
+    requests:
+      - method: POST
+        path: /session
+        body:
+          title: "spawn-inline-tools"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { sid: .id, ws: .workspaceDir }
+    check:
+      - .id exists
+      - .workspaceDir exists
+
+  - name: 植入 marker 文件到 parent workspace（供 subagent 用 read 读取）
+    files:
+      - path: "workspaces/{sid}/probe.txt"
+        content: { marker: "TOOLPROBE_7QK9X2", note: "inherit bound probe" }
+
+steps:
+  - name: 订阅 parent agent_loop 流（主 run 事件）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 发消息驱动 inline spawn（生产路径 /messages；消息里不提 tools 参数，让 LLM 自然省略→命中修复路径）
+    requests:
+      - method: POST
+        path: /session/{sid}/messages
+        body:
+          content: "请使用 agent 工具派生一个子 agent（直接 inline 派生即可，不要指定任何模板 templateRef）。给该子 agent 的任务是：读取文件 {ws}/probe.txt 的内容，并把读到的原始内容原样返回给你。等待子 agent 完成后，把它返回的文件内容告诉我。必须调用 agent 工具派生子 agent，不要自己读取、不要提问，直接执行。"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { run_id: .runId }
+    check:
+      - .runId exists
+
+  - name: 等 parent run 完成（sync spawn：parent 同步等 child 结果）
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 1"
+      timeout: 60
+    check:
+      - main.count(type=run_start) == 1
+      - main.count(type=run_end) == 1
+      - main.absent(type=error)
+
+  - name: GET children — sync spawn 完成后 child 应在 terminated 组
+    poll:
+      request: GET /session/{sid}/children
+      until: ".terminated[0].sessionId exists"
+      every: 1
+      timeout: 15
+    save:
+      child_sid: ".terminated[0].sessionId"
+    check:
+      - .terminated[0].sessionId exists
+
+  - name: GET child session — 验 derivation=subagent + parentSessionId（inline spawn：subAgentTemplateType 应为 null/缺省）
+    requests:
+      - GET /session/{child_sid}
+    check:
+      - .derivation == "subagent"
+      # check rhs 不做 {var} 插值（框架仅对 path/body/sse-group/files 插值，check 引擎纯字面量），
+      # `.parentSessionId == "{sid}"` 会拿 ULID 和 5 字符字面量 "{sid}" 比永远 fail。
+      # 同框架惯例（agent_spawn_sync / cascade-delete）：用 exists 验字段落库；精确值等价已由
+      # SSE child answer marker（step 07）+ executor 跨层证据兜底。
+      - .parentSessionId exists
+
+  - name: GET child transcript — 验 subagent 用 read 读到了 marker（证明继承了 bound 全集，非空）
+    requests:
+      - GET /session/{child_sid}/messages
+    check:
+      - .items[-1].content[0].text ~= "TOOLPROBE_7QK9X2"
+
+  - name: GET parent usage — 验 sub usage 递归上报（child 真跑过 LLM）
+    requests:
+      - GET /session/{sid}/usage
+    check:
+      - .sub exists
+      - .sub.llmCallCount >= 1
+
+teardown:
+  - name: DELETE parent session（child 随父联级清理）
+    requests:
+      - DELETE /session/{sid}

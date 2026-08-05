@@ -1,0 +1,201 @@
+# train-multiturn-flow — v0.0.221 academy 多轮训练全链路（建教室→学生→版本→训练任务→coach 自主循环→paused 三态终态）
+#
+# 覆盖契约（以 specs/tech/version_logs/v0.0.221/change_plan.md A/E 节为准 — specs/api/overall/18-academy.md
+#   §2.4-§2.6 accept/reject/stop 已删 + awaiting_confirm 终态已不存在，spec 待 doc-modifier 同步）：
+#   specs/api/overall/18-academy.md：
+#     §1.1 POST /academy/classroom — 建教室（事务同建 head session）
+#     §1.5 POST /academy/classroom/:cid/student — 建学生（事务同建 0.0 初始 formal 版本）
+#     §3.1 POST /academy/classroom/:cid/dataset — 建数据集
+#     §3.6 POST /academy/classroom/:cid/grader — 建 em 评估器（纯函数 grade，免额外 LLM 调用）
+#     §2.1 POST /academy/classroom/:cid/student/:sid/training-task — 发起 multi 训练任务
+#     §2.2 GET  /academy/training-task/:tid — 任务详情（含历史轮次，验持久化 + 状态推进）
+#     POST /academy/training-task/:tid/pause — teardown 兜底（[v0.0.221] 新路由替原 /stop）
+#
+# v0.0.221 核心变更（vs v0.0.213）：
+#   - task.status 6 态 → 3 态（pending/running/paused + pausedReason）；awaiting_confirm/done/rejected 不存在
+#   - coach 不再 propose（无 propose 链）→ 触达 maxTurns/早停自动 status=paused + pausedReason
+#   - TurnResult.proposed 字段改名 paused（语义对齐；本 case 不直接断 TurnResult，断 task 状态）
+#   - /stop 路由删 → /pause 路由（teardown 改用 /pause）
+#   - coach 用 manage-task 工具（原 train-student 改名；action evaluate/revise/fork/sample/grade 等不变）
+#
+# 断言面：
+#   【建任务】POST 201 响应 task.candidateVersionId exists（建任务即 fork 自 base round1）+
+#             status=pending / mode / optimizeStyle / maxTurns / coachSessionId 双向关联
+#   【状态推进】poll GET /training-task/:tid 直到 status=paused（替原 awaiting_confirm）—— coach 自主
+#             evaluate→revise 循环被 engine 在 maxTurns 触达时自动 pause（pausedReason=maxturns）或
+#             早停时 pause（pausedReason=earlystop）；design 双引擎（engine deliverTo 推 a2a 消息到
+#             coach inbox 牵引 coach 推进；coach 驱动权，引擎不驱动 coach）
+#   【三态机】task.pausedReason exists（maxturns/completed/stopped/earlystop 闭合 4 值之一；具体值
+#             由 coach LLM 行为决定，不断固定值）
+#   【turn record】GET 验落盘：turns 列表含 round==1（coach 至少调过一次 revise）+ sampleResults/
+#             avgScore 存在（真调 minimax sample + em 纯函数 grade 产出）+ candidateVersionId 持久化
+#
+# 真调 LLM：coach 自主跑 consume 多次 LLM 调用（读任务书/决策 evaluate/revise）+ 每轮 revise 1 次
+#           sample（AcademyLlmPort 直调 minimax）；em grade 纯函数 0 次。maxTurns=2 → 至多 2 轮 revise。
+# 429 skip：sample 阶段 429/529/503 → step_exec 抛 RateLimitedError → case skipped（框架自动，不重试）
+#
+# 时序（v0.0.215 round1 修复，orchestrator 实证非功能 bug）：coach 自主 run ~44s（transcript 实证完整闭环），
+# AT 白名单多 case 连续真调 minimax 累计更慢——单 poll 60s 窗恰逢/累计超时误判钉死（round1 step05 fail 根因）。
+# poll.timeout 框架上限 180（case_loader v0.0.203 用户裁决专为 trainer 真 LLM 多 turn 链路放宽）→ 本 case
+# poll 窗拉满 180s，case timeout 240 兜底（180+快步骤 ~10 = 190 < 240；poll 满足即走，上限仅截真挂死）。
+#
+# 设计注记：
+# - mode=multi + optimizeStyle=training：coach 用 manage-task（原 train-student 改名）action=evaluate/revise
+# - em grader（matchRule caseInsensitive+trim）使 grade 为纯函数（0/1 二值），排除 llm-judge 额外 LLM
+# - maxTurns=2：engine 在 currentTurn>=maxTurns 时自动 pause（reviseCandidate §3 step 6；原 proposeTask
+#   调用已删，改为 putTask status=paused + pausedReason='maxturns'）；coach 自主决定每轮 edit/revise 节奏。
+# - **coach 自主激活假设**：createTrainingTaskAndCoach step⑤ deliverTo(coach, buildTaskBookMessage) =
+#   enqueue + activate，激活 coach agent_loop 自主跑（v0.0.213 训练闭环修复核心，v0.0.221 不变）。AT poll
+#   观察任务级状态推进验证此假设；若实现未自动激活 coach → poll timeout。
+# - **不用 HTTP /revise 手动推进**：coach 已自主跑，HTTP /revise 会与 coach 竞 per-task lock（task_busy）；
+#   poll 观察真实产品流更稳、更对齐 design。
+# - **不依赖 training.* SSE**（spec §6 已对齐 design：engine 状态变化走 deliverTo 推 a2a Message 到 coach
+#   inbox，非 SSE 事件）；turn 完成判据 = GET 持久化轮询（turns 列表 + status），全程零 SSE wait。
+# - round 2 不硬断言：coach 可能在 round 1 后早停（pausedReason=earlystop，合法行为）；只断 round 1
+#   （至少 1 轮 revise 发生）+ maxTurns=2 config 验证多轮能力。count-based 不变量（精确 turn 数）
+#   AT DSL 无 count（body 数组只 any/all），UT 覆盖。
+# - **teardown 用 /pause（替原 /stop）**：v0.0.221 /stop 路由删；已 paused 则 409 幂等（invalid_task_state）。
+case: train-multiturn-flow
+module: academy
+timeout: 240
+
+setup:
+  - name: 建教室（事务同建 head session；POST 201 返 classroom + headSessionId）
+    # defaultModel = test pool minimax（classroom 级默认模型），使建学生 fallback 教室默认 → 学生 version.json.model 落真值
+    # 避免 test env 无 default_models.chat → resolveModel app 默认档落空 → 400 model_not_configured（data_model §62 fallback 链）
+    requests:
+      - method: POST
+        path: /academy/classroom
+        body:
+          name: "at-multiturn-flow"
+          logo: "🎓"
+          defaultModel:
+            providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+            modelId: "MiniMax-M3"
+        status: [201]
+    save:
+      cid: .classroom.id
+      head_sid: .headSessionId
+    check:
+      - .classroom.id exists
+      - .classroom.headTeacherSessionId exists
+      - .classroom.defaultModel exists
+      - .headSessionId exists
+
+  - name: 建学生（事务同建 0.0 初始 formal 版本）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/student
+        body:
+          name: "mt-student"
+        status: [201]
+    save:
+      sid: .student.id
+      initial_vid: .initialVersion.id
+    check:
+      - .student.id exists
+      - .student.currentFormalVersionId exists
+      - .initialVersion.id exists
+      - .initialVersion.type == "formal"
+
+  - name: 建数据集（1 个 case；multi 模式必填 datasetId）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/dataset
+        body:
+          name: "mt-dataset"
+          description: "AT multi-turn dataset"
+          items:
+            - id: "case-1"
+              question: "What is 2+2? Reply with only the number."
+              expectedAnswer: "4"
+              gradingCriteria: "exact match of the number"
+        status: [201]
+    save:
+      did: .id
+    check:
+      - .id exists
+
+  - name: 建 em 评估器（纯函数 grade，免 llm-judge 额外 LLM 调用 + 降低 429 概率）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/grader
+        body:
+          name: "mt-em-grader"
+          type: "em"
+          matchRule:
+            caseInsensitive: true
+            trim: true
+        status: [201]
+    save:
+      gid: .id
+    check:
+      - .id exists
+
+steps:
+  - name: 发起 multi 训练任务（maxTurns=2；POST 201 返 task + coachSessionId；建任务即 fork 初始 candidate + 投递任务书激活 coach）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/student/{sid}/training-task
+        body:
+          baseVersionId: "{initial_vid}"
+          mode: "multi"
+          optimizeStyle: "training"
+          directive: "Improve student math ability via training-style iteration"
+          datasetId: "{did}"
+          graderId: "{gid}"
+          maxTurns: 2
+        status: [201]
+    save:
+      tid: .task.id
+      coach_sid: .coachSessionId
+    check:
+      - .task.id exists
+      - .task.status == "pending"
+      - .task.mode == "multi"
+      - .task.optimizeStyle == "training"
+      - .task.maxTurns == 2
+      - .task.baseVersionId exists
+      - .task.coachSessionId exists
+      - .task.candidateVersionId exists
+      - .coachSessionId exists
+
+  - name: poll 任务级状态推进直到 paused（coach 自主 evaluate→revise 循环；engine 在 maxTurns 触达时自动 pause + pausedReason；替原 awaiting_confirm）
+    # coach 被建任务时的任务书 deliverTo 激活，自主调 evaluate/revise（manage-task 工具，原 train-student 改名）；
+    # engine 在 currentTurn>=maxTurns 时 putTask status=paused + pausedReason='maxturns'（原 proposeTask 已删），
+    # 或早停时 pausedReason='earlystop'。poll 观察此真实产品流。
+    poll:
+      request: GET /academy/training-task/{tid}
+      until: .task.status == "paused"
+      every: 1
+      timeout: 180
+    check:
+      - .task.status == "paused"
+      - .task.pausedReason exists
+      - .task.currentTurn >= 1
+      - .task.coachSessionId exists
+      - .task.candidateVersionId exists
+      - .task.temporaryBaselineVersionId exists
+      - .turns exists
+
+  - name: GET 任务详情验 turn record 持久化（round 1 + 真调 sample/grade 产出 + 候选版本链）
+    requests:
+      - GET /academy/training-task/{tid}
+    check:
+      - .task.status == "paused"
+      - .task.pausedReason exists
+      - .task.candidateVersionId exists
+      - .task.temporaryBaselineVersionId exists
+      - .turns exists
+      - .turns[] any .round == 1
+      - .turns[] any .sampleResults exists
+      - .turns[] any .avgScore >= 0
+      - .turns[] all .round >= 1
+
+teardown:
+  - name: 兜底 pause task（防残留 running 任务；已 paused 则 409 幂等；v0.0.221 /stop 删改 /pause）
+    requests:
+      - method: POST
+        path: /academy/training-task/{tid}/pause
+        body: { reason: "AT teardown" }
+        status: [200, 409, 404]

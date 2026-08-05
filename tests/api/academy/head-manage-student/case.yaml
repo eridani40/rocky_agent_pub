@@ -1,0 +1,310 @@
+# head-manage-student — v0.0.221 head 教室层主权（manage-classroom 20 action + head 不进 task 内场）
+#
+# 覆盖契约（以 specs/tech/version_logs/v0.0.221/change_plan.md C/D/E 节为准 — specs/api/overall/18-academy.md
+#   §2.4-§2.6 accept/reject/stop 已删，spec 待 doc-modifier 同步）：
+#   specs/api/overall/18-academy.md：
+#     §1.1 POST /academy/classroom（事务同建 head session）/ §1.5 POST student（同建 0.0 初始 formal 版）
+#     §3.1/§3.6 dataset+grader（multi 训练前提）/ §1.3 GET classroom（tasks 看板）
+#     §1.8 GET version / POST /academy/training-task/:tid/pause（teardown，[v0.0.221] 新路由）
+#   specs/api/overall/04-agent-session.md §3.2：POST /session/:id/messages → 202 + {runId, enqueueId}
+#   specs/tech/agent/agent_interface_and_loop/[P0]agent_event.md §5.4/5.5：
+#     tool_call_start（toolName 顶层字段）/ tool_result_end（isError）——SSE 工具面断言权威
+#   specs/tech/agent/message/[P0]agent_message_interface.md §4.6：
+#     持久化 ToolCallBlock = {type:"tool_call", name, arguments}——messages action 级断言权威
+#   change_plan C 节（三工具→两工具）+ D 节（head profile.toolBound 去 train-student/manage-student）：
+#     head 仅绑 manage-classroom（20 action：dataset/grader/skill + 学生 CRUD 7 + 任务监督 4）
+#     任务监督 4 action：start_task（原 start_training 改名）/ list_tasks / get_task / update_task（NEW）
+#     update_task 仅 patch {maxTurns?, directive?}（其他字段拒；不改 status/candidate/baseline）
+#
+# v0.0.221 vs v0.0.215 差异：
+#   - manage-student 工具删除（9 action 并入 manage-classroom）；train-student 改名 manage-task（coach 专属）
+#   - head profile.toolBound：去 train-student + manage-student，仅留 manage-classroom（扩 20 action）
+#   - 原 accept 链断（accept 路由删 + head 无 adopt 权限——adopt 是 coach 的 manage-task action）
+#   - task 终态：awaiting_confirm → paused + pausedReason（三态机）
+#   - 新增 head 能力：update_task（调大 maxTurns 让 coach 续训越过原上限）
+#
+# 断言面（三层互证 + 边界）：
+#   【SSE 工具面】tool_call_start toolName=manage-classroom >= 1（head 用对工具）
+#     + run 完整结束（run_start→run_end 各 >= 1 + 顺序正确）+ 无全局 error 帧
+#     + **边界 absent**：tool_call_start toolName=manage-task（coach 专属，head 不调）
+#                       toolName=manage-student（旧工具已删）
+#                       toolName=train-student（旧名已改名）
+#     （不硬断"全程零 isError"——真 LLM head 决策链会试错-纠正；"start_task 最终成功"由后续
+#      paused 链路间接证明，是更强的实质证据）
+#   【messages action 级】持久化 ToolCallBlock filter 断言：
+#     run1: .items[] any .content[name=manage-classroom].arguments.action == "start_task"
+#     run2: .items[] any .content[name=manage-classroom].arguments.action == "update_task"
+#   【结果落盘】poll classroom tasks[0] → status=paused + pausedReason exists（三态机终态）
+#     run2 后 GET task → maxTurns == 3（update_task patch 生效，原 maxTurns=1）
+#   【防假能用硬断言】两轮 head 最终回复文本 !~= 5 条认输话术
+#
+# 设计注记（每条对应一个已知坑/契约事实）：
+# - **走 POST /messages 生产路径（非 run wrapper）**：复刻用户真实操作 + head 完整决策链（enqueue→activate→
+#   tool loop→最终文本）；run wrapper 是 test-only 同步壳，不代表生产链路。
+# - **run1 maxTurns=1 + run2 update_task 调大**：复刻新「maxTurns 到顶 → head update_task 续训」核心场景
+#   （design §7.5）。run1 maxTurns=1 使 task 快速 paused（coach 1 轮即到顶）；run2 head 调 update_task
+#   调大 maxTurns=3（patch 生效但 coach 不自动 resume——update_task 是静默 patch，resume 须另调）。
+# - **边界 absent 断言用 SSE stream**：head 不调 manage-task（coach 专属）/ manage-student（已删）/
+#   train-student（已改名）。profile.toolBound 从根隔离（head 工具列表不含 manage-task），LLM 不知
+#   manage-task 存在 → 自然不调。absent 断言是 sanity check（若 fail 说明工具泄漏到 head 工具列表）。
+# - **studentId 匹配 = 单学生结构保证**：本 case 教室仅 1 名学生（记录员1），tasks[0] 必归属她；
+#   check 右侧不插值（陷阱 1）无法逐字比对 .studentId == "{sid}"，结构性唯一 = 等价强断言。
+# - **mode 不硬断（head 主权决策）**：start_task action 的 mode 参数由 head LLM 自主决定（simple/multi
+#   都合法）；代码默认 'multi'（manage-student-training-actions.ts str(input.mode, 'multi')），但 head
+#   可自主传 mode:'simple'（合法行为，非 bug）。硬断 mode == "multi" = 把 LLM 不确定行为钉死，违反
+#   AT 入选本意。本 case 核心 = head manage-classroom 工具链路 + 边界 absent + update_task patch 生效；
+#   mode 非核心断言点（dataset/grader 仍 setup 备用——head 选 multi 时用，选 simple 时闲置无害）。
+# - **action 级断言用 filter 路径而非块索引**：assistant 消息 content=[text?, tool_call...] 块序随 LLM
+#   输出变化，content[0]/content[1] 硬索引 flaky；eval_path 支持 [key=val] filter（定位每消息首个
+#   name=X 的 tool_call 块）+ 数组谓词 any 跨消息扫描，块序无关。
+# - **长等待全走 poll 不走 wait**：head run 真实 >60s（6 轮 message + bash 单次 ~28s，transcript 实证），
+#   coach run ~44s（连续真调 minimax 累计更慢）——wait/poll 单窗 60s 恰逢/累计超时误判钉死
+#   （v0.0.215 round1 step07 fail 根因，orchestrator 实证非功能 bug）。框架 poll.timeout 上限 180
+#   （case_loader v0.0.203 用户裁决专为 trainer 真 LLM 多 turn 链路放宽），wait 上限仍 60 不碰——
+#   故 run1/run2 完成等待从 wait 转双相 poll（先 poll state=running 确认 activate，再 poll state=idle
+#   等完成，防「poll idle 撞上 run 未启动」假完成）。
+# - **不认输断言只达最终回复**：DSL 数组谓词不支持嵌套（content[] 内再谓词 → 拒载），中间
+#   assistant 消息的文本块不可达；最终回复是用户可见结论，认输话术最可能出现处。两 run 各断一次。
+# - **teardown 用 /pause（替原 /stop）**：v0.0.221 /stop 路由删，改 /pause。已 paused 则 409 幂等。
+#   条件停 task：tid_td 在 teardown 内现取（steps 中途失败 task 未建时 save 失败仅标 small，
+#   run_case 约定 teardown fail 不翻 case 结果）；防 coach 泄漏续跑烧 minimax 影响后续 case（429 风险）。
+# - auto_naming 并发：首条消息触发命名后台 LLM（session_meta topic），不在 main 流，不干扰断言。
+# - 429 skip：head/coach/sample 任一环节 429/529/503 → 框架自动 skipped（不重试不阻塞）。
+#
+# 真调 LLM 估算：head run1 ~2-4 次 + 命名 1 次 + coach 循环 ~2-3 次（1 轮：决策+sample）+ head run2
+#   ~2-3 次 ≈ 8-12 次 minimax。em grader 纯函数 0 次。case timeout 300 = head run1（poll ≤150s）
+#   + coach 循环（poll ≤150s）+ head run2（poll ≤150s）+ idle 落定（≤90s）+ 快步骤裕量；
+#   期望实际 ~200s（poll 满足即走，上限仅截真挂死）。
+case: head-manage-student
+module: academy
+timeout: 300
+
+setup:
+  - name: 建教室（事务同建 head session；defaultModel=test pool minimax 保模型 fallback 链落真值）
+    requests:
+      - method: POST
+        path: /academy/classroom
+        body:
+          name: "at-head-manage-student"
+          logo: "🎓"
+          defaultModel:
+            providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+            modelId: "MiniMax-M3"
+        status: [201]
+    save:
+      cid: .classroom.id
+      head_sid: .headSessionId
+    check:
+      - .classroom.id exists
+      - .classroom.headTeacherSessionId exists
+      - .classroom.defaultModel exists
+      - .headSessionId exists
+
+  - name: 验 head session 身份（biz=academy + role=head_teacher；manage-classroom 工具 role 门依赖此身份）
+    requests:
+      - GET /session/{head_sid}
+    check:
+      - .id exists
+      - .biz == "academy"
+      - .role == "head_teacher"
+      - .state == "idle"
+
+  - name: 建学生"记录员1"（复刻用户操作；事务同建 0.0 初始 formal 版本）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/student
+        body:
+          name: "记录员1"
+        status: [201]
+    save:
+      sid: .student.id
+      initial_vid: .initialVersion.id
+    check:
+      - .student.id exists
+      - .student.name == "记录员1"
+      - .student.currentFormalVersionId exists
+      - .initialVersion.id exists
+      - .initialVersion.type == "formal"
+
+  - name: 建数据集（1 个 case；multi 模式必填 datasetId；head 经 assets mapper/工具可见）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/dataset
+        body:
+          name: "hms-dataset"
+          description: "AT head-manage-student dataset"
+          items:
+            - id: "case-1"
+              question: "What is 5+3? Reply with only the number."
+              expectedAnswer: "8"
+              gradingCriteria: "exact match of the number"
+        status: [201]
+    save:
+      did: .id
+    check:
+      - .id exists
+
+  - name: 建 em 评估器（纯函数 grade，免 llm-judge 额外 LLM 调用 + 降低 429 概率）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/grader
+        body:
+          name: "hms-em-grader"
+          type: "em"
+          matchRule:
+            caseInsensitive: true
+            trim: true
+        status: [201]
+    save:
+      gid: .id
+    check:
+      - .id exists
+
+steps:
+  - name: 订阅 head session agent_loop 流（先订阅后触发；as=main 整 case 唯一）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{head_sid}_amt:main", as: main }
+
+  - name: 对 head 发"训练记录员1"（生产路径 POST /messages → 202；maxTurns=1 使 task 快速 paused 触发 run2 update_task 场景）
+    requests:
+      - method: POST
+        path: /session/{head_sid}/messages
+        body:
+          content: "训练记录员1：用教室里的数据集和评估器训练它，最多 1 轮就好。"
+        status: [202]
+    check:
+      - .runId exists
+      - .enqueueId exists
+
+  - name: 等 head 主 run 启动（phase 1：确认 activate，防「poll idle 撞上 run 未启动」假完成）
+    poll:
+      request: GET /session/{head_sid}
+      until: .state == "running"
+      every: 0.5
+      timeout: 30
+    check:
+      - .state == "running"
+
+  - name: 等 head 主 run 完成回 idle（phase 2：head run 真实 >60s，wait 60s 上限不够转 poll ≤180 窗）+ SSE 工具面 + 边界 absent 断言
+    # 不硬断 absent isError=True：真 LLM head 决策链会试错-纠正（按名字找→纠正、dataset_not_found→纠正重试），
+    # 强断"全程零工具错误"假 fail。"start_task 最终成功"由后续 paused + update_task 链路间接证明。
+    poll:
+      request: GET /session/{head_sid}
+      until: .state == "idle"
+      every: 2
+      timeout: 150
+    check:
+      - .state == "idle"
+      - main.count(type=run_start) >= 1
+      - main.order(run_start < run_end)
+      - main.count(type=run_end) >= 1
+      - main.count(type=tool_call_start,toolName=manage-classroom) >= 1
+      - main.absent(type=tool_call_start,toolName=manage-task)
+      - main.absent(type=tool_call_start,toolName=manage-student)
+      - main.absent(type=tool_call_start,toolName=train-student)
+      - main.absent(type=error)
+
+  - name: 验 head 决策链落盘（start_task action 级硬断言）+ 防假能用（最终回复无认输话术）
+    requests:
+      - GET /session/{head_sid}/messages
+    check:
+      - .items[] any .content[name=manage-classroom].arguments.action == "start_task"
+      - .items[-1].role == "assistant"
+      - .items[-1].content[0].type == "text"
+      - .items[-1].content[0].text !~= "不认识学生"
+      - .items[-1].content[0].text !~= "没有学生列表"
+      - .items[-1].content[0].text !~= "没有管学生"
+      - .items[-1].content[0].text !~= "找不到学生"
+      - .items[-1].content[0].text !~= "没有持久化的学生"
+
+  - name: poll 任务到 paused（start_task 建成任务 + coach 自主跑到 maxTurns=1 → status=paused + pausedReason；coach run ~44s 起步，poll 窗 150s 覆盖）
+    # 单学生结构保证 tasks[0] 必属记录员1（check 右侧不插值无法逐字比对 studentId，结构唯一=等价强断言）
+    poll:
+      request: GET /academy/classroom/{cid}
+      until: .tasks[0].status == "paused"
+      every: 2
+      timeout: 150
+    save:
+      tid: .tasks[0].id
+    check:
+      - .tasks[0].status == "paused"
+      - .tasks[0].pausedReason exists
+      - .tasks[0].studentId exists
+      - .tasks[0].coachSessionId exists
+      - .tasks[0].candidateVersionId exists
+
+  - name: 对 head 发"调大 maxTurns"（head 用 manage-classroom.update_task；新核心场景：maxTurns 到顶 → head 调大让 coach 续训）
+    requests:
+      - method: POST
+        path: /session/{head_sid}/messages
+        body:
+          content: "这个任务到 maxTurns 上限了。帮我把它的 maxTurns 调大到 3，让教练能继续训练。"
+        status: [202]
+    check:
+      - .runId exists
+      - .enqueueId exists
+
+  - name: 等 head 审核 run 启动（phase A：state=running 确认 activate）
+    poll:
+      request: GET /session/{head_sid}
+      until: .state == "running"
+      every: 0.5
+      timeout: 30
+    check:
+      - .state == "running"
+
+  - name: poll messages 直到 update_task 工具块落盘（head 决策"调大 maxTurns"→ manage-classroom.update_task；head run2 真实 >60s，poll 窗 150s 覆盖）
+    poll:
+      request: GET /session/{head_sid}/messages
+      until: .items[] any .content[name=manage-classroom].arguments.action == "update_task"
+      every: 2
+      timeout: 150
+    check:
+      - .items[] any .content[name=manage-classroom].arguments.action == "update_task"
+      - main.count(type=tool_call_start,toolName=manage-classroom) >= 2
+      - main.absent(type=error)
+
+  - name: poll head session 回 idle（我的 run 落定，再取最终回复断认输话术）
+    poll:
+      request: GET /session/{head_sid}
+      until: .state == "idle"
+      every: 1
+      timeout: 90
+    check:
+      - .state == "idle"
+
+  - name: 验审核轮最终回复（防假能用：head 讲不清/推托 = fail）
+    requests:
+      - GET /session/{head_sid}/messages
+    check:
+      - .items[-1].role == "assistant"
+      - .items[-1].content[0].type == "text"
+      - .items[-1].content[0].text !~= "不认识学生"
+      - .items[-1].content[0].text !~= "没有学生列表"
+      - .items[-1].content[0].text !~= "没有管学生"
+      - .items[-1].content[0].text !~= "找不到学生"
+      - .items[-1].content[0].text !~= "没有持久化的学生"
+
+  - name: 验 update_task patch 生效（GET task → maxTurns == 3，原 maxTurns=1；update_task 仅 patch maxTurns/directive 不改 status）
+    requests:
+      - GET /academy/training-task/{tid}
+    check:
+      - .task.maxTurns == 3
+      - .task.status == "paused"
+
+teardown:
+  # 条件停 task：tid_td 在 teardown 现取——steps 中途失败（task 未建）时 save 失败仅标 small 不翻 case
+  # （run_case：teardown 自身 fail 不翻结果）；防 coach 泄漏续跑烧 minimax 引发后续 case 429。
+  # /pause 替原 /stop（v0.0.221 /stop 路由删）；已 paused 则 409 幂等。
+  - name: 取 task id（best-effort；无任务则本步 small，不翻 case）
+    requests:
+      - GET /academy/classroom/{cid}
+    save:
+      tid_td: .tasks[0].id
+  - name: 兜底 pause task（已 paused/无 tid_td 则 409/404 幂等）
+    requests:
+      - method: POST
+        path: /academy/training-task/{tid_td}/pause
+        body: { reason: "AT teardown" }
+        status: [200, 409, 404]

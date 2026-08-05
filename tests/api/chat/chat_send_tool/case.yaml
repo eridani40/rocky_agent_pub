@@ -1,0 +1,33 @@
+# chat_send_tool — 工具调用链
+# 覆盖框架能力：run + 工具调用消息断言（path 过滤 [role=tool]）
+# 对应 PRD 路径2：发消息→LLM 返回工具调用→工具执行→返回结果→LLM 继续回复
+case: chat_send_tool
+module: chat
+timeout: 90
+
+setup:
+  - name: 建会话（预绑定 provider）
+    requests:
+      - 'POST /session {"title": "v2-tool-test", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 发消息触发工具调用（bash 计算）
+    run: { content: "请用 bash 工具执行：echo $((1+1))，只需执行并告诉我输出结果" }
+    check:
+      - .state == "idle"
+      - .messages exists
+
+  - name: 查询消息列表确认有工具消息
+    requests:
+      - GET /session/{sid}/messages
+    check:
+      - .items exists
+
+teardown:
+  - name: 删除会话
+    requests:
+      - DELETE /session/{sid}

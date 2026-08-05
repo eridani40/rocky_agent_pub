@@ -1,0 +1,35 @@
+# v0.0.210 scope — academy-head_teacher:parent:main
+# 参考: specs/tech/academy/[P0]session_kind_extension.md §4.1（head scope 含 academy 4 mapper）
+# extends default；显式独立成文件（后续按需分化）。
+# 去 squad 相关 mappers/reminders（academy 无 squad/group 上下文）；加 academy 4 mapper。
+extends: default
+scopeId: academy-head_teacher:parent:main
+name: Academy Head Teacher Main
+description: academy 班主任主 session scope（教室身份 + 资产概览 + 任务看板）
+
+groups:
+  - id: system-prompt
+    points:
+      - pointId: system_prompt_mapper
+        impls:
+          - identity
+          - rules
+          - tool_guidance
+          - skills
+          - context_files
+          - memory_user
+          - memory_session
+          # ── academy 专属 ──
+          - academy_classroom_role        # 教室身份正文（"你是 X 教室的班主任"）
+          - academy_head_role             # head 行为指引（task 内部 send_message coach；update_task 调大续训）
+          - academy_classroom_assets      # 教室数据集/评估器/skill 概览
+          - academy_classroom_students    # 学生名单（名字/正式版/版本数/在跑任务）
+          - academy_task_status           # 教室任务状态看板（含 coachSessionId）
+      - pointId: system_reminder
+        impls:
+          - env
+          - time
+          - workspace
+          - tool_error
+          - todo
+          - reachable_agents

@@ -1,0 +1,4 @@
+# node-gyp 构建产物
+build/
+# Swift build 产物
+swift/.build/

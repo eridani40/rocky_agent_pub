@@ -1,0 +1,176 @@
+# ask_question_flow — ask-question 悬挂→peek→toolReply 续跑 + 普通 query 放弃路径
+# 覆盖契约：
+#   session1: ask-question → suspended(stopReason=tool_pending) → peek → toolReply(direct_result)
+#     → pre-process 编辑占位 block(pending→success) → loop 续跑 → idle + assistant text
+#   session2: suspended 后发普通 query → 放弃路径（pending 清空，占位保持 status=pending，
+#     query 正常落库 + LLM 回复）
+# 断言面：Req（stub audit llm 帧数）+ Resp + SSE（事件序列）
+# 吸收旧 case：ask_question/submit + ask_question/abandon（并 2）
+case: ask_question_flow
+module: ask_question
+timeout: 120
+
+setup:
+  - name: 建 session1（submit 路径）
+    requests:
+      - 'POST /session {"title": "v2-ask-submit", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid1: .id, sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+  - name: 建 session2（abandon 路径）
+    requests:
+      - 'POST /session {"title": "v2-ask-abandon", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid2: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  # ── session1: toolReply 回填续跑路径 ──
+  - name: 订阅 session1 流
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid1}_amt:main", as: loop1 }
+
+  - name: s1 — 触发 ask-question（directive 引导 LLM 调 ask-question 工具后停下）
+    requests:
+      - method: POST
+        path: /session/{sid1}/run
+        body:
+          content: "请调用 ask-question 工具问我：你喜欢什么颜色？选项A:红色 B:蓝色 C:绿色。提问后等待我回答"
+        status: [200]
+    check:
+      - .state == "suspended"
+      - .stopReason == "tool_pending"
+
+  - name: s1 — 等 require_human_input 帧
+    wait:
+      stream: loop1
+      until: "loop1.count(type=require_human_input) >= 1"
+      timeout: 10
+    check:
+      - loop1.count(type=require_human_input) == 1
+
+  - name: s1 — 验 session suspended + pendingToolCalls 落盘
+    requests:
+      - GET /session/{sid1}
+    check:
+      - .state == "suspended"
+      - .running == false
+
+  - name: s1 — peek 队首（ask-question / direct_result / pending）
+    requests:
+      - GET /session/{sid1}/pending-tool-call
+    save: { tc_id1: .pending.toolCallId }
+    check:
+      - .pending.toolCallId exists
+      - .pending.handleType == "direct_result"
+      - .pending.status == "pending"
+
+  - name: s1 — toolReply 回填（direct_result + 选 A 蓝色）
+    requests:
+      - method: POST
+        path: /session/{sid1}/messages
+        body:
+          toolReply:
+            toolCallId: "{tc_id1}"
+            handleType: "direct_result"
+            payload:
+              selections: ["A"]
+        status: [200, 202]
+    check:
+      - .runId exists
+
+  - name: s1 — 等 run 续跑完成（poll 到 idle；LLM 续答可能在本步骤期间出站）
+    poll:
+      request: GET /session/{sid1}
+      until: .state == "idle"
+      every: 0.5
+      timeout: 30
+    check:
+      - .state == "idle"
+
+  - name: s1 — 验 transcript（pre-process 编辑占位 → tool_result success + assistant text）
+    requests:
+      - GET /session/{sid1}/messages
+    check:
+      - .items exists
+
+  # ── session2: 普通 query 放弃路径 ──
+  - name: 订阅 session2 流
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid2}_amt:main", as: loop2 }
+
+  - name: s2 — 触发 ask-question（建立 suspended 态）
+    requests:
+      - method: POST
+        path: /session/{sid2}/run
+        body:
+          content: "请调用 ask-question 工具问我：你现在在哪里？选项A:家 B:公司 C:路上。提问后等待回答"
+        status: [200]
+    check:
+      - .state == "suspended"
+      - .stopReason == "tool_pending"
+
+  - name: s2 — 等 require_human_input 帧
+    wait:
+      stream: loop2
+      until: "loop2.count(type=require_human_input) >= 1"
+      timeout: 10
+    check:
+      - loop2.count(type=require_human_input) == 1
+
+  - name: s2 — peek 确认 pending
+    requests:
+      - GET /session/{sid2}/pending-tool-call
+    save: { tc_id2: .pending.toolCallId }
+    check:
+      - .pending.toolCallId exists
+      - .pending.handleType == "direct_result"
+
+  - name: s2 — 订阅 abandon 后的流事件
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid2}_amt:main", as: loop2b }
+
+  - name: s2 — 发普通 query（放弃路径，无 toolReply）
+    requests:
+      - method: POST
+        path: /session/{sid2}/messages
+        body:
+          content: "算了，不用问了，直接告诉我今天天气怎么样"
+        status: [200, 202]
+    check: []
+
+  - name: s2 — 等 run 到 idle（abandon query LLM 续答可能在本步骤期间出站）
+    poll:
+      request: GET /session/{sid2}
+      until: .state == "idle"
+      every: 0.5
+      timeout: 30
+    check:
+      - .state == "idle"
+
+  - name: s2 — 验 pendingToolCalls 已清空（放弃后清队列）
+    requests:
+      - GET /session/{sid2}
+    check:
+      - .state == "idle"
+
+  - name: s2 — 验 transcript（abandon query 落库 + LLM 回复，占位保持 pending）
+    requests:
+      - GET /session/{sid2}/messages
+    check:
+      - .items exists
+
+teardown:
+  - name: 删除 session1
+    requests:
+      - DELETE /session/{sid1}
+
+  - name: 删除 session2
+    requests:
+      - DELETE /session/{sid2}

@@ -1,0 +1,4 @@
+# studio-mate:subagent:main profile
+# 派生子 agent；共性继承 subagent 基座（同 biz 内无中间层，直继承系统基座）。
+id: studio-mate:subagent:main
+extends: subagent

@@ -1,0 +1,22 @@
+{
+  "llm": {
+    "authInvalid": "Authentication failed. Please check your API Key.",
+    "authForbidden": "API Key has no permission or is region-restricted.",
+    "rateLimited": "Model is rate-limited. Please retry later.",
+    "providerOverloaded": "Provider is overloaded. Please retry later.",
+    "serverError": "Provider internal error.",
+    "network": "Network error. Please check your connection.",
+    "streamIncomplete": "Response stream interrupted.",
+    "emptyResponse": "Model returned an empty response.",
+    "maxTokensTooHigh": "Output length exceeds limit (request parameter out of range).",
+    "timeoutFirstChunk": "Response timed out.",
+    "timeoutInterChunk": "Response timed out.",
+    "contextLengthExceeded": "Context too long and compaction failed.",
+    "maxTokensExceeded": "Output reached the model's maximum length.",
+    "contentFiltered": "Content was rejected by moderation.",
+    "modelNotFound": "Model does not exist or is not configured.",
+    "malformedToolCall": "Model emitted a malformed tool call.",
+    "badRequestOther": "Bad request parameters.",
+    "abortedByUser": "Aborted by user."
+  }
+}

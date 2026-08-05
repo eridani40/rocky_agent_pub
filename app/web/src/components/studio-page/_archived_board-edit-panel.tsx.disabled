@@ -1,0 +1,207 @@
+/**
+ * component-board-edit-panel —— 看板全实体字段编辑面板（主壳；edit + create 共用）
+ * 参考: specs/ui/components/studio-page/squad-board.md v2.0 §编辑流程（edit）/ §创建流程（v0.0.68 create）
+ *       specs/api/overall/11b-squad-workitems.md §3（写端点 + CreateBody / PatchBody schema）
+ *
+ * 职责：
+ *   - 渲染当前 target 的全字段表单（按 entity 类型动态显示子字段块）
+ *   - mode='edit'（缺省，向后兼容）：从 board snapshot 派生 initial（snapshot 找不到 → 不渲染）
+ *   - mode='create'（v0.0.68）：空 defaults；snapshot 找不到不阻塞渲染（用户填新值）
+ *   - 关联字段调 BoardSelector（禁原生 select）；body 调 BoardBodyEditor
+ *   - 保存按钮 testid = squad-board-{entity}-{id}-save；取消 = squad-board-{entity}-{id}-cancel
+ *   - Cmd/Ctrl+Enter 触发 save（编辑面板根监听）
+ *   - 字段块（TitleField/KrMetricFields/TaskFields/OwnerField/BodyField）拆到 component-board-edit-fields.tsx
+ *   - form state + handleSubmit 拆到 useBoardEditForm hook（保 panel ≤300 行）
+ *
+ * 边界：仅渲染表单 + 上抛 patch；不直调端点（端点调用在 SquadBoard，便于乐观更新统一管理）。
+ * 单文件 ≤300 行（form state 抽 hook；字段 JSX 抽 fields 子模块）。
+ */
+import { useMemo } from 'react';
+import type { Board, EditTarget } from './board-types';
+import type { Member } from './squad-types';
+import type { SelectorOption } from './component-board-selector';
+import { BoardSelector } from './component-board-selector';
+import {
+  BodyField,
+  OwnerField,
+  KrMetricFields,
+  TaskFields,
+  TitleField,
+} from './component-board-edit-fields';
+import { useBoardEditForm, type BoardPatch } from './use-board-edit-form';
+
+interface BoardEditPanelProps {
+  squadId: string;
+  target: EditTarget;
+  board: Board;
+  members: Member[];
+  /** 模式：'edit'（缺省，向后兼容） | 'create'（v0.0.68 新建） */
+  mode?: 'create' | 'edit';
+  /** 保存：调用方按 mode 调 createX / patchX 端点 + 乐观更新（panel 不直调） */
+  onSave: (patch: BoardPatch) => void;
+  /** 取消（行内还原） */
+  onCancel: () => void;
+}
+
+/** edit 模式 snapshot 检测：任意 entity 找到即渲染（用 unknown 避免 import 完整 type） */
+function findSnapshot(target: EditTarget, board: Board): boolean {
+  if (target.kind === 'goal') return board.goals.items.some((g) => g.id === target.id);
+  if (target.kind === 'kr') {
+    return board.goals.items.some((g) => g.krs.some((k) => k.id === target.id));
+  }
+  if (target.kind === 'req') return board.requirements.items.some((r) => r.id === target.id);
+  return board.tasks.items.some((t) => t.id === target.id);
+}
+
+/** 编辑/创建面板根 —— form state 走 useBoardEditForm hook；本组件仅渲染 + 绑定 */
+export function BoardEditPanel({
+  squadId: _squadId, target, board, members, mode = 'edit', onSave, onCancel,
+}: BoardEditPanelProps) {
+  const snapshotExists = useMemo(() => findSnapshot(target, board), [target, board]);
+  const form = useBoardEditForm({ target, board, mode, onSubmit: onSave });
+
+  // selector 选项（从 board 数据预处理；entity=member 用 members prop）
+  const krOptions = useMemo<SelectorOption[]>(
+    () =>
+      board.goals.items.flatMap((g) =>
+        g.krs.map((k) => ({ value: k.id, label: `${k.title} (${k.current}/${k.target})`, hint: g.title })),
+      ),
+    [board.goals.items],
+  );
+  const reqOptions = useMemo<SelectorOption[]>(
+    () => board.requirements.items.map((r) => ({ value: r.id, label: r.title, hint: r.status })),
+    [board.requirements.items],
+  );
+  // dependsOn 选项：同 Req 内 task（排除自身；环检测由后端兜底）。
+  // create 模式下读 form.source（用户已选的父 Req）；edit 模式 form.source 来自 snapshot。
+  const taskDepOptions = useMemo<SelectorOption[]>(() => {
+    if (target.kind !== 'task' || !form.source) return [];
+    return board.tasks.items
+      .filter((t) => t.id !== target.id && t.source.requirementId === form.source)
+      .map((t) => ({ value: t.id, label: t.title, hint: t.status }));
+  }, [board.tasks.items, target, form.source]);
+  const priorityOptions = useMemo<SelectorOption[]>(
+    () => [
+      { value: 'urgent', label: 'urgent' },
+      { value: 'high', label: 'high' },
+      { value: 'medium', label: 'medium' },
+      { value: 'low', label: 'low' },
+      { value: 'none', label: 'none' },
+    ],
+    [],
+  );
+
+  /** Cmd/Ctrl+Enter 触发 save（squad-board.md §状态/交互） */
+  function onRootKeyDown(e: React.KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      form.handleSubmit();
+    }
+  }
+
+  // edit 模式 snapshot 找不到 → 不渲染（实体已删除/归档）；create 模式不阻断
+  if (mode === 'edit' && !snapshotExists) {
+    return null;
+  }
+
+  // D1-b 强制：create task 模式下 source.requirementId 为空 → 保存禁用（文案「先选父 Requirement」）
+  const isCreateTaskBlocked = mode === 'create' && target.kind === 'task' && !form.source;
+
+  return (
+    <div
+      data-testid={`squad-board-${target.kind}-${target.id}-edit-panel`}
+      onKeyDown={onRootKeyDown}
+      className="mt-2 flex flex-col gap-2 rounded-md border border-accent/40 bg-surface-2 p-3"
+    >
+      <TitleField target={target} value={form.title} onChange={form.setTitle} />
+
+      {target.kind === 'kr' && (
+        <KrMetricFields
+          target={target}
+          current={form.current}
+          targetNum={form.targetNum}
+          unit={form.unit}
+          deadline={form.deadline}
+          onCurrent={form.setCurrent}
+          onTarget={form.setTargetNum}
+          onUnit={form.setUnit}
+          onDeadline={form.setDeadline}
+        />
+      )}
+
+      {(target.kind === 'goal' || target.kind === 'kr') && (
+        <OwnerField target={target} value={form.owner} members={members} onChange={form.setOwner} />
+      )}
+
+      {target.kind === 'req' && (
+        <label className="flex flex-col gap-1">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-2">关联 KR</span>
+          <BoardSelector
+            entity="req"
+            entityId={target.id}
+            field="relatedKRId"
+            value={form.relatedKRId}
+            options={krOptions}
+            nullable
+            onChange={(v) => form.setRelatedKRId(v as string | null)}
+          />
+        </label>
+      )}
+
+      {target.kind === 'task' && (
+        <TaskFields
+          target={target}
+          board={board}
+          source={form.source}
+          assignee={form.assignee}
+          priority={form.priority}
+          dependsOn={form.dependsOn}
+          deadline={form.deadline}
+          memberOptions={members.map((m) => ({ value: m.id, label: m.name, hint: m.role }))}
+          reqOptions={reqOptions}
+          priorityOptions={priorityOptions}
+          taskDepOptions={taskDepOptions}
+          onSource={form.setSource}
+          onAssignee={form.setAssignee}
+          onPriority={form.setPriority}
+          onDependsOn={form.setDependsOn}
+          onDeadline={form.setDeadline}
+        />
+      )}
+
+      <BodyField target={target} value={form.body} onChange={form.setBody} />
+
+      {/* 操作按钮：save / cancel */}
+      <div className="flex items-center justify-end gap-2 pt-1">
+        <button
+          type="button"
+          data-testid={`squad-board-${target.kind}-${target.id}-cancel`}
+          onClick={onCancel}
+          className="rounded-md border border-border-2 bg-surface px-3 py-1.5 text-[12px] text-muted-2 hover:text-fg-2"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          data-testid={`squad-board-${target.kind}-${target.id}-save`}
+          onClick={form.handleSubmit}
+          disabled={isCreateTaskBlocked}
+          title={isCreateTaskBlocked ? '先选父 Requirement' : undefined}
+          className={
+            'rounded-md border px-3 py-1.5 text-[12px] font-semibold ' +
+            (isCreateTaskBlocked
+              ? 'cursor-not-allowed border-border-2 bg-surface text-muted-2 opacity-60'
+              : 'border-accent bg-accent/12 text-accent hover:bg-accent/20')
+          }
+        >
+          {isCreateTaskBlocked ? '先选父 Requirement' : '保存'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 向后兼容：BoardPatch 类型从此处 re-export（view 等历史 import 不破坏） */
+export type { BoardPatch } from './use-board-edit-form';
+
+export default BoardEditPanel;

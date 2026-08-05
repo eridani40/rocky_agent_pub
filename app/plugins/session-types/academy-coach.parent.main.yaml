@@ -1,0 +1,30 @@
+# v0.0.210 academy-coach:parent:main profile
+# 参考: specs/tech/academy/[P0]session_kind_extension.md §3.2（coach 工具集 — 训练执行容错层）
+# v0.0.221：train-student → manage-task（重命名）；不绑 manage-classroom（不能改教室资产）。
+id: academy-coach:parent:main
+extends: default
+autoNaming: false                  # coach 名 = "教练·任务#N"（建任务时自动命名）
+toolBound:
+  - read
+  - write                 # 新建文件（candidate 版本 AGENTS.md/skill/memory 修订刚需；edit 管改已有、write 管建新）
+  - edit
+  - glob
+  - grep
+  - bash
+  - skill
+  - skill_manage
+  - memory
+  - memory_manage
+  - web_search
+  - web_fetch
+  - browser
+  - see_image
+  - agent                  # 派生 explorer/knowledge_learning_trainer subagent（优化/评估辅助）
+  - send_message           # 与 head / subagent 沟通
+  - history_search
+  - history_get_context
+  - ask-question
+  - todo                   # session 级双层待办（v0.0.223）
+  # ── academy 专属 ──
+  - manage-task             # coach 专属 task 推进（evaluate/revise/fork/adopt/pause/resume/history + read_dataset/read_grader）
+skillSource: global-enabled

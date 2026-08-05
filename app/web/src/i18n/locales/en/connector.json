@@ -1,0 +1,48 @@
+{
+  "header": {
+    "title": "Connectors",
+    "desc": "connector · manage the agent's connections to external resources"
+  },
+  "tab": {
+    "browser": "Browser",
+    "computer": "Computer"
+  },
+  "computer": {
+    "name": "Computer",
+    "desc": "Let the agent see screenshots and control your Mac (needs Accessibility + Screen Recording permissions)",
+    "unavailable": "Desktop app only — open this page inside the Rocky desktop app",
+    "refresh": "Re-check",
+    "accessibility": "Accessibility",
+    "screenRecording": "Screen Recording",
+    "granted": "Granted",
+    "denied": "Not granted",
+    "requestAccessibility": "Grant Accessibility",
+    "openScreenRecording": "Open Screen Recording settings",
+    "testScreenshot": "Test screenshot",
+    "testScreenshotHint": "Verify Rocky can actually capture the screen",
+    "screenshotOk": "Screenshot ok",
+    "screenshotFail": "Screenshot failed"
+  },
+  "browser": {
+    "name": "Browser",
+    "desc": "Attach to a Chrome you already have open; reuse the real logged-in session",
+    "switchLabel": "Browser connector enable / disable",
+    "switchOff": "Not enabled",
+    "connectingInline": "Connecting",
+    "errorDefault": "Connection failed. Please verify Chrome has remote debugging enabled.",
+    "retry": "Retry",
+    "guideSubtitle": "After turning the switch on, the agent connects the first time it uses the browser",
+    "guide": {
+      "step1": "Open chrome://inspect/#remote-debugging",
+      "step2": "Check 'Enable remote debugging'",
+      "step3": "Ensure Chrome version ≥ 144",
+      "step4": "Approve the connection prompt Chrome shows when attaching"
+    },
+    "connection": {
+      "disconnected": "Enabled (not connected)",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "error": "Connection failed"
+    }
+  }
+}

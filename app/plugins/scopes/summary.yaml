@@ -1,0 +1,48 @@
+# v0.0.204 scope — summary 基座（forked 拆分：summary runKind 共性）
+# 替代原 forked.yaml 的 summary 路径（consolidate 同结构但 toolBound 不同，profile 层区分）。
+# 共性：side_run_builder 复用 parentSnapshot / in_memory_session_store / reject_should_compact /
+#       noop_do_compact + noop_post_compact / 关 system_reminder_injector+search_indexing。
+extends: default
+scopeId: summary
+name: Summary
+description: summary run 共用 scope（旁路压缩 run：side_run_builder + in_memory store + 关 compact 防递归 + 关 reminder/search 索引）
+
+groups:
+  - id: context-ingest
+    points:
+      - pointId: context_ingest_handler
+        # 关 system_reminder_injector + search_indexing（不进历史索引防污染）；
+        # 与 default 不同（default 含此 2 项），故显式列剩余 3 项
+        impls:
+          - query_truncate
+          - tool_result_truncate
+          - store_sink
+
+  - id: context-assemble
+    points:
+      - pointId: context_assemble_reducer
+        # side_run_builder 复用固定 parentSnapshot + in_memory 增量
+        impls:
+          - side_run_builder
+
+  - id: context-compact
+    points:
+      - pointId: context_should_compact
+        # 防递归：summary 永不 compact（reject 恒返 false）
+        impls:
+          - reject_should_compact
+      - pointId: context_do_compact
+        # defense-in-depth：summary 不真做 summary（noop）
+        impls:
+          - noop_do_compact
+      - pointId: context_post_compact
+        # memory_skill_consolidation 不跑（防递归整理）；noop 保留
+        impls:
+          - noop_post_compact
+
+  - id: context-engine
+    points:
+      - pointId: session_store
+        # 内存 store（无持久化，run 结束即回收）
+        impls:
+          - in_memory_session_store

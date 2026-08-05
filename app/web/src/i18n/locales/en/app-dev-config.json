@@ -1,0 +1,236 @@
+{
+  "layout": {
+    "emptyGroups": "No groups",
+    "emptyGroup": "No configurable keys in this group",
+    "collapseAll": "Collapse system config",
+    "expandAll": "Expand system config",
+    "generalSection": "General",
+    "systemSection": "System",
+    "discardConfirmTitle": "Discard changes?",
+    "discardConfirmBody": "The current tab has unsaved changes. Switching tabs will discard them.",
+    "discardConfirmOk": "Discard",
+    "discardConfirmCancel": "Cancel"
+  },
+  "tab": {
+    "general": { "label": "General" },
+    "session": { "label": "Session" },
+    "models": { "label": "Models" },
+    "tools": { "label": "Tools" },
+    "memory": { "label": "Memory" },
+    "observability": { "label": "Observability" },
+    "consolidation": { "label": "Consolidation" },
+    "plugin": { "label": "Plugins" }
+  },
+  "group": {
+    "appearance": { "label": "Appearance" },
+    "providers": { "label": "Providers" },
+    "web_search": { "label": "Web Search" },
+    "web_fetch": { "label": "Web Fetch" },
+    "see_image": { "label": "See Image" },
+    "locale": { "label": "Language" },
+    "user_memory": { "label": "Long-term Memory" },
+    "llm_request": { "label": "LLM Request" },
+    "default_models": { "label": "Playground Default Models" },
+    "observability": { "label": "Observability" },
+    "logs": { "label": "Logs" },
+    "plugin": { "label": "Plugin" },
+    "session": { "label": "Session Injection Limits" },
+    "consolidation": { "label": "Consolidation" }
+  },
+  "userMemory": {
+    "title": "Global long-term memory",
+    "scopeHint": "User preferences/facts/feedback shared across all sessions",
+    "create": "+ New memory",
+    "loading": "Loading…",
+    "empty": "No global memory yet. Click the button above to create one."
+  },
+  "locale": {
+    "label": "language",
+    "desc": "界面语言 / Interface language"
+  },
+  "defaultModels": {
+    "unconfigured": "Unconfigured",
+    "clear": "Clear",
+    "loading": "Loading…",
+    "empty": "No provider available, configure in Providers & Models first",
+    "searchPlaceholder": "Search models...",
+    "unitSeconds": "s",
+    "unitTimes": "times"
+  },
+  "consolidation": {
+    "description": "This consolidation merges and reorganizes skills and memory: it periodically merges duplicate/conflicting content and archives or disables over-limit historical entries (never physically deleted).",
+    "restartNotice": "Changes to the toggle/time/model require an app restart to take effect (no hot reload).",
+    "runNow": "Run now",
+    "running": "Running…",
+    "error": {
+      "inProgress": "A consolidation task is already running, please try again later.",
+      "failed": "Consolidation task failed: {{message}}",
+      "network": "Failed to trigger consolidation: {{message}}"
+    },
+    "status": {
+      "neverRun": "Never run yet",
+      "lastRunLabel": "Last run: {{time}}"
+    }
+  },
+  "webSearch": {
+    "sectionTitle": "Web Search",
+    "sectionDesc": "web_search · web search backend configuration",
+    "empty": "No web_search provider plugin installed",
+    "typeLabel": "Provider type",
+    "apiKeyLabel": "API Key",
+    "save": "Save",
+    "reset": "Reset",
+    "saving": "Saving…"
+  },
+  "webFetch": {
+    "sectionDesc": "web_fetch · web fetch service configuration",
+    "jinaApiKeyLabel": "Jina API Key",
+    "jinaApiKeyDesc": "Requests use Bearer auth when configured (anonymous access also available)",
+    "save": "Save",
+    "reset": "Reset",
+    "saving": "Saving…"
+  },
+  "seeImage": {
+    "sectionDesc": "see_image · image understanding backend configuration",
+    "empty": "No see_image provider plugin installed",
+    "typeLabel": "Provider type",
+    "apiKeyLabel": "API Key",
+    "save": "Save",
+    "reset": "Reset",
+    "saving": "Saving…"
+  },
+  "observability": {
+    "sectionTitle": "Observability configuration",
+    "sectionDesc": "observability · tracing & monitoring",
+    "langfuseDesc": "langfuse · tracing & monitoring",
+    "unnamed": "(unnamed)",
+    "emptyBaseUrl": "(base url not configured)",
+    "newConfig": "New configuration",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "toggleLabel": "Observability on/off",
+    "toggleAria": "{{name}} on/off",
+    "deleteAria": "Delete {{name}}",
+    "deleteTitle": "Delete observability configuration",
+    "deleteBody": "Delete {{name}}? This cannot be undone; related trace data will not be deleted.",
+    "addTitle": "Add configuration",
+    "addSubtitle": "Connect tracing platforms like Langfuse",
+    "loading": "Loading…",
+    "retry": "Retry",
+    "dirtyHint": "● Unsaved changes",
+    "savedHint": "✓ Saved",
+    "resetBtn": "Reset",
+    "saveBtn": "Save",
+    "changeNotice": "Changes take effect on next launch or new session.",
+    "breadcrumbRoot": "Observability",
+    "basic": {
+      "title": "Basic information",
+      "hint": "Instance name and backend connection info"
+    },
+    "field": {
+      "name": "Name",
+      "type": "Type"
+    },
+    "auth": {
+      "title": "Authentication keys",
+      "localOnly": "(stored locally only)",
+      "hint": "Langfuse public/private keys; private key stays local, never uploaded"
+    },
+    "physical": {
+      "title": "Physical-layer logging"
+    },
+    "dualRecord": {
+      "label": "Dual recording",
+      "hint": "logPhysical",
+      "ariaLabel": "Dual recording explanation",
+      "toggleLabel": "Dual recording on/off",
+      "tooltip": "When enabled, each LLM call logs two generations: logical (business view) + physical (wire body sent to LLM). Physical carries no usage and does not affect token/cost stats. Default off = only logical LLM requests are logged. Changes take effect on restart or new session."
+    }
+  },
+  "schema": {
+    "appearance": {
+      "theme": {
+        "label": "Theme",
+        "desc": "Dark / light theme; takes effect after save"
+      }
+    },
+    "llm_request": {
+      "stall_timeout_s": {
+        "label": "LLM Request Stall Timeout",
+        "desc": "LLM request stall timeout (seconds; 0 disables)"
+      },
+      "max_retry_times": {
+        "label": "Max Retry Attempts",
+        "desc": "Max retry attempts on LLM request failure"
+      },
+      "stall_tool_s": {
+        "label": "Tool Stall Timeout",
+        "desc": "Tool call stall timeout (seconds; default 120)"
+      },
+      "max_attempts": {
+        "label": "LLM Retry Attempts",
+        "desc": "Max LLM call retry attempts (default 3)"
+      }
+    },
+    "default_models": {
+      "chat": {
+        "label": "Default Chat Model",
+        "desc": "New sessions follow this; optional"
+      }
+    },
+    "consolidation": {
+      "enabled": {
+        "label": "Enable Consolidation",
+        "desc": "When enabled, runs a daily skill/memory consolidation task; when disabled, the task does not exist — no scheduling, no LLM calls"
+      },
+      "dailyTime": {
+        "label": "Daily Consolidation Time",
+        "desc": "Time of day the consolidation task triggers (local timezone)"
+      },
+      "modelId": {
+        "label": "Consolidation Model",
+        "desc": "Model used by the consolidation task; if unconfigured, it silently skips without error"
+      }
+    },
+    "session": {
+      "maxSkillInject": {
+        "label": "Skill Injection Limit",
+        "desc": "Max number of skills injected per session (default 50)"
+      },
+      "maxMemoryInject": {
+        "label": "Memory Injection Limit",
+        "desc": "Max number of memories injected per session (default 50)"
+      }
+    },
+    "logs": {
+      "enableLlmRequestLog": {
+        "label": "Log LLM Request",
+        "desc": "Log outbound LLM calls to logs/llm.log"
+      },
+      "enableToolResultLog": {
+        "label": "Log Tool Result",
+        "desc": "Log tool call results to logs/tool.log"
+      },
+      "enableAppApiLog": {
+        "label": "Log App API",
+        "desc": "Log inbound HTTP requests to logs/api.log"
+      },
+      "enableEventLog": {
+        "label": "Log Event",
+        "desc": "Log event hub events to logs/event.log"
+      },
+      "enableErrorLog": {
+        "label": "Log Errors",
+        "desc": "Log system errors (agent/LLM/unhandled exceptions) to logs/error.log"
+      },
+      "enableAgentLog": {
+        "label": "Log Agent Diagnostics",
+        "desc": "Log agent loop enter/exit, session state changes, inbox enqueue/drain to logs/agent.log (ids/counts/status only, no message content)"
+      },
+      "enablePerformanceLog": {
+        "label": "Log Performance",
+        "desc": "Log slow queries (persistence queries over 200ms) to logs/performance.log (entity/duration/row count, for locating bottlenecks)"
+      }
+    }
+  }
+}

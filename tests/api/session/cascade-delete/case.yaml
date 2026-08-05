@@ -1,0 +1,140 @@
+# cascade-delete — 删 parent session 级联删子孙 + 清 cron（N2+N3 修正验证，PRD 路径 B+C）
+#
+# 覆盖契约：
+#   - specs/api/overall/04-agent-session.md §2.4 DELETE /session/:id（v0.0.192.delete_cleanup 修订：
+#     handleSessionItem DELETE 分支补 collectDescendants BFS，删 parent 前先快照+逐个删全部子孙）
+#   - specs/api/overall/10-multi-agent.md §2（spawn child：derivation=subagent / parentSessionId 落库）
+#   - specs/api/overall/16-cron.md §2（session cron HTTP：POST create / GET list，归属 session）
+#   - specs/prd/version_logs/v0.0.192.delete_cleanup.md §3.2（子孙级联 + 每 descendant 触发 onSessionDestroyed）
+#
+# 断言面（三段：child 存在 → 挂 cron → 级联全删）：
+#   【建 child】spawn explorer 子 agent（真调 minimax，生产路径 /messages）→ GET /children terminated
+#              → GET child 验 derivation=subagent + parentSessionId 落库
+#   【挂 cron】POST /session/:child/cron（HTTP 确定性，构造「挂 cron 的子孙」场景）→ GET list 验 job 落库
+#   【级联删】DELETE /session/:parent → GET /session/:child 404（子孙级联删，无孤儿 — N2 核心）
+#             + GET /session/:parent 404 + GET /session/:child/cron 404（cron 注册表随 session 同灭）
+#
+# AT vs UT 边界（设计权衡，非 bug）：
+#   - AT 验「session 级 404」（child record + cron HTTP 端点随 session 消失）——黑盒可观测的级联契约。
+#   - 内存调度引擎 job 注销（onSessionDestroyed → cron removeAllJobs + engine.unregister）是内部状态，
+#     AT 无 endpoint 可查；由 UT 覆盖（session-cascade.test.ts 断言 onSessionDestroyed 触发次数 =
+#     descendants+1）。AT 通过「child 挂 cron → 级联删 → cron 端点 404」间接验证该路径被走到。
+#   - 「重启 app 后 cron 不复活」（PRD 路径 C 重启验证）AT 不覆盖（AT 不 mid-case 重启 server）——UT 覆盖。
+#
+# 调 LLM：spawn child 必须走 agent 工具（HTTP 无创建 child+parentSessionId 的端点），真调 minimax；
+#         429 → 框架自动 skip。cron 创建走 HTTP（确定性，不走 LLM）。
+# 子 agent 挂 cron 的合法性：16-cron §2.2 POST /session/:sid/cron 仅校验 session 存在（404）/expr/prompt，
+#         无 subagent 403（agent 工具层才有 subagent policy 限制，HTTP 端点无）。故 HTTP 可在 subagent
+#         session 上建 cron，用于确定性构造「挂 cron 的子孙」场景——级联删的 deleteSession→onSessionDestroyed
+#         代码路径与 cron 创建方式无关。
+case: cascade-delete
+module: session
+timeout: 150
+
+setup:
+  - name: 建 parent session（playground，预绑定 minimax）
+    requests:
+      - 'POST /session {"title": "cascade-delete-parent", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { parent_sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 订阅 parent agent_loop 流（捕获 spawn run 事件序列）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{parent_sid}_amt:main", as: spawn_run }
+
+  - name: 发消息驱动 spawn explorer 子 agent（生产路径 /messages）
+    requests:
+      - method: POST
+        path: /session/{parent_sid}/messages
+        body:
+          content: "请使用 agent 工具派生一个 explorer 子 agent（templateRef=explorer）同步探查当前工作目录有哪些文件，等待它完成后返回探查结果。必须调用 agent 工具，不要提问任何问题，直接执行。"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { run_id: .runId }
+    check:
+      - .runId exists
+
+  - name: 等 parent run 完成（sync spawn：parent 同步等 child 结果后 run_end）
+    wait:
+      stream: spawn_run
+      until: "spawn_run.count(type=run_end) == 1"
+      timeout: 60
+    check:
+      - spawn_run.count(type=run_end) == 1
+      - spawn_run.absent(type=error)
+
+  - name: GET children — sync spawn 完成后 child 在 terminated 组
+    poll:
+      request: GET /session/{parent_sid}/children
+      until: ".terminated[0].sessionId exists"
+      every: 1
+      timeout: 15
+    save:
+      child_sid: ".terminated[0].sessionId"
+    check:
+      - .terminated[0].sessionId exists
+
+  - name: GET child session — 验是 parent 的子（derivation=subagent + parentSessionId 落库）
+    requests:
+      - GET /session/{child_sid}
+    check:
+      - .derivation == "subagent"
+      - .parentSessionId exists
+
+  - name: 给 child 挂 cron（HTTP 确定性，构造「挂 cron 的子孙」场景验 N3 路径）
+    requests:
+      - method: POST
+        path: /session/{child_sid}/cron
+        body:
+          cron: "*/30 * * * *"
+          prompt: "cascade-delete 验证用 cron prompt"
+          name: "cd-cron"
+    check:
+      - .id exists
+      - .cron == "*/30 * * * *"
+
+  - name: GET child cron list — 验 job 落库（删前确认 cron 确实存在）
+    requests:
+      - GET /session/{child_sid}/cron
+    check:
+      - .items exists
+      - .items[0].id exists
+
+  - name: DELETE parent session（级联删全部子孙 + 每 descendant 触发 onSessionDestroyed 清 cron）
+    requests:
+      - DELETE /session/{parent_sid}
+
+  - name: child session 级联已删（GET → 404，N2 核心：无孤儿）
+    requests:
+      - method: GET
+        path: /session/{child_sid}
+        status: [404]
+    check:
+      - .error exists
+
+  - name: parent session 已删（GET → 404）
+    requests:
+      - method: GET
+        path: /session/{parent_sid}
+        status: [404]
+    check:
+      - .error exists
+
+  - name: child cron 注册表随 session 同灭（GET → 404，session 不在则 cron 端点同灭）
+    requests:
+      - method: GET
+        path: /session/{child_sid}/cron
+        status: [404]
+    check:
+      - .error exists
+
+teardown:
+  - name: 兜底清 parent（steps 已删则 404 幂等；spawn 失败残留则 204 清掉）
+    requests:
+      - method: DELETE
+        path: /session/{parent_sid}
+        status: [204, 404]

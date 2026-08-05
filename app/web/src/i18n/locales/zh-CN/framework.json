@@ -1,0 +1,20 @@
+{
+  "nav": {
+    "playground": "Playground",
+    "studio": "Studio",
+    "skills": "SKILLS",
+    "channel": "渠道",
+    "connector": "连接器",
+    "settingsApp": "应用设置",
+    "brand": "Rocky",
+    "academy": "Academy"
+  },
+  "dragHandle": {
+    "ariaLabel": "拖拽排序"
+  },
+  "secretInput": {
+    "placeholder": "输入新值",
+    "edit": "编辑",
+    "commit": "提交"
+  }
+}

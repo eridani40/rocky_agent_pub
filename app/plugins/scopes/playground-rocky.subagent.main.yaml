@@ -1,0 +1,31 @@
+# scope — playground-rocky:subagent:main（persistent store + 主链，去 squad mappers）
+# subagent = 派生子 agent；persistent_session_store（落库 transcript）+ 主链 mappers。
+# playground 无 squad/group 上下文：system_prompt_mapper 去 squad_role/team_roster/memory_group/parent_task，
+# system_reminder 去 squad_* 5 项（与 playground-rocky:parent:main 同口径）。
+extends: default
+scopeId: playground-rocky:subagent:main
+name: Playground Rocky Subagent
+description: playground subagent scope（persistent store + 主链 mappers，去 squad 相关 mappers/reminders）
+
+groups:
+  - id: system-prompt
+    points:
+      - pointId: system_prompt_mapper
+        # 去掉 squad_role / team_roster / memory_group / parent_task（playground 无 squad/group 上下文）
+        impls:
+          - identity
+          - rules
+          - tool_guidance
+          - skills
+          - context_files
+          - memory_user
+          - memory_session
+      - pointId: system_reminder
+        # 去掉 squad_charter/squad_tasks/squad_board/squad_workspace/squad_team_status 5 项
+        impls:
+          - env
+          - time
+          - workspace
+          - tool_error
+          - todo
+          - reachable_agents

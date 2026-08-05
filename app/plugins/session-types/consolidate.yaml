@@ -1,0 +1,29 @@
+# v0.0.204 session type profile — consolidate 基座（consolidate runKind 共性）
+# 参考: specs/tech/agent/session/[P0]session_type_profile.md §4
+#
+# consolidate run = fork-2 整理 agent（skill_manage + memory_manage 两工具，多轮）。
+# 共性与 summary 同（in_memory / 不碰状态机），仅 toolBound + maxIterDefault 不同。
+
+id: consolidate
+extends: default
+# T1 整理者化：扩 read/write/edit/glob/grep 让 T1 能整理 AGENTS.md（spec PRD §14.2.2）
+# 触发机制（sibling 双发 / 锁 / fire-and-forget）不变；scope yaml 不动
+toolBound:
+  - skill_manage
+  - memory_manage
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+toolDefinitionsSource: host-snapshot
+runShape:
+  drainMode: none
+  backgroundPath: true
+  maxIterDefault: 10
+  touchesStateMachine: false
+  persistsRun: false
+  usagePartition: consolidate
+lifecycleHooks:
+  abortFinalize: none
+  cascadeChildren: false

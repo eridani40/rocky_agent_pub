@@ -1,0 +1,14 @@
+{
+  "//": "shared：兜底跨进程非契约内容，lib ES2022，输出 CommonJS（供 server/Electron Node 主进程 require；web 仅 import type 不触发 runtime 加载）。不依赖任何 @app/*（见 package_structure §3.5）",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*"]
+}

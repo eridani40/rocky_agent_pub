@@ -1,0 +1,128 @@
+# CI/CD 业务全景看板种子模板 — panorama-designer skill 模板库
+# 用法：leader 按团队实际改实体/字段/状态/文案后，经 panorama(define, dryRun=true) 预检再落盘
+# 权威 DSL 契约：specs/tech/squad/[P1]panorama_dsl.md
+meta:
+  version: "1.0"
+
+version:
+  id: team
+  name: 研发团队
+  board_name: CI/CD 看板
+
+entities:
+  pipeline_run:
+    label: 流水线运行
+    id_field: id
+    fields:
+      id:           { type: string }
+      branch:       { type: string, max: 200 }
+      commit:       { type: string, max: 40 }
+      status:       { type: enum, values: [queued, running, success, failed] }
+      duration_sec: { type: number, min: 0 }
+      triggered_by: { type: enum, values: [push, pr, schedule, manual] }
+      started_at:   { type: datetime }
+    states:
+      field: status
+      initial: queued
+      transitions:
+        queued:  [running, failed]
+        running: [success, failed]
+        success: []
+        failed:  []
+      terminal: [success, failed]
+    display:
+      status_labels: { queued: 排队中, running: 运行中, success: 成功, failed: 失败 }
+      status_colors: { queued: "#8b949e", running: "#4c9aff", success: "#3fb950", failed: "#f85149" }
+
+  deployment:
+    label: 部署
+    id_field: id
+    fields:
+      id:              { type: string }
+      env:             { type: enum, values: [staging, prod] }
+      version:         { type: string, max: 100 }
+      deploy_status:   { type: enum, values: [pending, deploying, live, rolled_back] }
+      pipeline_run_id: { type: ref, entity: pipeline_run }
+      deployed_at:     { type: datetime }
+    states:
+      field: deploy_status
+      initial: pending
+      transitions:
+        pending:     [deploying]
+        deploying:   [live, rolled_back]
+        live:        [rolled_back]
+        rolled_back: []
+      terminal: [rolled_back]
+    display:
+      status_labels: { pending: 待部署, deploying: 部署中, live: 在线, rolled_back: 已回滚 }
+      status_colors: { pending: "#8b949e", deploying: "#4c9aff", live: "#3fb950", rolled_back: "#d29922" }
+
+  incident:
+    label: 故障
+    id_field: id
+    fields:
+      id:         { type: string }
+      title:      { type: string, max: 200, required: true }
+      severity:   { type: enum, values: [p1, p2, p3, p4] }
+      incident_status: { type: enum, values: [open, investigating, resolved] }
+      owner:      { type: string, max: 100 }
+      created_at: { type: datetime }
+    states:
+      field: incident_status
+      initial: open
+      transitions:
+        open:          [investigating, resolved]
+        investigating: [resolved]
+        resolved:      []
+      terminal: [resolved]
+    display:
+      status_labels: { open: 待处理, investigating: 排查中, resolved: 已解决 }
+      status_colors: { open: "#f85149", investigating: "#d29922", resolved: "#3fb950" }
+
+views:
+  - id: run_kanban
+    label: 流水线看板
+    entity: pipeline_run
+    component: kanban
+    group_by: status
+    columns: [queued, running, success, failed]
+    card:
+      title: "{id} {branch}"
+      badges: [status, commit]
+      footer: "{triggered_by} · 耗时 {duration_sec}s"
+
+  - id: run_table
+    label: 最近运行
+    entity: pipeline_run
+    component: table
+    columns: [id, branch, commit, status, duration_sec, triggered_by, started_at]
+    sort: { field: started_at, order: desc }
+    limit: 20
+
+  - id: run_chart
+    label: 近7天趋势
+    entity: pipeline_run
+    component: bar_chart
+    bucket: { field: started_at, unit: day, days: 7 }
+    stack_by: status
+
+  - id: deploy_kanban
+    label: 部署环境
+    entity: deployment
+    component: kanban
+    group_by: deploy_status
+    columns: [pending, deploying, live, rolled_back]
+    card:
+      title: "{id} {version}"
+      badges: [env, deploy_status]
+      footer: "来自 {pipeline_run_id.id|手动}"
+
+  - id: incident_kanban
+    label: 故障处理
+    entity: incident
+    component: kanban
+    group_by: incident_status
+    columns: [open, investigating, resolved]
+    card:
+      title: "{id} {title}"
+      badges: [severity, owner]

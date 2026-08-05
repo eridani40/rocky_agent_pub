@@ -1,0 +1,219 @@
+# train-adopt — v0.0.221 academy adopt 旁路不变量（adopt 不改 task 状态 + 可重复 + 产新 formal）
+#
+# 覆盖契约（以 specs/tech/version_logs/v0.0.221/change_plan.md E 节为准 — specs/api/overall/18-academy.md
+#   §2.4-§2.6 accept/reject/stop 路由已删，spec 待 doc-modifier 阶段 5 同步）：
+#   POST /academy/training-task/:tid/adopt  body {versionId} → {newFormalVersionId, newLabel, newWorkspaceDir}
+#   GET  /academy/training-task/:tid        — task 详情（验 adopt 后 status 不变 + pausedReason 仍在）
+#   GET  /academy/classroom/:cid/student/:sid/version/:vid — 版本五元组 meta（验 type/status）
+#   change_plan A.adoptVersion + B.adoptToFormal：
+#     - adoptVersion 调 adoptToFormal(processVersionId)，**MUST NOT 校验 task.status**（旁路与状态机无关）
+#     - **不改 task.status / candidateVersionId / temporaryBaselineVersionId**（旁路定稿，生产轴不动）
+#     - adoptToFormal 校验 processVersion.type === 'process'（formal 版本不可 adopt）
+#     - 同一 process 版本可多次 adopt → 每次产新 formal ULID + major 递增（2.0/3.0/4.0...）
+#     - adoptToFormal 末尾同步 student.currentFormalVersionId（BUG-001 修复，UT 覆盖；AT 不断此字段）
+#
+# v0.0.221 vs v0.0.213（原 train-accept）差异：
+#   - HTTP /accept /reject /stop 路由全删 → /adopt /pause /resume /update-task 新增
+#   - task.status 6 态 → 3 态（pending/running/paused + pausedReason）；awaiting_confirm/done/rejected 不存在
+#   - coach 不再 propose（无 propose 链）→ 触达 maxTurns/早停自动 status=paused + pausedReason
+#   - adopt 与 task 状态完全解耦（生产⊥归档两轴）；原 accept 要求 awaiting_confirm + 改 status=done
+#
+# 断言面（adopt 旁路不变量，三层互证）：
+#   【adopt 1】POST /adopt {versionId=candidateVersionId} → 200 + {newFormalVersionId, newLabel, newWorkspaceDir} 非空
+#   【状态不变 1】GET task → status 仍 == "paused"（adopt 旁路不改状态；pausedReason 仍在）
+#   【新 formal 落盘】GET /version/{new_vid1} → type=formal + status=active + versionLabel exists
+#   【可重复 adopt】第二次 POST /adopt（同 versionId）→ 又一 newFormalVersionId（major 递增）
+#   【状态不变 2】GET task → status 仍 == "paused"（多次 adopt 仍不改状态）
+#   【第二 formal 落盘】GET /version/{new_vid2} → type=formal
+#
+# setup：建 task 后 poll 到 status=paused（coach 跑完 maxTurns=2 自然 paused；adopt 不依赖状态但
+#   paused 后 task 稳定不再变，断言「status 不变」更可靠 — 若 running 中 adopt，coach 可能并发改状态）。
+#   processVersionId = task.candidateVersionId（建任务即 fork 自 base，type=process 恒成立）。
+#
+# 设计注记：
+# - **process_vid 选 candidateVersionId 而非 temporaryBaselineVersionId**：candidate 自建任务即 fork
+#   （type=process 恒成立）；temporaryBaseline 在 coach 未 revise 时仍指 base formal（type=formal）→
+#   adopt 会 409 process_required（adoptToFormal 校验 type）。candidate 是安全的 adopt 目标。
+# - **poll 到 paused 而非 running**：running 中 adopt 状态可能并发变化（coach 推进），断言「status
+#   不变」会被 coach 并发推进污染。paused = 终态稳定，status 不会被 coach 改，adopt 后 status 仍
+#   == paused 是干净旁路证据。
+# - **pausedReason 不断具体值**：闭合 4 值（maxturns/completed/stopped/earlystop），具体哪个由 coach
+#   LLM 行为决定（到达 maxTurns / 早停 / 显式 pause），非状态机硬保证 → 只断 exists。
+# - **newLabel 动态不断固定值**：adoptToFormal 按 seq 分配（初始 0.0 → 首个 adopt = 1.0 → 2.0/3.0...），
+#   check 右侧不插值（陷阱 1：`.newLabel == "{x}"` 中 {x} 是字面串）→ 只断 exists；具体值由
+#   GET /version/{new_vid} 的 .meta.versionLabel exists 间接存活。
+# - **两次 adopt 用同 versionId**：证明「可重复 adopt 同一 process 版」（非要求两次用不同 versionId）。
+#   每次产新 ULID + major 递增（2.0/3.0），student.currentFormalVersionId 跟最新（BUG-001 修复）。
+# - **teardown 省略**：task 已 paused（终态，coach 不再烧 LLM）；无 DELETE classroom 端点，残留无害
+#   （每轮新教室新 id，name 含 case 标识不冲突）。
+# - **adopt 无 LLM 调用**：纯 store ops（fs.cp + putVersion + putStudent）；setup 的 coach 自主跑 consume
+#   LLM（maxTurns=2 → ~3-5 次 minimax：决策 + sample + em grade 纯函数 0 次）。
+# - **count-based 不变量（formal 版本数 +2）AT 不可达**：DSL body 数组谓词只 any/all 无 count → 改写
+#   为存在性断言（GET /version/{new_vid} 返 type=formal 即证明产出了新 formal）；formal 版本计数不变量
+#   由 UT AcademyStore.adoptToFormal 覆盖。
+#
+# 时序：coach 自主 run ~44s 起步（transcript 实证），连续真调累计更慢 — poll 窗 180s（框架上限）
+#   覆盖；case timeout 240 兜 worst-case（180 + adopt 快步骤 ~10 = 190 < 240；poll 满足即走）。
+case: train-adopt
+module: academy
+timeout: 240
+
+setup:
+  - name: 建教室 + head session（defaultModel=test pool minimax 保模型 fallback 链落真值）
+    requests:
+      - method: POST
+        path: /academy/classroom
+        body:
+          name: "at-train-adopt"
+          logo: "🎓"
+          defaultModel:
+            providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+            modelId: "MiniMax-M3"
+        status: [201]
+    save:
+      cid: .classroom.id
+    check:
+      - .classroom.id exists
+      - .classroom.defaultModel exists
+      - .headSessionId exists
+
+  - name: 建学生 + 0.0 初始 formal 版本
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/student
+        body:
+          name: "ta-student"
+        status: [201]
+    save:
+      sid: .student.id
+      initial_vid: .initialVersion.id
+    check:
+      - .student.id exists
+      - .initialVersion.id exists
+      - .initialVersion.type == "formal"
+
+  - name: 建数据集（multi 训练前提）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/dataset
+        body:
+          name: "ta-dataset"
+          items:
+            - id: "case-1"
+              question: "What is 3+5? Reply with only the number."
+              expectedAnswer: "8"
+              gradingCriteria: "exact match"
+        status: [201]
+    save:
+      did: .id
+    check:
+      - .id exists
+
+  - name: 建 em 评估器（纯函数 grade，免 llm-judge 额外 LLM 调用 + 降 429 概率）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/grader
+        body:
+          name: "ta-em-grader"
+          type: "em"
+          matchRule: { caseInsensitive: true, trim: true }
+        status: [201]
+    save:
+      gid: .id
+    check:
+      - .id exists
+
+  - name: 发起 multi 训练任务（maxTurns=2 directive 引导 revise → coach 自主跑到 maxTurns 自然 paused）
+    requests:
+      - method: POST
+        path: /academy/classroom/{cid}/student/{sid}/training-task
+        body:
+          baseVersionId: "{initial_vid}"
+          mode: "multi"
+          optimizeStyle: "training"
+          directive: "Improve student math ability via training-style iteration. Edit candidate AGENTS.md then revise."
+          datasetId: "{did}"
+          graderId: "{gid}"
+          maxTurns: 2
+        status: [201]
+    save:
+      tid: .task.id
+    check:
+      - .task.id exists
+      - .task.status == "pending"
+      - .task.candidateVersionId exists
+
+  - name: poll task1 到 paused（coach 跑完 maxTurns 自然 paused；adopt 旁路不依赖状态，但 paused 后稳定不再变，断言「状态不变」更可靠）
+    # coach 被建任务时的任务书 deliverTo 激活，自主 evaluate→revise 循环；触达 maxTurns → status=paused +
+    # pausedReason='maxturns'，或早停 → pausedReason='earlystop'。具体 reason 由 LLM 行为决定，不断固定值。
+    poll:
+      request: GET /academy/training-task/{tid}
+      until: .task.status == "paused"
+      every: 1
+      timeout: 180
+    save:
+      process_vid: .task.candidateVersionId
+    check:
+      - .task.status == "paused"
+      - .task.pausedReason exists
+      - .task.candidateVersionId exists
+
+steps:
+  # ── adopt 1：旁路定稿，产新 formal 版本 ──
+  - name: adopt candidateVersionId → 新 formal 版本（adopt 旁路，不改 task 状态）
+    requests:
+      - method: POST
+        path: /academy/training-task/{tid}/adopt
+        body:
+          versionId: "{process_vid}"
+        status: [200]
+    save:
+      new_vid1: .newFormalVersionId
+      new_label1: .newLabel
+    check:
+      - .newFormalVersionId exists
+      - .newLabel exists
+      - .newWorkspaceDir exists
+
+  - name: GET task1 → status 仍 paused（adopt 旁路不改状态；pausedReason 仍在）
+    requests:
+      - GET /academy/training-task/{tid}
+    check:
+      - .task.status == "paused"
+      - .task.pausedReason exists
+
+  - name: GET 新 formal 版本 1 → type=formal + status=active（adoptToFormal 复制为新正式版）
+    requests:
+      - GET /academy/classroom/{cid}/student/{sid}/version/{new_vid1}
+    check:
+      - .meta.type == "formal"
+      - .meta.status == "active"
+      - .meta.versionLabel exists
+
+  # ── adopt 2：可重复 adopt，产 major 递增新 formal ──
+  - name: adopt 同 candidateVersionId 再一次 → 又一新 formal（可重复；2.0/3.0 major 递增）
+    requests:
+      - method: POST
+        path: /academy/training-task/{tid}/adopt
+        body:
+          versionId: "{process_vid}"
+        status: [200]
+    save:
+      new_vid2: .newFormalVersionId
+    check:
+      - .newFormalVersionId exists
+      - .newLabel exists
+
+  - name: GET task1 → status 仍 paused（多次 adopt 仍不改状态，旁路语义）
+    requests:
+      - GET /academy/training-task/{tid}
+    check:
+      - .task.status == "paused"
+      - .task.pausedReason exists
+
+  - name: GET 第二个 formal 版本 → type=formal（可重复 adopt 产多个 formal 不变量）
+    requests:
+      - GET /academy/classroom/{cid}/student/{sid}/version/{new_vid2}
+    check:
+      - .meta.type == "formal"
+      - .meta.status == "active"

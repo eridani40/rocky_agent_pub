@@ -1,0 +1,173 @@
+# t2_daily_consolidation — 二级整理（天级）：模型未配置跳过 + 冗余 global memory 收敛
+# 覆盖契约：specs/api/version_logs/v0.0.151.t2_consolidate/change_log.md（POST /test/consolidation/run）
+#           + specs/api/overall/03-config-center.md §2.6/§2.7（consolidation group + GET /consolidation/status）
+# 对应 PRD 路径 5（模型未配置→静默跳过）+ 路径 4（超限/冗余→收敛到限内，无物理删）+ 路径 1（配置→触发→摘要可见）
+#
+# v0.0.238 scope 必填后（PRD §14.2.3），memory_manage 写入不再默认 global——种子写入显式
+# 指定 scope=global，否则工具报 invalid_input 阻断 case。
+#
+# 触发用 test-only 同步端点（不等真实 cron 到点，AT wait/poll 上限 60s 无法可靠等 HH:mm 粒度）。
+# 顺序：先跑「模型未配置」skip 分支（零 LLM，稳定）→ 再配置模型 → 真实 agent 调用写 2 条冗余
+# global memory 种子（source=agent，走 memory_manage 工具，同 memory_manage_write case 已验证的
+# 「指令 agent 调工具写指定 name/body」写法）→ 触发主体整理 → 断言响应结构 + 收敛信号 + 无物理删
+# （种子条目触发后仍物理存在、且至少一条被 archived，走 GET ?includeArchived=true 断言——R3 record
+# 核实真实行为：两条种子被归档、合并新条目并存，无物理删除）。
+#
+# 设计取舍（DSL 原子性限制，check 不支持布尔连接/OR）：收敛信号断言优先用端点自身返回的结构化
+# BlockResult.action（!= "no_change"，由 server 分类，非本 case 猜测存储层状态）；"归档不删"
+# 用 GET /memory/global?includeArchived=true 断言两条种子仍物理存在（不论 archived 值）
+# （15-memory-ui.md §3.1：默认列表过滤 archived 条目，必须带该 query 参数才能看到——R3 归因：
+# 漏带该参数曾致 step 断言假 fail，误判为物理删除，实为产品行为正确）。
+#
+# step 12 archived 断言两次放宽（LLM 判归档谁天然主观：A 是「政策式书面」、B 是「情感化重复表达 +
+# 语气强」——两条含义相近但表述不对称，LLM 挑哪条 archive 无稳定规律）：
+#   - v0.0.164：原设计强断两条都 archived==true → 首跑撞真实 fail（A false / B true）→ 只钉 B。
+#   - v0.0.217：再次实测撞反向 fail（A archived=true / B archived=false，恰与钉 B 相反）→ 证明
+#     「哪条被归档」是 LLM 主观收敛方向，硬钉任一条都必然 flaky（两个方向各出现过一次）。
+# 现断言只钉客观不变量：两条种子都仍物理存在（archive 不删）+ 整理后至少存在一条 archived 条目
+# （数组谓词 `.entries[] any .archived == true`，不指定 A 还是 B）。
+# 收敛信号的强证据仍在 step 11：BlockResult.action != "no_change" + globalMemory.detail exists
+# （server 侧结构化分类，非本 case 猜存储层）——step 12 只守「不物理删 + 有归档发生」两条底线。
+case: t2_daily_consolidation
+module: consolidation
+timeout: 240
+
+setup:
+  - name: 建种子会话（承载写入 global memory 种子条目的 agent 调用）
+    requests:
+      - 'POST /session {"title": "t2dc-seed-session", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  # ── 路径 5：模型未配置 → 静默跳过（先跑，零 LLM，稳定）──
+  - name: 清空 consolidation 模型配置（modelId 未设置）
+    requests:
+      - 'PUT /config/app {"group": "consolidation", "items": [{"key": "default", "data": {"enabled": true, "dailyTime": "04:00", "modelId": null}}]}'
+    check:
+      - .ok == true
+
+  - name: 触发整理（模型未配置场景，同步返回）
+    requests:
+      - 'POST /test/consolidation/run'
+    check:
+      - .skippedReason == "model_not_configured"
+
+  - name: 断言可见性状态已写（skip 也算已执行一次）
+    requests:
+      - GET /consolidation/status
+    check:
+      - .lastRunAt exists
+      - .summary exists
+
+  # ── 路径 4 + 1：配置模型 → seed 冗余 global memory → 触发 → 收敛 ──
+  - name: 配置 consolidation 模型（启用 + 绑定测试模型）
+    requests:
+      - 'PUT /config/app {"group": "consolidation", "items": [{"key": "default", "data": {"enabled": true, "dailyTime": "04:00", "modelId": "MiniMax-M3"}}]}'
+    check:
+      - .ok == true
+
+  - name: 订阅 agent_loop 流（种子写入用）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 种子写入 global memory 冗余条目 A（走 memory_manage 工具，真实 agent 调用）
+    run: { content: "请用 memory_manage 工具写入一条新记忆（scope 参数指定为 global）：name 为 t2seed-pref-a-t2dc1，type 为 user，intro 为「用户偏好简洁回复」，body 为「该用户明确表示所有回复都应保持简洁扼要，避免长篇大论，这是长期稳定的沟通偏好」。写完后请直接确认已完成，不用做其他事情。" }
+    check:
+      - .state == "idle"
+      - .messages exists
+
+  - name: 等种子 A 写入完成
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 1"
+      timeout: 30
+    check:
+      - main.count(type=run_end) == 1
+      - main.absent(type=error)
+
+  - name: 种子写入 global memory 冗余条目 B（同一偏好的重复表述）
+    run: { content: "请用 memory_manage 工具写入一条新记忆（scope 参数指定为 global）：name 为 t2seed-pref-b-t2dc1，type 为 user，intro 为「喜欢简短答案」，body 为「用户偏好简短回答，不想要冗长解释，讨厌啰嗦的长篇大论」。写完后请直接确认已完成，不用做其他事情。" }
+    check:
+      - .state == "idle"
+      - .messages exists
+
+  - name: 等种子 B 写入完成
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 2"
+      timeout: 30
+    check:
+      - main.count(type=run_end) == 2
+      - main.absent(type=error)
+
+  - name: 验证两条种子已落 global memory（source=agent，evolvable=true）
+    requests:
+      - GET /memory/global
+    check:
+      - .entries exists
+      - .entries[name=t2seed-pref-a-t2dc1] exists
+      - .entries[name=t2seed-pref-a-t2dc1].source == "agent"
+      - .entries[name=t2seed-pref-a-t2dc1].evolvable == true
+      - .entries[name=t2seed-pref-b-t2dc1] exists
+      - .entries[name=t2seed-pref-b-t2dc1].source == "agent"
+
+  - name: 触发整理（主体：真实收敛，同步返回完整结果）
+    requests:
+      - 'POST /test/consolidation/run'
+    timeout: 180   # 整理链 = global skill + global memory 两段 forkedRun 多轮 ReAct，minimax 下预留充分余量（case 级 240 已够）
+    check:
+      - .skippedReason absent
+      - .globalSkill exists
+      - .globalSkill.action exists
+      - .globalMemory exists
+      - .globalMemory.action exists
+      - .globalMemory.action != "no_change"
+      - .globalMemory.detail exists
+      - .sessions exists
+      - .sessions[] any .sessionId exists
+      - .summary exists
+
+  - name: 验证种子条目触发后仍物理存在 + 至少发生一次归档（archived 具体归属 LLM 主观，不钉哪条）
+    requests:
+      - GET /memory/global?includeArchived=true
+    check:
+      # 不变量 1（archive 不删）：两条种子都不允许被物理删除（不论 archived 与否）
+      - .entries[name=t2seed-pref-a-t2dc1] exists
+      - .entries[name=t2seed-pref-b-t2dc1] exists
+      # 不变量 2（有归档发生）：列表里至少存在一条 archived 条目，不指定是 A 还是 B——
+      # 「归档谁」是 LLM 主观收敛方向（两个方向都实测出现过），硬钉任一条必 flaky；
+      # DSL 原子性不支持「A OR B archived」，数组谓词 any 是唯一可表达的客观形式。
+      # 收敛的强证据在 step 11（globalMemory.action != "no_change" + detail exists，server 侧分类）。
+      - .entries[] any .archived == true
+
+  - name: 再次断言 status 反映本次触发结果
+    requests:
+      - GET /consolidation/status
+    check:
+      - .lastRunAt exists
+      - .summary exists
+
+teardown:
+  - name: 归档种子条目 A（best-effort，可能已被整理 archive/合并改写）
+    requests:
+      - method: DELETE
+        path: /memory/global/t2seed-pref-a-t2dc1
+        status: [200, 404]
+
+  - name: 归档种子条目 B（best-effort）
+    requests:
+      - method: DELETE
+        path: /memory/global/t2seed-pref-b-t2dc1
+        status: [200, 404]
+
+  - name: 重置 consolidation 配置为默认禁用态
+    requests:
+      - 'PUT /config/app {"group": "consolidation", "items": [{"key": "default", "data": {"enabled": false, "dailyTime": "04:00", "modelId": null}}]}'
+
+  - name: 删除种子会话
+    requests:
+      - DELETE /session/{sid}

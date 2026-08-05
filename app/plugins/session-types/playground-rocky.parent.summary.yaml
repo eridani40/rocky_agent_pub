@@ -1,0 +1,4 @@
+# v0.0.204 playground-rocky:parent:summary profile（自动压缩场景）
+# 空 = 全继承 summary 基座（手动/自动同 profile，无区分手动/自动字段）
+id: playground-rocky:parent:summary
+extends: summary

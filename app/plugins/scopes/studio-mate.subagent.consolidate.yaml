@@ -1,0 +1,7 @@
+# v0.0.204 scope — studio-mate:subagent:consolidate（consolidate runKind；空=继承 consolidate 基座）
+# 补全矩阵：subagent.main extends default → post_compact memory_skill_consolidation 产 consolidate run →
+# 必须有对应 consolidate scope，否则递归。本文件旁路（reject + forked + in_memory；toolBound 由 profile 表达）。
+extends: consolidate
+scopeId: studio-mate:subagent:consolidate
+name: studio-mate:subagent:consolidate
+description: consolidate run scope（手动/自动同 profile；空=继承 consolidate 基座）

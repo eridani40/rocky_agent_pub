@@ -1,0 +1,60 @@
+# todo-reminder — session 有未结束 todo → reminder 注入 [todo] 段
+#
+# 覆盖契约：
+#   - specs/tech/agent/context/[P0]system_reminder.md §3（todo provider order 5，[v0.0.223]
+#     重定义为 session todo 进度，来源 ctx.todoStore）+ §4（system_reminder_injector 落库到
+#     末条 user message content，块级 TextBlock isSystemReminder=true，持久化进 transcript）
+#   - specs/tech/agent/tools/[P1]todo_tools.md §6（[todo] 产出格式：未结束主 item 摘要 + 步骤进度）
+#   - specs/prd/version_logs/v0.0.223.md §3 UC-223-TODO-REMIND / §2.5（填壳 + 语义重定义）
+#
+# 断言面：
+#   预置未结束 todo 主 item（status=in_progress，HTTP 直建 todo store）→ 真调 minimax 发一条
+#   user message（无工具路径）→ ingest 期 system_reminder_injector 跑 todo provider 填壳 →
+#   [todo] 段以 TextBlock(isSystemReminder=true) 落库到末条 user message。
+#   GET /messages → items[-2]（末条 user message）content[] 任一 block 文本含 "[todo]" 标头。
+#
+# 机制说明（断言为何成立）：
+#   - reminder 落库持久化（非临时视图，system_reminder.md §4）；GET /messages 返原始 transcript
+#     不在 server 侧过滤 isSystemReminder block（前端 DEFAULT_BLOCK_FILTER 才隐，HTTP 黑盒可读）。
+#   - 单次 run + 无工具调用 → transcript = [user, assistant]，items[-2] = 末条 user message。
+#   - todo provider 仅 parent.main 产出（playground = parent.main），故 playground session 适用。
+#
+# AT vs UT 边界：UT（TodoReminderProvider）覆盖「读 ctx.todoStore + parent.main only + 标头 [todo]
+#   + 不读 task_tools」白盒；AT 覆盖「填壳产出真注入到 user message」跨层黑盒链路（HTTP 可观测）。
+case: todo-reminder
+module: todo
+timeout: 120
+
+setup:
+  - name: 建 playground 会话（预绑 minimax，parent.main）
+    requests:
+      - 'POST /session {"title": "todo-reminder-223", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 预置一条未结束 todo 主 item（供 todo provider 产出进度）
+    requests:
+      - 'POST /session/{sid}/todos {"desc": "reminder-probe-223", "source": {"type": "user_message"}, "output": {"type": "file"}, "status": "in_progress"}'
+    check:
+      - .itemId exists
+
+  - name: 发 user message 触发 ingest + reminder 注入（真调 minimax，无工具路径）
+    run:
+      content: "只回复「继续」两个字，不要调用任何工具。"
+    check:
+      - .state == "idle"
+
+  - name: GET /messages → 末条 user message content 含 [todo] reminder block
+    requests:
+      - GET /session/{sid}/messages
+    check:
+      - .items exists
+      - .items[-2].content[] any .text ~= "[todo]"
+
+teardown:
+  - name: 删除会话（级联清 todo store）
+    requests:
+      - DELETE /session/{sid}

@@ -1,0 +1,334 @@
+{
+  "session": {
+    "defaultTitle": "New chat",
+    "emptyHint": "Type a message below to start the conversation"
+  },
+  "convPanel": {
+    "title": "Sessions",
+    "create": "New session",
+    "empty": "No sessions",
+    "copySessionId": "Copy Session ID",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "loadMore": "Load more",
+    "resize": {
+      "ariaLabel": "Drag to resize session list width",
+      "title": "Drag to resize"
+    }
+  },
+  "composer": {
+    "send": {
+      "ariaLabel": "Send",
+      "title": "Send (Enter)"
+    }
+  },
+  "conversation": {
+    "delete": {
+      "ariaLabel": "Delete session",
+      "dialogTitle": "Delete conversation?",
+      "dialogBody": "This will permanently delete \"{{title}}\". This cannot be undone."
+    }
+  },
+  "subagent": {
+    "terminatedCount": "Not running ({{count}})",
+    "observe": "Watch →"
+  },
+  "toolBatch": {
+    "title": "Tool calls",
+    "countSuffix": "{{count}} calls"
+  },
+  "toolCall": {
+    "params": "Parameters",
+    "paramsEmpty": "No parameters",
+    "result": "Result"
+  },
+  "run": {
+    "stopReason": {
+      "noToolCall": "Completed",
+      "noNewMessages": "Completed",
+      "maxIterations": "Max iterations reached",
+      "doomLoop": "Doom loop detected, stopped",
+      "toolPending": "Waiting for input",
+      "interrupted": "Interrupted"
+    },
+    "error": {
+      "title": "Run error",
+      "copyHint": "Click to copy error detail",
+      "copied": "Copied"
+    }
+  },
+  "loading": {
+    "thinking": "Thinking…",
+    "answering": "Generating answer…",
+    "toolCalling": "Calling tools…",
+    "toolExecuting": "Executing…",
+    "toolExecutingNamed": "Running tool: {{names}}",
+    "retrying": "Retrying {{attempt}}/{{maxAttempts}}"
+  },
+  "abort": {
+    "ariaLabel": "Abort",
+    "title": "Abort current run"
+  },
+  "minimap": {
+    "noReply": "No reply yet"
+  },
+  "floatMenu": {
+    "memory": "Memory",
+    "cron": "Scheduled tasks",
+    "skills": "Skills",
+    "todo": "Todos"
+  },
+  "todoModal": {
+    "title": "Todo list",
+    "empty": "No todos yet",
+    "emptyHint": "The agent maintains its working todos as it works",
+    "stepsProgress": "Steps {{done}}/{{total}}",
+    "source": "Source",
+    "output": "Output",
+    "memo": "Memo",
+    "status": {
+      "not_started": "Not started",
+      "in_progress": "In progress",
+      "done": "Done",
+      "skipped": "Skipped",
+      "error": "Error"
+    },
+    "sourceType": {
+      "task": "Task",
+      "user_message": "User message",
+      "agent": "Agent"
+    },
+    "outputType": {
+      "file": "File",
+      "reply_session": "Reply to session",
+      "reply_agent": "Reply to agent"
+    }
+  },
+  "skillsModal": {
+    "title": "Skills",
+    "tab": {
+      "session": "Session",
+      "group": "Group",
+      "global": "Global"
+    },
+    "scope": {
+      "workspace": "workspace",
+      "group": "group",
+      "builtin": "builtin",
+      "app": "app"
+    },
+    "empty": {
+      "session": "No skills in this session's workspace.",
+      "group": "No group skills (this playground session has no squad).",
+      "global": "No active global skills."
+    },
+    "emptyDesc": "(no description)",
+    "loading": "Loading…"
+  },
+  "memory": {
+    "create": "New memory",
+    "loading": "Loading…",
+    "empty": "No memory yet. Click + above to create one.",
+    "editor": {
+      "editTitle": "Edit memory",
+      "createTitle": "New memory",
+      "introPlaceholder": "One-line intro",
+      "bodyPlaceholder": "Body",
+      "whyPlaceholder": "Why remember this",
+      "howPlaceholder": "How to apply",
+      "whyRequiredHint": "feedback/project requires why + how",
+      "missingFields": "Missing required fields: {{fields}}",
+      "evolvableLabel": "Allow agent auto-evolution",
+      "evolvableHint": "When on, the agent may auto-rewrite this entry during consolidation"
+    },
+    "entryCard": {
+      "archived": "Archived",
+      "collapseDetail": "Collapse detail",
+      "expandDetail": "Expand detail",
+      "archive": "Archive",
+      "manual": "manual",
+      "manualTitle": "Excluded from agent auto-evolution (user-maintained)"
+    }
+  },
+  "workspace": {
+    "unset": "Not set",
+    "resize": {
+      "ariaLabel": "Drag to resize workspace width",
+      "title": "Drag to resize"
+    },
+    "expand": {
+      "title": "Expand workspace",
+      "ariaLabel": "Expand workspace panel"
+    },
+    "tree": {
+      "loading": "Loading",
+      "openFolder": "Open folder",
+      "openFile": "Open file"
+    },
+    "tab": {
+      "workspace": "Workspace",
+      "memory": "Memory",
+      "switchDir": "Switch workspace dir",
+      "refresh": "Refresh workspace",
+      "collapse": "Collapse workspace panel"
+    },
+    "mdEditor": {
+      "loading": "Loading…",
+      "loadFail": "Failed to load",
+      "saved": "Saved",
+      "hint": "Edit directly · Save to apply"
+    }
+  },
+  "usage": {
+    "title": "Token usage",
+    "cumulative": "Cumulative",
+    "occupancy": "{{pct}}% used · {{free}} left",
+    "row": {
+      "current": "Session",
+      "forked": "Compacted",
+      "sub": "Sub-agent",
+      "total": "Total"
+    },
+    "leg": {
+      "system": "System",
+      "messages": "Messages",
+      "tools": "Tools",
+      "reserve": "Output reserve"
+    },
+    "col": {
+      "source": "Source",
+      "input": "Input",
+      "cache": "Cache",
+      "output": "Output",
+      "total": "Total"
+    },
+    "toggle": {
+      "collapse": "Collapse usage",
+      "expand": "Expand usage"
+    },
+    "compact": "Compact context",
+    "clear": "Clear session"
+  },
+  "readonlyBadge": "SUBAGENT · READ-ONLY",
+  "pendingQuestion": {
+    "awaitInput": "Awaiting your answer",
+    "multi": "multi",
+    "other": "Other",
+    "otherPlaceholder": "Enter other answer",
+    "submit": "Submit",
+    "submitHint": "Please answer all questions before submitting",
+    "progress": "Answered {{answered}}/{{total}}"
+  },
+  "pendingApproval": {
+    "title": "Approval Required",
+    "allowBtn": "Allow",
+    "denyBtn": "Deny",
+    "allowAlwaysBtn": "Always Allow"
+  },
+  "cron": {
+    "panel": {
+      "title": "Scheduled",
+      "sessionScope": "session-scoped",
+      "newBtn": "New",
+      "emptyTitle": "No scheduled tasks in this session",
+      "emptyHintCreate": "Once created, this session will be auto-woken by the prompt at scheduled times.",
+      "emptyHintAgent": "Agent can also call the cron tool itself."
+    },
+    "form": {
+      "newTitle": "New scheduled task",
+      "nameLabel": "Name (optional)",
+      "namePlaceholder": "Advance todo",
+      "freqLabel": "Frequency",
+      "promptLabel": "Task description (prompt when fired)",
+      "promptPlaceholder": "Check todo.md, advance unfinished tasks, and report progress to me.",
+      "promptHint": "At scheduled times this session will be woken by this prompt for one run.",
+      "validationRequired": "Frequency and task description are both required"
+    },
+    "freq": {
+      "presetMinutes": "Every N minutes",
+      "presetHours": "Every N hours",
+      "presetDaily": "Daily",
+      "presetWeekly": "Weekly",
+      "advancedToggle": "Advanced: custom cron",
+      "advancedSummary": "Advanced: write cron expression directly",
+      "intervalMinutes": "Interval (minutes)",
+      "intervalHours": "Interval (hours)",
+      "timeLabel": "Time",
+      "weekdayLabel": "Weekday",
+      "previewCaption": "(underlying cron; users usually don't need to care)"
+    },
+    "job": {
+      "nextFire": "Next fire {{time}}",
+      "notScheduled": "Not scheduled",
+      "disabled": "Disabled",
+      "enableAria": "Enable",
+      "disableAria": "Disable",
+      "stateEnabled": "Enabled",
+      "stateDisabled": "Disabled"
+    },
+    "delete": {
+      "dialogAria": "Confirm delete scheduled task",
+      "dialogTitle": "Delete scheduled task?",
+      "dialogBody": "Will permanently delete \"{{name}}\". This cannot be undone."
+    },
+    "error": {
+      "loadFail": "Load failed",
+      "actionFail": "Action failed",
+      "deleteFail": "Delete failed",
+      "createFail": "Create failed"
+    }
+  },
+  "emptyState": {
+    "newConversation": "New conversation",
+    "eyebrow": "Playground",
+    "subtitle": "Click the button below to start a new conversation, or pick a previous one from the left.",
+    "chipFile": "Analyze a file",
+    "chipResearch": "Research & summarize",
+    "chipCode": "Help me write code"
+  },
+  "clearConfirm": {
+    "title": "Clear chat",
+    "body": "This will clear all messages, compaction logs, run history and cumulative usage of the current session. This cannot be undone.",
+    "confirm": "Confirm clear"
+  },
+  "enqueue": {
+    "queueHint": "Queued · {{count}} item(s) — sent one-by-one after Rocky finishes",
+    "expandFull": "Expand full",
+    "dequeue": "Remove from queue"
+  },
+  "mention": {
+    "searchPlaceholder": "Search…",
+    "noMatch": "No matches",
+    "student": {
+      "label": "Students"
+    }
+  },
+  "origin": {
+    "from": "from {{name}}"
+  },
+  "pickerTitle": {
+    "model": "Model",
+    "effort": "Effort",
+    "approvalMode": "Approval Mode"
+  },
+  "effort": {
+    "pickerAria": "Effort: {{level}}",
+    "level": {
+      "default": "Default",
+      "low": "Low",
+      "high": "High",
+      "max": "Max"
+    }
+  },
+  "approvalMode": {
+    "pickerAria": "Approval: {{mode}}",
+    "level": {
+      "normal": "Normal",
+      "greenlight": "Green Light"
+    }
+  },
+  "linkViewer": {
+    "fileNotFound": "File not found: {{path}}",
+    "loadFail": "Failed to open"
+  }
+}

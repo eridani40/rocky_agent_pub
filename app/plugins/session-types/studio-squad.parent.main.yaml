@@ -1,0 +1,14 @@
+# v0.0.204 studio-squad:parent:main profile（群聊哑路由）
+# toolBound = [send_message]（哑路由现状）+ skill_manage/memory_manage——
+#   squad 主 run 不整理资产，带上是为 consolidate 旁路 run 复用 main snapshot.tools 时
+#   与 consolidate 基座 toolBound 交集非空（能真提炼，不空跑）。
+id: studio-squad:parent:main
+extends: default
+toolBound:
+  - send_message
+  - todo
+  - skill_manage
+  - memory_manage
+eosStop:
+  - <EOS>
+autoNaming: false

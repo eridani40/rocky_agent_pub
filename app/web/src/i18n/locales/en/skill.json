@@ -1,0 +1,93 @@
+{
+  "tab": {
+    "manage": "Mine",
+    "market": "Market"
+  },
+  "source": {
+    "market": "Market",
+    "local": "Local"
+  },
+  "sourceFilter": {
+    "ariaLabel": "Source filter",
+    "all": "All",
+    "builtin": "Built-in",
+    "market": "Market",
+    "rocky": "Rocky",
+    "rockyTooltip": "From Rocky's self-iteration and evolution"
+  },
+  "install": {
+    "addAria": "Install skill",
+    "closeAria": "Close install zone"
+  },
+  "market": {
+    "searchPlaceholder": "Search skills…",
+    "searchHint": "Type a keyword to search skills",
+    "loading": "Loading…",
+    "empty": "No matching skills found",
+    "error": "Failed to load, please retry",
+    "noProvider": "No active market source configured",
+    "installsLabel": "installs",
+    "status": {
+      "installed": "Installed",
+      "updatable": "Update available",
+      "upToDate": "Up to date"
+    },
+    "btn": {
+      "install": "Install",
+      "installing": "Installing…",
+      "update": "Update",
+      "checkUpdate": "Check for updates"
+    },
+    "detail": {
+      "files": "Files",
+      "loading": "Loading details…",
+      "error": "Failed to load details",
+      "viewSource": "View source"
+    }
+  },
+  "page": {
+    "loadFail": "Load failed",
+    "installFail": "Install failed",
+    "previewFail": "Failed to load preview",
+    "deleteFail": "Delete failed",
+    "headerTitle": "Skill management",
+    "headerDesc": "skill · install / enable / preview / delete",
+    "loading": "Loading…"
+  },
+  "item": {
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "emptyDesc": "(no description)",
+    "enableLabel": "Enable",
+    "evolvableLabel": "Evolvable",
+    "toggleAria": "{{name}} enable / disable",
+    "evolvableAria": "{{name}} evolvable on / off",
+    "previewBtn": "Preview",
+    "deleteTitle": "Delete",
+    "deleteAria": "Delete {{name}}",
+    "builtinNoEvolve": "Built-in skill cannot evolve",
+    "builtinNoDelete": "Built-in skills are read-only (shipped with the app)"
+  },
+  "dropzone": {
+    "title": "Drag a Skill here to install",
+    "subtitle": "Supports folders · .zip · .skill packages (auto-parses SKILL.md)",
+    "selectFile": "Choose file",
+    "selectFolder": "Choose folder"
+  },
+  "list": {
+    "empty": "No installed Skills yet"
+  },
+  "deleteModal": {
+    "title": "Delete Skill",
+    "body": "Delete {{name}}? This Skill will no longer be available. This cannot be undone."
+  },
+  "previewModal": {
+    "emptyTree": "(empty)",
+    "loading": "(loading…)",
+    "binary": "(binary file not previewable)",
+    "emptyFile": "(empty file)",
+    "truncated": "…(content truncated)",
+    "readFail": "(read failed)",
+    "selectHint": "Select a file on the left to view its content"
+  }
+}

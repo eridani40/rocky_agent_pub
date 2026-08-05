@@ -1,0 +1,86 @@
+# 团队工作管理看板种子模板 — panorama-designer skill 模板库
+# 通用团队工作流（任务 + 迭代）；user 说不清要什么看板时的默认起点，按需求裁剪
+# 权威 DSL 契约：specs/tech/squad/[P1]panorama_dsl.md
+meta:
+  version: "1.0"
+
+version:
+  id: team
+  name: 团队
+  board_name: 团队工作看板
+
+entities:
+  work_item:
+    label: 工作项
+    id_field: id
+    fields:
+      id:         { type: string }
+      title:      { type: string, max: 200, required: true }
+      kind:       { type: enum, values: [feature, bug, chore, spike] }
+      status:     { type: enum, values: [backlog, todo, in_progress, review, done] }
+      priority:   { type: enum, values: [p0, p1, p2, p3] }
+      assignee:   { type: string, max: 100 }
+      due_date:   { type: datetime }
+      created_at: { type: datetime }
+      sprint_ref: { type: ref, entity: sprint }
+    states:
+      field: status
+      initial: backlog
+      transitions:
+        backlog:     [todo]
+        todo:        [in_progress, backlog]
+        in_progress: [review, todo]
+        review:      [done, in_progress]
+        done:        []
+      terminal: [done]
+    display:
+      status_labels: { backlog: 待规划, todo: 待办, in_progress: 进行中, review: 评审中, done: 已完成 }
+      status_colors: { backlog: "#8b949e", todo: "#4c9aff", in_progress: "#d29922", review: "#a371f7", done: "#3fb950" }
+
+  sprint:
+    label: 迭代
+    id_field: id
+    fields:
+      id:        { type: string }
+      name:      { type: string, max: 100, required: true }
+      phase:     { type: enum, values: [planning, active, closed] }
+      starts_at: { type: datetime }
+      ends_at:   { type: datetime }
+    states:
+      field: phase
+      initial: planning
+      transitions:
+        planning: [active]
+        active:   [closed]
+        closed:   []
+      terminal: [closed]
+    display:
+      status_labels: { planning: 规划中, active: 进行中, closed: 已结束 }
+      status_colors: { planning: "#8b949e", active: "#3fb950", closed: "#6e7681" }
+
+views:
+  - id: work_kanban
+    label: 工作看板
+    entity: work_item
+    component: kanban
+    group_by: status
+    columns: [backlog, todo, in_progress, review, done]
+    card:
+      title: "{id} {title}"
+      badges: [priority, assignee]
+      footer: "截止 {due_date|未定}"
+
+  - id: work_table
+    label: 工作列表
+    entity: work_item
+    component: table
+    columns: [id, title, kind, status, priority, assignee, due_date]
+    sort: { field: due_date, order: asc }
+    limit: 50
+
+  - id: priority_chart
+    label: 按优先级统计
+    entity: work_item
+    component: bar_chart
+    bucket: { field: created_at, unit: day, days: 14 }
+    stack_by: priority

@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev1]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        run: bun install
+      - name: Generate version file
+        run: bun run gen-version
+      - name: Typecheck
+        run: bun run typecheck

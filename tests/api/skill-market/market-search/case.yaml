@@ -1,0 +1,47 @@
+# market-search — 市场 search API 主路径：capability negotiation → GET /skills/market/search
+# 覆盖契约：specs/tech/agent/skills/[P1]skill_market.md §9（/skills/market/* HTTP 端点）
+#           + §2（SkillMarketSearchResult / SkillMarketItem 字段）+ §3（capability negotiation 三层模型）
+#           + §8（skills.sh impl：capabilities.stats=['installs']；search 出站 GET https://skills.sh/api/search?q=）
+# 覆盖用户指示：states/v0.0.167.skill_market_ui/verify/test-plan.md §3b（用户 2026-07-17「skill search 的 api 需要加 at」）
+# 断言面：Resp（capabilities 结构 + search items 结构/字段）；search 真实调 skills.sh 公网 API（v0.0.190 真实调，不录制不回放）
+#
+# 环境前置（非 case 自身可满足）：
+#  E1. skills_sh builtin plugin 必须在 test env 生效（skill_market_provider exclusive EP ≤1 active）。
+#      未生效 → /skills/market/capabilities 返 503，step1 fail（属环境/产品问题，非 case 缺陷）。
+#  E2. search 真打公网 https://skills.sh/api/search?q=git，需网络可达 + skills.sh 在线且对 "git" 返 ≥1 结果
+#      （"git" 是高命中关键词）。
+#
+# 设计裁决 — 仅 capabilities + search，不含 install round-trip（用户「install 加不加都行」+「优先保证 search 稳定」）：
+#  install 若放进本 case，其步骤失败会连带整个 search case 一起 fail（同 case 单步 fail = 整 case fail），
+#  且 install 引入 3 个 flaky 向量（依赖 items[0].ref 可下载 / 真实文件落盘 / 跨轮 DATA_DIR 持久需 teardown 删 skill 才能重入）。
+#  为保证用户核心诉求「search API 稳定」，install 契约留给 UT（U1/U2/U5 已覆盖安装元数据/覆盖守卫/handler）。见 test_case.md「install 取舍」。
+
+case: market-search
+module: skill-market
+timeout: 60
+
+steps:
+  - name: 能力协商 — GET /skills/market/capabilities（无出站，返生效 provider 自描述）
+    # §9：返 { id, label, capabilities }；skills.sh capabilities = { stats: ['installs'] }（§8，单元素数组，无 stars/categories/sorts）。
+    # capabilities 是 provider 静态属性，不触发出站 HTTP。
+    requests:
+      - GET /skills/market/capabilities
+    check:
+      - .id exists
+      - .label exists
+      - .capabilities exists
+      - .capabilities.stats[0] == "installs"
+
+  - name: 搜索市场 q=git — 出站 skills.sh /api/search 经 web_fetch(proxyFetch) 拦截
+    # §9：GET /skills/market/search?q= → 200 SkillMarketSearchResult { provider, query, count, tookMs, items[] }。
+    # §2/§3：每 item 必有 ref/name（通用核心）；skills.sh 命中项带 stats.installs；search 阶段【不返回 description】（核心可选，故不断言 description）。
+    requests:
+      - GET /skills/market/search?q=git
+    check:
+      - .provider exists               # provider.id（string）
+      - .query == "git"                # query 原样回显（deterministic）
+      - .count >= 1                    # items.length ≥ 1（"git" 高命中）
+      - .items exists
+      - .items[0].ref exists           # 通用核心必有字段（数组谓词子谓词不支持 exists，故用 index 断言）
+      - .items[0].name exists
+      - .items[] any .stats.installs >= 0   # 命中项含 stats.installs（数组谓词 any：≥1 项带 installs 统计维度）

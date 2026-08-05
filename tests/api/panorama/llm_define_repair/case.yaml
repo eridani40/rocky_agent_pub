@@ -1,0 +1,207 @@
+# llm_define_repair — leader 首次搭建含校验失败自修复回路（覆盖 PRD P2）
+# 覆盖契约（specs/api/overall/14-panorama-endpoints.md + [P1]panorama_validation.md）：
+#   ① POST schema/validate 含语义错误 DSL -> ok:false + errors[{layer:semantic, code:panorama_unknown_*, path, suggestion}]
+#   ② POST schema/validate 修正后 DSL   -> ok:true
+#   ③ PUT schema 落盘                    -> ok:true + board.yaml 持久化 + events 有 board.defined
+#   ④ POST create 实例                   -> ok:true + id（证明 board 可操作）
+#   ⑤ leader run（LLM 生成 DSL -> dryRun -> 自修复 -> 落盘）-> idle；GET schema 非空
+# 断言面：Resp（校验返回结构 + 持久化 + 实例创建 + LLM run 终态）
+# 一进一出：候选淘汰 consolidation/t2_daily_consolidation（详见 test_case.md）
+# 注：DSL card 用字面标题（不用 {field} 插值）——AT 框架 load 期 {var} 静态校验会拒载
+#     body 字符串里的字面 {field}；语义错误改用 ref/group_by 两类（同属 panorama_unknown_* 语义层）。
+# v0.0.190 新框架适配：真实调 API（无 stub 声明 / 无 MODE / 无录制回放）；
+#   Leg3 走 POST /session/{sid}/run 真调 minimax（squad.modelDefault），429/529 -> skipped 不阻塞。
+# 环境准备要求：env_start.sh 自动起 env + copy dev config；providers 用 test pool，
+#   squad modelDefault=MiniMax-M3 经 resolveConfigBySid 解析（同 compact_model_directive 模式）。
+case: llm_define_repair
+module: panorama
+timeout: 180
+
+setup:
+  - name: 建 squad（事务同建 leader member + leader studio session）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "v189-panorama-define-repair"
+          description: "AT case for panorama P2 leader define+repair (v0.0.189)"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "leader-01"
+        status: [200, 201]
+    save:
+      squadId: .id
+      sid: .members[0].sessionId
+    check:
+      - .id exists
+      - .leaderId exists
+      - .members[0].sessionId exists
+      - .members[0].role == "leader"
+
+  - name: 验 leader session 为 studio 会话
+    requests:
+      - GET /session/{sid}
+    check:
+      - .biz == "studio"
+      - .role == "leader"
+      - .squadId exists
+      - .state == "idle"
+
+steps:
+  # ── Leg 1: 校验契约（dryRun，不落盘）—— 自修复回路依赖的结构化反馈 ──
+  - name: validate 含语义错误 DSL -> ok:false + 语义层错误
+    requests:
+      - method: POST
+        path: /squad/{squadId}/panorama/schema/validate
+        body:
+          dsl: |-
+            meta:
+              version: "1.0"
+            entities:
+              pipeline_run:
+                label: 流水线运行
+                id_field: id
+                fields:
+                  id: { type: string }
+                  branch: { type: string }
+                  status: { type: enum, values: [queued, running, success, failed] }
+                  pipeline_ref: { type: ref, entity: ghost_team }
+                states:
+                  field: status
+                  initial: queued
+                  transitions: { queued: [running], running: [success, failed] }
+                  terminal: [success, failed]
+            views:
+              - id: runs
+                label: 看板
+                entity: pipeline_run
+                component: kanban
+                group_by: nonexistent_status
+                columns: [queued, running, success, failed]
+                card:
+                  title: 流水线运行
+                  badges: [status]
+        status: [200]
+    check:
+      - .ok == false
+      - .errors[] any .layer == "semantic"
+      - .errors[] any .code ~= "panorama_unknown"
+      - .errors[] any .path exists
+      - .errors[] any .message exists
+      - .errors[] any .suggestion exists
+
+  - name: validate 修正后 DSL -> ok:true
+    requests:
+      - method: POST
+        path: /squad/{squadId}/panorama/schema/validate
+        body:
+          dsl: |-
+            meta:
+              version: "1.0"
+            entities:
+              pipeline_run:
+                label: 流水线运行
+                id_field: id
+                fields:
+                  id: { type: string }
+                  branch: { type: string }
+                  status: { type: enum, values: [queued, running, success, failed] }
+                states:
+                  field: status
+                  initial: queued
+                  transitions: { queued: [running], running: [success, failed] }
+                  terminal: [success, failed]
+            views:
+              - id: runs
+                label: 看板
+                entity: pipeline_run
+                component: kanban
+                group_by: status
+                columns: [queued, running, success, failed]
+                card:
+                  title: 流水线运行
+                  badges: [status]
+        status: [200]
+    check:
+      - .ok == true
+
+  # ── Leg 2: 落盘 + 操作面验证（确定性）──
+  - name: PUT schema 落盘 -> ok:true
+    requests:
+      - method: PUT
+        path: /squad/{squadId}/panorama/schema
+        body:
+          dsl: |-
+            meta:
+              version: "1.0"
+            entities:
+              pipeline_run:
+                label: 流水线运行
+                id_field: id
+                fields:
+                  id: { type: string }
+                  branch: { type: string }
+                  status: { type: enum, values: [queued, running, success, failed] }
+                states:
+                  field: status
+                  initial: queued
+                  transitions: { queued: [running], running: [success, failed] }
+                  terminal: [success, failed]
+            views:
+              - id: runs
+                label: 看板
+                entity: pipeline_run
+                component: kanban
+                group_by: status
+                columns: [queued, running, success, failed]
+                card:
+                  title: 流水线运行
+                  badges: [status]
+        status: [200]
+    check:
+      - .ok == true
+
+  - name: POST create 实例 -> ok:true + id
+    requests:
+      - method: POST
+        path: /squad/{squadId}/panorama/entities/pipeline_run
+        body:
+          fields:
+            id: "pr-at-001"
+            branch: "main"
+            status: "queued"
+        status: [200, 201]
+    check:
+      - .ok == true
+      - .id exists
+
+  - name: GET schema -> 持久化 DSL 非空 + 含 pipeline_run
+    requests:
+      - GET /squad/{squadId}/panorama/schema
+    check:
+      - .dsl exists
+      - .dsl ~= "pipeline_run"
+
+  - name: GET events -> 审计记录 board.defined
+    requests:
+      - GET /squad/{squadId}/panorama/events
+    check:
+      - .events[] any .type == "board.defined"
+
+  # ── Leg 3: LLM 自修复冒烟（真 LLM 不确定性场景 = AT 入选依据）──
+  - name: leader run 生成 DSL -> dryRun -> 自修复 -> 落盘
+    run:
+      content: "请用 panorama 工具为团队搭建一个 CI/CD 流水线看板：定义实体 pipeline_run（字段 id、branch、status，status 是枚举 queued/running/success/failed，状态机 queued 转 running，running 转 success 或 failed），加一个 kanban 视图按 status 分组。请先用 dryRun 校验，若有错误按 suggestion 修复，校验通过后正式 define 落盘。必须调用 panorama 工具完成，不要提问，直接执行。"
+    check:
+      - .state == "idle"
+
+  - name: GET schema -> leader 落盘的 board 非空
+    requests:
+      - GET /squad/{squadId}/panorama/schema
+    check:
+      - .dsl exists
+
+teardown:
+  - name: 删除 squad（级联清理 leader session + 数据）
+    requests:
+      - DELETE /squad/{squadId}

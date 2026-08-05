@@ -1,0 +1,7 @@
+# scope — studio-mate:subagent:main
+# studio mate 的 subagent 继承 squadId（在 squad 上下文工作）→ 保留 default 全量 mapper 链
+# （含 squad_role/team_roster 等；与 playground subagent 去 squad mapper 的口径不同）。
+extends: default
+scopeId: studio-mate:subagent:main
+name: Studio Mate Subagent
+description: studio mate 派生 subagent scope（persistent store + 主链；squad 上下文保留全量 mapper）

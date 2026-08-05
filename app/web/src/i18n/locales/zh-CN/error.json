@@ -1,0 +1,22 @@
+{
+  "llm": {
+    "authInvalid": "认证失败，请检查 API Key",
+    "authForbidden": "API Key 无权限或地域受限",
+    "rateLimited": "模型限流，请稍后重试",
+    "providerOverloaded": "服务商过载，请稍后重试",
+    "serverError": "服务商内部错误",
+    "network": "网络错误，请检查网络连接",
+    "streamIncomplete": "响应流中断",
+    "emptyResponse": "模型返回空响应",
+    "maxTokensTooHigh": "输出长度超限（请求参数越界）",
+    "timeoutFirstChunk": "响应超时",
+    "timeoutInterChunk": "响应超时",
+    "contextLengthExceeded": "上下文过长且压缩失败",
+    "maxTokensExceeded": "输出达到模型上限",
+    "contentFiltered": "内容被审核拒绝",
+    "modelNotFound": "模型不存在或未配置",
+    "malformedToolCall": "模型工具调用格式错误",
+    "badRequestOther": "请求参数错误",
+    "abortedByUser": "用户已中断"
+  }
+}

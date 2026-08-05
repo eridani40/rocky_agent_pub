@@ -1,0 +1,91 @@
+# todo-crud-flow — todo 工具全 action 链路（LLM 决策建 todo + HTTP CRUD 契约）
+#
+# 覆盖契约：
+#   - specs/api/overall/20-todo.md §1/§2（资源模型 + GET/POST/PATCH/DELETE /session/:sid/todos
+#     + /steps + /cleanup 全端点 + 5 态 enum + 错误码）
+#   - specs/tech/agent/tools/[P1]todo_tools.md §3（7 action schema：add_item/update_item/add_step/
+#     update_step/delete_item/list/cleanup_finished）+ §2.3（5 态 free-form 跃迁，仅校验 enum）
+#   - specs/prd/version_logs/v0.0.223.md §3 UC-223-TODO-CREATE（建 todo 全流程）
+#
+# 断言面（双轨）：
+#   【A LLM 决策（不确定场景，AT 入选核心理由）】run directive prompt → agent 调 todo 工具
+#       add_item（含 source/output/memo 结构化字段）→ GET /todos 见条目 output.type=file。
+#       证明 agent 自主维护 todo 的跨层链路（tool → TodoStore → HTTP read）真调 minimax 打通。
+#   【B HTTP 契约（确定性）】POST 建主 item（source/output/memo 全字段）→ POST 加步骤 →
+#       PATCH 步骤状态 free-form 跃迁（not_started→done）→ PATCH 主 item 状态（→skipped）
+#       → POST cleanup（removed>=1，证明 skipped 主 item 被清理 + 状态确已改）。逐端点断言
+#       20-todo.md 契约（agent 工具不经 HTTP，HTTP surface 需独立断言）。
+#
+# AT vs UT 边界（设计权衡，非 bug）：
+#   - UT（todoTool 7 action dispatch + 5 态 free-form + TodoStore）覆盖工具 action 分发与状态机白盒。
+#   - AT 覆盖「LLM 决策建 todo」不确定链路（A）+ HTTP 端点契约黑盒（B）——两者正交，不重复。
+#   - 状态 free-form 跃迁在 AT 仅做正向断言（PATCH 返 200 + cleanup 移除 skipped item 间接证明状态
+#     确已改）；「非法 status → invalid_status」「跃迁不报 illegal_transition」由 UT 覆盖
+#     （AT check 无 count/否定/absent 量词，无法表达「不报错」语义）。
+case: todo-crud-flow
+module: todo
+timeout: 120
+
+setup:
+  - name: 建 playground 会话（预绑 minimax，parent.main 持 todo 工具）
+    requests:
+      - 'POST /session {"title": "todo-crud-flow-223", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  # ===== Phase A：LLM 决策建 todo（不确定场景，AT 入选核心理由）=====
+  - name: A1 真调 minimax → agent 调 todo 工具 add_item 建结构化主 item
+    run:
+      content: "请调用 todo 工具的 add_item action 创建一条主待办：描述填 AT-TODO-FLOW-223，来源 source 类型填 user_message，产出 output 类型填 file，备忘 memo 填 marker223。创建完成后只回复「已创建」三个字，不要做其他操作，不要调用别的工具。"
+    check:
+      - .state == "idle"
+      - .messages exists
+
+  - name: A2 GET /todos 见 LLM 建的结构化条目（output.type=file）
+    requests:
+      - GET /session/{sid}/todos
+    check:
+      - .items exists
+      - .items[] any .output.type == "file"
+
+  # ===== Phase B：HTTP 契约确定性链路（20-todo.md 全端点）=====
+  - name: B1 POST 建主 item（source/output/memo 全字段，201）
+    requests:
+      - 'POST /session/{sid}/todos {"desc": "HTTP-CRUD-223", "source": {"type": "agent"}, "output": {"type": "reply_session", "refId": "{sid}"}, "memo": "deterministic-item", "status": "not_started"}'
+    save: { itemId: .itemId }
+    check:
+      - .itemId exists
+
+  - name: B2 POST 加步骤（201）
+    requests:
+      - 'POST /session/{sid}/todos/{itemId}/steps {"desc": "step-1", "status": "not_started"}'
+    save: { stepId: .stepId }
+    check:
+      - .itemId exists
+      - .stepId exists
+
+  - name: B3 PATCH 步骤状态 free-form 跃迁（not_started→done）
+    requests:
+      - 'PATCH /session/{sid}/todos/{itemId}/steps/{stepId} {"status": "done"}'
+    check:
+      - .itemId exists
+
+  - name: B4 PATCH 主 item 状态 free-form 跃迁（not_started→skipped）
+    requests:
+      - 'PATCH /session/{sid}/todos/{itemId} {"status": "skipped"}'
+    check:
+      - .itemId exists
+
+  - name: B5 POST cleanup 删 done/skipped 主 item（removed>=1 证状态确改 + 清理生效）
+    requests:
+      - POST /session/{sid}/todos/cleanup
+    check:
+      - .removed >= 1
+
+teardown:
+  - name: 删除会话（级联清 session 级 todo store）
+    requests:
+      - DELETE /session/{sid}

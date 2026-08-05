@@ -1,0 +1,31 @@
+# v0.0.210 scope — academy-student:parent:main
+# 参考: specs/tech/academy/[P0]session_kind_extension.md §4.1（student scope 极简 — identity + tools）
+# extends default；显式独立成文件。
+# 去 squad 相关 mappers/reminders；加 academy_classroom_role（仅身份，无训练上下文）。
+extends: default
+scopeId: academy-student:parent:main
+name: Academy Student Main
+description: academy 学生主 session scope（极简 — 教室身份 + 学习工具）
+
+groups:
+  - id: system-prompt
+    points:
+      - pointId: system_prompt_mapper
+        impls:
+          - identity
+          - rules
+          - tool_guidance
+          - skills
+          - agent_profile
+          - context_files
+          - memory_user
+          - memory_session
+          # ── academy 专属（仅身份，无训练上下文） ──
+          - academy_classroom_role        # 教室身份正文（"你是 X 教室的学生"）
+      - pointId: system_reminder
+        impls:
+          - env
+          - time
+          - workspace
+          - tool_error
+          - todo

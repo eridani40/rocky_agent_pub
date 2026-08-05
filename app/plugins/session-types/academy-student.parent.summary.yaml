@@ -1,0 +1,6 @@
+# v0.0.210 academy-student:parent:summary profile（summary runKind）
+# 参考: specs/tech/academy/[P0]session_kind_extension.md §3.4（summary/consolidate 矩阵完整性）
+# 空文件 extends summary 基座即等价（手动/自动 summary 同 profile）。
+# 启动期 validator validateMainMatrix 要求每个 <prefix>:main 必须有对应 <prefix>:summary。
+id: academy-student:parent:summary
+extends: summary

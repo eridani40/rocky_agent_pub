@@ -1,0 +1,42 @@
+{
+  "header": {
+    "title": "Channels",
+    "desc": "channel · IM channel access layer (Feishu and other external IM)"
+  },
+  "list": {
+    "newBtn": "New Channel",
+    "empty": "No channels yet. Click \"New Channel\" to add one.",
+    "bindingCount": "{{count}} binding(s)",
+    "switchLabel": "Toggle channel {{name}}",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteConfirm": "Confirm"
+  },
+  "form": {
+    "impl": "Type",
+    "name": "Name",
+    "namePlaceholder": "Channel name (e.g. Company Feishu Bot)",
+    "appId": "App ID",
+    "appIdPlaceholder": "cli_xxx",
+    "appSecret": "App Secret",
+    "appSecretPlaceholder": "Enter App Secret",
+    "appSecretEditHint": "Leave unchanged (submitting *** keeps the stored value)",
+    "submit": "Save",
+    "submitting": "Saving…",
+    "cancel": "Cancel",
+    "errRequired": "Please fill in all required fields",
+    "noImplTypes": "No channel type available (channel impl not activated in default.yaml)"
+  },
+  "setupDoc": {
+    "title": "Setup Guide",
+    "desc": "How to create and configure a bot on the Feishu Open Platform"
+  },
+  "state": {
+    "disabled": "Disabled",
+    "disconnected": "Enabled (not connected)",
+    "connecting": "Connecting…",
+    "connected": "Connected",
+    "error": "Connection failed",
+    "errorDefault": "Connection failed. Please check credentials or network and retry."
+  }
+}

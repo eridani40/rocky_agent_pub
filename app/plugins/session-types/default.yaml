@@ -1,0 +1,50 @@
+# v0.0.204 session type profile — default 基座（main run 共性 root）
+# 参考: specs/tech/agent/session/[P0]session_type_profile.md §3/§4
+#
+# 所有 main-run 类型链最终回退到此。toolBound = playground-rocky 现状值（SHARED_PLAYGROUND_BOUND）。
+# 其他字段 = main run 共性默认（drainMode eager / persistsRun true / maxIter 25 / usagePartition current / ...）。
+
+id: default
+enabled: true
+toolBound:
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+  - bash
+  - skill
+  - memory
+  - skill_manage
+  - memory_manage
+  - web_search
+  - web_fetch
+  - browser
+  - see_image
+  - agent
+  - send_message
+  - cron
+  - ask-question
+  - computer
+  - history_search
+  - history_get_context
+  - todo
+toolDefinitionsSource: own
+runShape:
+  drainMode: eager
+  backgroundPath: false
+  maxIterDefault: 25
+  touchesStateMachine: true
+  persistsRun: true
+  usagePartition: current
+lifecycleHooks:
+  abortFinalize: four-step
+  cascadeChildren: true
+eventChannel:
+  emitDefault: true
+modelHints:
+  readsSquadDefault: false
+skillSource: global-enabled
+eosStop: []
+autoNaming: false
+preloadContext: none

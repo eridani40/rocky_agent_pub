@@ -1,0 +1,5 @@
+# v0.0.204 scope — studio-leader:parent:consolidate（consolidate runKind；空=继承 consolidate 基座）
+extends: consolidate
+scopeId: studio-leader:parent:consolidate
+name: studio-leader:parent:consolidate
+description: consolidate run scope（手动/自动同 profile；空=继承 consolidate 基座）

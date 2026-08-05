@@ -1,0 +1,20 @@
+{
+  "nav": {
+    "playground": "Playground",
+    "studio": "Studio",
+    "skills": "SKILLS",
+    "channel": "Channels",
+    "connector": "Connectors",
+    "settingsApp": "App settings",
+    "brand": "Rocky",
+    "academy": "Academy"
+  },
+  "dragHandle": {
+    "ariaLabel": "Drag to reorder"
+  },
+  "secretInput": {
+    "placeholder": "Enter new value",
+    "edit": "Edit",
+    "commit": "Commit"
+  }
+}

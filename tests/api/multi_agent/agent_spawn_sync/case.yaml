@@ -1,0 +1,85 @@
+# agent_spawn_sync — spawn explorer sync → child 落库字段 + parent usage.sub 聚合
+# 覆盖契约：child session derivation=subagent / parentSessionId / subAgentTemplateType=explorer 落库；
+#           parent usage.sub.llmCallCount>0 + input_total_tokens>0（递归子 agent usage 上报）
+# 断言面：Req（stub audit LLM 帧：parent run + child explorer run）+ Resp + SSE（parent run 事件序列）
+# 吸收旧 case：spawn_sync_explorer_tc1（迁）
+# API spec: 10-multi-agent.md §2（derivation/parentSessionId/subAgentTemplateType）+ §4（sub usage）
+# 录制引导词确定性：prompt 显式点名 agent 工具和 templateRef=explorer + 禁止追问
+# sync spawn 完成后 child 在 terminated 组（同步等待完成），直接 GET /children 读 terminated[0]
+case: agent_spawn_sync
+module: multi_agent
+timeout: 120
+
+setup:
+  - name: 建 parent session（playground，带 provider/model）
+    requests:
+      - method: POST
+        path: /session
+        body:
+          title: "spawn-sync-v2"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 订阅 agent_loop 流（parent session 主 run 事件）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 发消息驱动 spawn explorer（生产路径 /messages）
+    requests:
+      - method: POST
+        path: /session/{sid}/messages
+        body:
+          content: "请使用 agent 工具派生一个 explorer 子 agent（templateRef=explorer）同步探查当前工作目录有哪些文件，等待它完成后返回探查结果。必须调用 agent 工具，不要提问任何问题，直接执行。"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { run_id: .runId }
+    check:
+      - .runId exists
+
+  - name: 等 parent run 完成（sync spawn：parent 同步等 child 结果）
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 1"
+      timeout: 60
+    check:
+      - main.count(type=run_start) == 1
+      - main.count(type=run_end) == 1
+      - main.absent(type=error)
+
+  - name: GET children — sync spawn 完成后 child 应在 terminated 组
+    poll:
+      request: GET /session/{sid}/children
+      until: ".terminated[0].sessionId exists"
+      every: 1
+      timeout: 15
+    save:
+      child_sid: ".terminated[0].sessionId"
+    check:
+      - .terminated[0].sessionId exists
+
+  - name: GET child session — 验 derivation/parentSessionId/subAgentTemplateType 落库
+    requests:
+      - GET /session/{child_sid}
+    check:
+      - .derivation == "subagent"
+      - .parentSessionId exists
+      - .subAgentTemplateType == "explorer"
+
+  - name: GET parent usage — 验 sub usage 递归上报（llmCallCount≥1 + input_total_tokens≥1）
+    requests:
+      - GET /session/{sid}/usage
+    check:
+      - .sub exists
+      - .sub.llmCallCount >= 1
+      - .sub.input_total_tokens >= 1
+
+teardown:
+  - name: DELETE parent session（child 随父联级清理）
+    requests:
+      - DELETE /session/{sid}

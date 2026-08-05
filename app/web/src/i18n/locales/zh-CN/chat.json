@@ -1,0 +1,334 @@
+{
+  "session": {
+    "defaultTitle": "新会话",
+    "emptyHint": "在下方输入消息开始对话"
+  },
+  "convPanel": {
+    "title": "会话列表",
+    "create": "新建会话",
+    "empty": "暂无会话",
+    "copySessionId": "复制 Session ID",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "loadMore": "加载更多",
+    "resize": {
+      "ariaLabel": "拖动调整会话列表宽度",
+      "title": "拖动调整宽度"
+    }
+  },
+  "composer": {
+    "send": {
+      "ariaLabel": "发送",
+      "title": "发送（Enter）"
+    }
+  },
+  "conversation": {
+    "delete": {
+      "ariaLabel": "删除会话",
+      "dialogTitle": "删除会话？",
+      "dialogBody": "将永久删除「{{title}}」，无法恢复。"
+    }
+  },
+  "subagent": {
+    "terminatedCount": "非运行中 ({{count}})",
+    "observe": "观察 →"
+  },
+  "toolBatch": {
+    "title": "工具调用",
+    "countSuffix": "{{count}} 次"
+  },
+  "toolCall": {
+    "params": "参数",
+    "paramsEmpty": "无参数",
+    "result": "结果"
+  },
+  "run": {
+    "stopReason": {
+      "noToolCall": "已完成",
+      "noNewMessages": "已完成",
+      "maxIterations": "已达最大迭代数",
+      "doomLoop": "检测到死循环，已停止",
+      "toolPending": "等待输入",
+      "interrupted": "已中断"
+    },
+    "error": {
+      "title": "执行出错",
+      "copyHint": "点击复制错误详情",
+      "copied": "已复制"
+    }
+  },
+  "loading": {
+    "thinking": "思考中…",
+    "answering": "生成回答…",
+    "toolCalling": "调用工具…",
+    "toolExecuting": "执行中…",
+    "toolExecutingNamed": "运行工具: {{names}}",
+    "retrying": "重试中 {{attempt}}/{{maxAttempts}}"
+  },
+  "abort": {
+    "ariaLabel": "中断",
+    "title": "中断当前 run"
+  },
+  "minimap": {
+    "noReply": "暂无回复"
+  },
+  "floatMenu": {
+    "memory": "长期记忆",
+    "cron": "定时任务",
+    "skills": "技能",
+    "todo": "待办"
+  },
+  "todoModal": {
+    "title": "待办清单",
+    "empty": "暂无待办",
+    "emptyHint": "agent 工作时会自主维护手头待办",
+    "stepsProgress": "步骤 {{done}}/{{total}}",
+    "source": "来源",
+    "output": "输出",
+    "memo": "备忘",
+    "status": {
+      "not_started": "未开始",
+      "in_progress": "进行中",
+      "done": "已结束",
+      "skipped": "已跳过",
+      "error": "出错"
+    },
+    "sourceType": {
+      "task": "任务",
+      "user_message": "用户消息",
+      "agent": "Agent"
+    },
+    "outputType": {
+      "file": "文件",
+      "reply_session": "回复会话",
+      "reply_agent": "回复 Agent"
+    }
+  },
+  "skillsModal": {
+    "title": "技能",
+    "tab": {
+      "session": "会话",
+      "group": "团队",
+      "global": "全局"
+    },
+    "scope": {
+      "workspace": "工作区",
+      "group": "团队",
+      "builtin": "内置",
+      "app": "应用"
+    },
+    "empty": {
+      "session": "本会话工作区没有 skills。",
+      "group": "无团队层 skills（playground 会话不属于 squad）。",
+      "global": "没有全局生效的 skills。"
+    },
+    "emptyDesc": "（未提供介绍）",
+    "loading": "加载中…"
+  },
+  "memory": {
+    "create": "新建长期记忆",
+    "loading": "加载中…",
+    "empty": "还没有长期记忆。点右上 + 新建一条。",
+    "editor": {
+      "editTitle": "编辑长期记忆",
+      "createTitle": "新建长期记忆",
+      "introPlaceholder": "一句话简介",
+      "bodyPlaceholder": "正文",
+      "whyPlaceholder": "为什么记住这条",
+      "howPlaceholder": "如何应用",
+      "whyRequiredHint": "feedback/project 强制填写 why + how",
+      "missingFields": "缺少必填字段：{{fields}}",
+      "evolvableLabel": "允许 agent 自动进化",
+      "evolvableHint": "开启后 agent 可在整理时自动改写本条"
+    },
+    "entryCard": {
+      "archived": "已归档",
+      "collapseDetail": "折叠详情",
+      "expandDetail": "展开详情",
+      "archive": "归档",
+      "manual": "手动",
+      "manualTitle": "不参与 agent 自动进化（用户手动维护）"
+    }
+  },
+  "workspace": {
+    "unset": "未设置",
+    "resize": {
+      "ariaLabel": "拖动调节工作区宽度",
+      "title": "拖动调节宽度"
+    },
+    "expand": {
+      "title": "展开工作区",
+      "ariaLabel": "展开工作区面板"
+    },
+    "tree": {
+      "loading": "加载中",
+      "openFolder": "打开文件夹",
+      "openFile": "打开文件"
+    },
+    "tab": {
+      "workspace": "工作区",
+      "memory": "长期记忆",
+      "switchDir": "切换工作区目录",
+      "refresh": "刷新工作区",
+      "collapse": "收起工作区面板"
+    },
+    "mdEditor": {
+      "loading": "读取中…",
+      "loadFail": "读取失败",
+      "saved": "已保存",
+      "hint": "直接编辑 · 保存后生效"
+    }
+  },
+  "usage": {
+    "title": "Token 用量",
+    "cumulative": "累积消耗",
+    "occupancy": "{{pct}}% 已占用 · 剩余 {{free}}",
+    "row": {
+      "current": "会话",
+      "forked": "整理",
+      "sub": "子Agent",
+      "total": "合计"
+    },
+    "leg": {
+      "system": "系统",
+      "messages": "消息",
+      "tools": "工具",
+      "reserve": "输出预留"
+    },
+    "col": {
+      "source": "来源",
+      "input": "输入",
+      "cache": "缓存",
+      "output": "输出",
+      "total": "合计"
+    },
+    "toggle": {
+      "collapse": "收起用量",
+      "expand": "展开用量"
+    },
+    "compact": "压缩上下文 (Compact)",
+    "clear": "清空会话 (Clear)"
+  },
+  "readonlyBadge": "子AGENT · 只读",
+  "pendingQuestion": {
+    "awaitInput": "等待你的回答",
+    "multi": "多选",
+    "other": "其他",
+    "otherPlaceholder": "请输入其他答案",
+    "submit": "提交",
+    "submitHint": "请回答完问题再提交",
+    "progress": "已答 {{answered}}/{{total}}"
+  },
+  "pendingApproval": {
+    "title": "需要审批",
+    "allowBtn": "同意",
+    "denyBtn": "拒绝",
+    "allowAlwaysBtn": "永远同意"
+  },
+  "cron": {
+    "panel": {
+      "title": "定时任务",
+      "sessionScope": "归属此 session",
+      "newBtn": "新建",
+      "emptyTitle": "本 session 暂无定时任务",
+      "emptyHintCreate": "新建后，到点会以任务描述作提示词自动唤醒本 session。",
+      "emptyHintAgent": "agent 也可自行调 cron 工具创建。"
+    },
+    "form": {
+      "newTitle": "新建定时任务",
+      "nameLabel": "名称（可选）",
+      "namePlaceholder": "推进 todo",
+      "freqLabel": "频率",
+      "promptLabel": "任务描述（触发时的提示词）",
+      "promptPlaceholder": "检查 todo.md，推进未完成的任务，把进展同步给我。",
+      "promptHint": "到点时本 session 会被这条 prompt 唤醒跑一轮。",
+      "validationRequired": "频率和任务描述都不能为空"
+    },
+    "freq": {
+      "presetMinutes": "每 N 分钟",
+      "presetHours": "每 N 小时",
+      "presetDaily": "每天",
+      "presetWeekly": "每周",
+      "advancedToggle": "高级：自定义 cron",
+      "advancedSummary": "高级：直接写 cron 表达式",
+      "intervalMinutes": "间隔（分钟）",
+      "intervalHours": "间隔（小时）",
+      "timeLabel": "时间",
+      "weekdayLabel": "周几",
+      "previewCaption": "（底层 cron，用户通常无需关心）"
+    },
+    "job": {
+      "nextFire": "下次触发 {{time}}",
+      "notScheduled": "尚未排程",
+      "disabled": "已停用",
+      "enableAria": "启用",
+      "disableAria": "禁用",
+      "stateEnabled": "启用",
+      "stateDisabled": "已禁用"
+    },
+    "delete": {
+      "dialogAria": "确认删除定时任务",
+      "dialogTitle": "删除定时任务？",
+      "dialogBody": "将永久删除「{{name}}」，无法恢复。"
+    },
+    "error": {
+      "loadFail": "加载失败",
+      "actionFail": "操作失败",
+      "deleteFail": "删除失败",
+      "createFail": "新建失败"
+    }
+  },
+  "emptyState": {
+    "newConversation": "新建对话",
+    "eyebrow": "Playground",
+    "subtitle": "点击下方按钮新建会话，或从左侧选择历史会话继续。",
+    "chipFile": "分析一个文件",
+    "chipResearch": "查资料并总结",
+    "chipCode": "帮我写代码"
+  },
+  "clearConfirm": {
+    "title": "清空会话",
+    "body": "将清除当前会话的所有消息、整理记录、运行历史与累积用量，操作不可撤销。",
+    "confirm": "确认清空"
+  },
+  "enqueue": {
+    "queueHint": "队列中 · {{count}} 条 — Rocky 处理完后依次发送",
+    "expandFull": "展开全文",
+    "dequeue": "移出队列"
+  },
+  "mention": {
+    "searchPlaceholder": "搜索…",
+    "noMatch": "无匹配结果",
+    "student": {
+      "label": "学生"
+    }
+  },
+  "origin": {
+    "from": "来自 {{name}}"
+  },
+  "pickerTitle": {
+    "model": "模型选择",
+    "effort": "推理强度",
+    "approvalMode": "审批模式"
+  },
+  "effort": {
+    "pickerAria": "推理强度：{{level}}",
+    "level": {
+      "default": "默认",
+      "low": "低",
+      "high": "高",
+      "max": "超高"
+    }
+  },
+  "approvalMode": {
+    "pickerAria": "审批模式：{{mode}}",
+    "level": {
+      "normal": "普通",
+      "greenlight": "绿灯"
+    }
+  },
+  "linkViewer": {
+    "fileNotFound": "文件未找到：{{path}}",
+    "loadFail": "打开失败"
+  }
+}

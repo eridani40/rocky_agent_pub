@@ -1,0 +1,6 @@
+# v0.0.204 scope — studio-squad:parent:main（群聊哑路由器主 session）
+# extends default；显式独立成文件（后续按需分化）
+extends: default
+scopeId: studio-squad:parent:main
+name: Studio Squad Main
+description: studio squad 群聊主 session scope（哑路由器，仅 send_message；与 default 同链路）

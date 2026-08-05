@@ -1,0 +1,19 @@
+{
+  "id": "zhipu_web_search",
+  "label": "__MSG_plugin.builtin.zhipu_web_search.label__",
+  "description": "__MSG_plugin.builtin.zhipu_web_search.description__",
+  "extImpls": [
+    {
+      "implId": "zhipu_coding_plan",
+      "point": "web_search_provider",
+      "impl": "./zhipu-coding-plan-provider.ts",
+      "description": "__MSG_plugin.builtin.zhipu_web_search.impl.zhipu_coding_plan.description__"
+    },
+    {
+      "implId": "zhipu_api",
+      "point": "web_search_provider",
+      "impl": "./zhipu-api-provider.ts",
+      "description": "__MSG_plugin.builtin.zhipu_web_search.impl.zhipu_api.description__"
+    }
+  ]
+}

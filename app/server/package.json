@@ -1,0 +1,34 @@
+{
+  "name": "@app/server",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "tsc -b && cp -r src/prompts/content dist/prompts/ && cp -r src/migration/handlers/*.yaml dist/migration/handlers/ && bash ../../scripts/check-server-build-assets.sh"
+  },
+  "_better-sqlite3_packaged_note": "better-sqlite3 的 install 走 prebuild-install（macOS arm64 等主流平台有 prebuilt .node 下载，dev 零编译）。packaged Electron ABI 重建由 scripts/build-dmg.sh ②c 显式执行（守 memory native-addon-workspace-skip-install-nodegyp：packaged 用 Electron ABI，非 Node ABI）",
+  "dependencies": {
+    "@app/protocols": "workspace:*",
+    "@app/shared": "workspace:*",
+    "@larksuiteoapi/node-sdk": "^1.70.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@mozilla/readability": "^0.6.0",
+    "adm-zip": "^0.5.17",
+    "better-sqlite3": "^11.10.0",
+    "chokidar": "^4.0.0",
+    "chrome-devtools-mcp": "1.4.0",
+    "gray-matter": "^4.0.3",
+    "langfuse": "^3.37.0",
+    "linkedom": "^0.18.12",
+    "playwright": "^1.61.1",
+    "undici": "^8.5.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^26.0.0",
+    "typescript": "^5.6.0"
+  }
+}

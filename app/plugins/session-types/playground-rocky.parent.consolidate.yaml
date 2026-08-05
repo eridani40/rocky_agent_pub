@@ -1,0 +1,4 @@
+# v0.0.204 playground-rocky:parent:consolidate profile
+# 空 = 全继承 consolidate 基座
+id: playground-rocky:parent:consolidate
+extends: consolidate

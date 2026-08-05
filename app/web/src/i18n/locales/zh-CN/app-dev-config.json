@@ -1,0 +1,236 @@
+{
+  "layout": {
+    "emptyGroups": "暂无 group",
+    "emptyGroup": "该 group 无可配置项",
+    "collapseAll": "收起系统配置",
+    "expandAll": "展开系统配置",
+    "generalSection": "通用",
+    "systemSection": "系统设置",
+    "discardConfirmTitle": "放弃改动？",
+    "discardConfirmBody": "当前 tab 有未保存的改动，切换 tab 将放弃这些改动。",
+    "discardConfirmOk": "放弃改动",
+    "discardConfirmCancel": "取消"
+  },
+  "tab": {
+    "general": { "label": "通用" },
+    "session": { "label": "会话" },
+    "models": { "label": "模型" },
+    "tools": { "label": "工具" },
+    "memory": { "label": "记忆" },
+    "observability": { "label": "可观测性" },
+    "consolidation": { "label": "整理" },
+    "plugin": { "label": "插件" }
+  },
+  "group": {
+    "appearance": { "label": "外观" },
+    "providers": { "label": "供应商" },
+    "web_search": { "label": "网络搜索" },
+    "web_fetch": { "label": "网络抓取" },
+    "see_image": { "label": "看图理解" },
+    "locale": { "label": "语言" },
+    "user_memory": { "label": "长期记忆" },
+    "llm_request": { "label": "LLM 请求" },
+    "default_models": { "label": "Playground 默认模型" },
+    "observability": { "label": "可观测性" },
+    "logs": { "label": "日志" },
+    "plugin": { "label": "插件" },
+    "session": { "label": "会话注入数量" },
+    "consolidation": { "label": "整理" }
+  },
+  "userMemory": {
+    "title": "全局长期记忆",
+    "scopeHint": "所有 session 共享的用户偏好/事实/反馈",
+    "create": "+ 新建长期记忆",
+    "loading": "加载中…",
+    "empty": "还没有全局长期记忆。点右上按钮新建一条。"
+  },
+  "locale": {
+    "label": "language",
+    "desc": "界面语言 / Interface language"
+  },
+  "defaultModels": {
+    "unconfigured": "未配置",
+    "clear": "清除",
+    "loading": "加载中…",
+    "empty": "无可用 provider，请先在供应商和模型配置",
+    "searchPlaceholder": "搜索模型...",
+    "unitSeconds": "秒",
+    "unitTimes": "次"
+  },
+  "consolidation": {
+    "description": "这个整理是对 skill 和 memory 进行整合整理：定期合并重复/冲突内容，并将超限的历史条目归档或禁用（永不物理删除）。",
+    "restartNotice": "开关/时间/模型的改动需重启应用后才会生效（不支持热更新）。",
+    "runNow": "立即整理",
+    "running": "整理中…",
+    "error": {
+      "inProgress": "整理任务已在进行中，请稍后再试。",
+      "failed": "整理任务失败：{{message}}",
+      "network": "无法触发整理任务：{{message}}"
+    },
+    "status": {
+      "neverRun": "尚未整理过",
+      "lastRunLabel": "上次整理时间：{{time}}"
+    }
+  },
+  "webSearch": {
+    "sectionTitle": "网络搜索",
+    "sectionDesc": "web_search · 网络搜索后端配置",
+    "empty": "未安装任何 web_search provider 插件",
+    "typeLabel": "Provider 类型",
+    "apiKeyLabel": "API Key",
+    "save": "保存",
+    "reset": "重置",
+    "saving": "保存中…"
+  },
+  "webFetch": {
+    "sectionDesc": "web_fetch · 网络抓取服务配置",
+    "jinaApiKeyLabel": "Jina API Key",
+    "jinaApiKeyDesc": "配置后请求走 Bearer 鉴权（无此 key 也可匿名访问）",
+    "save": "保存",
+    "reset": "重置",
+    "saving": "保存中…"
+  },
+  "seeImage": {
+    "sectionDesc": "see_image · 看图理解后端配置",
+    "empty": "未安装任何 see_image provider 插件",
+    "typeLabel": "Provider 类型",
+    "apiKeyLabel": "API Key",
+    "save": "保存",
+    "reset": "重置",
+    "saving": "保存中…"
+  },
+  "observability": {
+    "sectionTitle": "可观测性配置",
+    "sectionDesc": "observability · 链路追踪与监控",
+    "langfuseDesc": "langfuse · 链路追踪与监控",
+    "unnamed": "(未命名)",
+    "emptyBaseUrl": "(未配置 base url)",
+    "newConfig": "新建配置",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "toggleLabel": "可观测性启停",
+    "toggleAria": "{{name}} 启停",
+    "deleteAria": "删除 {{name}}",
+    "deleteTitle": "删除可观测性配置",
+    "deleteBody": "确定要删除 {{name}} 吗？该操作不可恢复，相关 trace 数据不会同步删除。",
+    "addTitle": "添加配置",
+    "addSubtitle": "接入 Langfuse 等链路追踪平台",
+    "loading": "加载中…",
+    "retry": "重试",
+    "dirtyHint": "● 有未保存的更改",
+    "savedHint": "✓ 已保存",
+    "resetBtn": "重置",
+    "saveBtn": "保存",
+    "changeNotice": "配置改动将在下次启动或新会话生效。",
+    "breadcrumbRoot": "可观测性",
+    "basic": {
+      "title": "基础信息",
+      "hint": "配置实例名称与后端连接信息"
+    },
+    "field": {
+      "name": "配置名称",
+      "type": "类型"
+    },
+    "auth": {
+      "title": "认证密钥",
+      "localOnly": "(仅存储于本地)",
+      "hint": "Langfuse 公钥/私钥；私钥仅本地保存，不会上传"
+    },
+    "physical": {
+      "title": "物理层记录"
+    },
+    "dualRecord": {
+      "label": "双重记录",
+      "hint": "logPhysical",
+      "ariaLabel": "双重记录说明",
+      "toggleLabel": "双重记录启停",
+      "tooltip": "开启后每次 LLM 调用并列记录两条 generation：logical（业务视图）+ physical（发给 LLM 的物理请求体/wire body）。physical 不带 usage，不污染 token/cost 统计。默认关闭 = 仅记录逻辑（logical）LLM 请求。改动重启或新会话生效。"
+    }
+  },
+  "schema": {
+    "appearance": {
+      "theme": {
+        "label": "主题",
+        "desc": "深色 / 浅色主题，保存后生效"
+      }
+    },
+    "llm_request": {
+      "stall_timeout_s": {
+        "label": "LLM 请求 stall 超时",
+        "desc": "LLM 请求 stall 超时（秒，0 表示禁用）"
+      },
+      "max_retry_times": {
+        "label": "最大重试次数",
+        "desc": "LLM 请求失败最大重试次数"
+      },
+      "stall_tool_s": {
+        "label": "工具 stall 超时",
+        "desc": "工具调用 stall 超时（秒，默认 120）"
+      },
+      "max_attempts": {
+        "label": "LLM 重试次数",
+        "desc": "LLM 调用失败最大重试次数（默认 3）"
+      }
+    },
+    "default_models": {
+      "chat": {
+        "label": "默认会话模型",
+        "desc": "新建会话跟随此项；可留空"
+      }
+    },
+    "consolidation": {
+      "enabled": {
+        "label": "启用整理任务",
+        "desc": "开启后每天定时执行 skill/memory 整合整理；关闭时整理任务不存在，不占用调度、不产生任何 LLM 调用"
+      },
+      "dailyTime": {
+        "label": "每日整理时间",
+        "desc": "每天触发整理任务的时刻（本地时区）"
+      },
+      "modelId": {
+        "label": "整理模型",
+        "desc": "整理任务使用的模型；未配置时到点会静默跳过，不报错"
+      }
+    },
+    "session": {
+      "maxSkillInject": {
+        "label": "Skill 注入上限",
+        "desc": "单次会话注入 skill 的最大条数（默认 50）"
+      },
+      "maxMemoryInject": {
+        "label": "Memory 注入上限",
+        "desc": "单次会话注入 memory 的最大条数（默认 50）"
+      }
+    },
+    "logs": {
+      "enableLlmRequestLog": {
+        "label": "记录 LLM 请求日志",
+        "desc": "记录 LLM 出站调用到 logs/llm.log"
+      },
+      "enableToolResultLog": {
+        "label": "记录工具结果日志",
+        "desc": "记录工具调用结果到 logs/tool.log"
+      },
+      "enableAppApiLog": {
+        "label": "记录 App API 日志",
+        "desc": "记录 app HTTP 入站请求到 logs/api.log"
+      },
+      "enableEventLog": {
+        "label": "记录 Event 日志",
+        "desc": "记录 event hub 事件到 logs/event.log"
+      },
+      "enableErrorLog": {
+        "label": "记录 Error 日志",
+        "desc": "记录系统错误（agent/LLM/未处理异常等）到 logs/error.log"
+      },
+      "enableAgentLog": {
+        "label": "记录 Agent 诊断日志",
+        "desc": "记录 agent loop 进入/退出、session 状态变化、inbox 到达/消费到 logs/agent.log（仅 id/计数/状态，不含消息内容）"
+      },
+      "enablePerformanceLog": {
+        "label": "记录性能日志",
+        "desc": "记录慢查询（耗时超 200ms 的持久层查询）到 logs/performance.log（含实体名/耗时/条数，定位性能瓶颈用）"
+      }
+    }
+  }
+}

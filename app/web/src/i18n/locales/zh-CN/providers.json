@@ -1,0 +1,48 @@
+{
+  "section": {
+    "title": "模型提供商",
+    "subtitle": "model_config · {{providerCount}} 个提供商 · {{modelCount}} 个模型",
+    "addProvider": "+ 添加提供商"
+  },
+  "field": {
+    "nameLabel": "名称",
+    "namePlaceholder": "如 Claude",
+    "apiKeyHint": "credentials.key（脱敏 ***，重输覆盖）",
+    "protocolHint": "protocol_id（请求翻译契约）",
+    "urlLabel": "实际请求地址",
+    "urlHint": "baseUrl + protocol.path（read-only）",
+    "urlEmpty": "先填 Base URL 与选择 protocol",
+    "enableTitle": "启用此提供商",
+    "enableHint": "disabled 后不出现在模型选择器"
+  },
+  "list": {
+    "modelCount": "{{count}} 个模型",
+    "enabled": "已启用",
+    "disabled": "已禁用"
+  },
+  "detail": {
+    "newTitle": "新提供商",
+    "connectionTitle": "连接配置",
+    "dirty": "● 有未保存的更改",
+    "saved": "✓ 已保存",
+    "modelsTitle": "关联模型 · {{count}}",
+    "addModel": "+ 添加模型",
+    "emptyModels": "暂无模型，点「添加模型」新增"
+  },
+  "model": {
+    "add": "添加模型",
+    "edit": "编辑模型",
+    "fieldEditHint": "model · 字段编辑",
+    "labelName": "显示名称",
+    "labelPlaceholder": "如 Claude Sonnet",
+    "labelId": "模型 ID",
+    "labelCtx": "上下文长度",
+    "labelMaxOutput": "最大输出",
+    "enableTitle": "启用此模型",
+    "enableHint": "关闭后在模型选择器隐藏"
+  },
+  "modelList": {
+    "disabled": "已禁用",
+    "deleteAria": "删除模型"
+  }
+}

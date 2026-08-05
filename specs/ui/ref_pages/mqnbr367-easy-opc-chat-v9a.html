@@ -1,0 +1,803 @@
+
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EASY OPC — Agent 对话视图 v9a</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #D97757; --accent-hover: #C25E3F; --accent-light: #F4E5DE; --accent-surface: #FBF1ED;
+  --sage: #5B7A6B; --sage-light: #E3F0E8;
+  --gold: #B89160; --gold-light: #F5E8D5;
+  --bg: #FAF6F0; --bg-warm: #F0EEE6; --surface: #FAF9F6; --surface-2: #FFFDF8;
+  --fg: #1A1A1A; --fg-2: #3D3929; --fg-3: #5C5A52; --muted: #87867F; --muted-2: #6B6A63;
+  --border: #E3E1DA; --border-2: #D9D6CE; --border-strong: #C7C4BB;
+}
+[data-theme="dark"] {
+  --accent: #E0916F; --accent-hover: #D97757; --accent-light: #3D2E26; --accent-surface: #2A1F1A;
+  --sage: #7A9B8C; --sage-light: #1E2D27; --gold: #D4AB78; --gold-light: #2E2519;
+  --bg: #1A1816; --bg-warm: #232120; --surface: #1E1C1A; --surface-2: #252321;
+  --fg: #F0EDE8; --fg-2: #D8D4CE; --fg-3: #B5B0A8; --muted: #807C75; --muted-2: #9A9590;
+  --border: #353231; --border-2: #423E3C; --border-strong: #555150;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--fg); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.5; height: 100vh; overflow: hidden; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.app-root { display: flex; height: 100vh; }
+
+.icon-nav { width: 56px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 14px 0; }
+.brand { width: 34px; height: 34px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-family: 'Playfair Display', serif; font-weight: 700; font-size: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(217,119,87,0.3); }
+.nav-spacer { flex: 1; }
+.nav-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; position: relative; color: var(--muted); margin-bottom: 4px; }
+.nav-icon:hover { background: var(--accent-surface); color: var(--accent); }
+.nav-icon.active { background: var(--accent-surface); color: var(--accent); }
+.nav-icon.active::before { content: ''; position: absolute; left: -8px; top: 50%; transform: translateY(-50%); width: 3px; height: 20px; background: var(--accent); border-radius: 0 3px 3px 0; }
+.nav-tooltip { position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); background: var(--fg); color: var(--surface); font-size: 11px; padding: 4px 10px; border-radius: 6px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 100; font-family: 'JetBrains Mono', monospace; }
+.nav-icon:hover .nav-tooltip { opacity: 1; }
+.theme-toggle { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; color: var(--muted); }
+.theme-toggle:hover { background: var(--bg-warm); color: var(--fg); }
+
+/* ── Conversation List Panel ── */
+.conv-panel { width: 220px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.conv-header { padding: 16px 16px 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
+.conv-header-title { font-size: 11px; font-weight: 600; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'JetBrains Mono', monospace; }
+.new-chat-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; color: var(--muted); border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+.new-chat-btn:hover { background: var(--accent-surface); color: var(--accent); }
+
+.conv-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+.conv-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; margin-bottom: 2px; }
+.conv-item:hover { background: var(--bg-warm); }
+.conv-item.active { background: var(--accent-surface); }
+.conv-item.active .conv-item-title { color: var(--accent); }
+.conv-item-title { font-size: 13px; font-weight: 500; color: var(--fg); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-item-meta { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+.chat-page { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+.chat-topbar { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: var(--surface-2); }
+.chat-title { font-size: 14px; font-weight: 600; color: var(--fg); }
+.chat-model-tag { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; background: var(--bg-warm); padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+
+.chat-messages { flex: 1; overflow-y: auto; padding: 24px 32px 60px; display: flex; flex-direction: column; gap: 28px; }
+
+.msg-row { display: flex; gap: 10px; max-width: 820px; width: 100%; margin: 0 auto; }
+.msg-row.user { flex-direction: row-reverse; align-self: flex-end; max-width: 600px; }
+.msg-avatar-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+.msg-avatar { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; font-family: 'Playfair Display', serif; }
+.msg-avatar.agent { background: linear-gradient(135deg, var(--accent) 0%, #C25E3F 100%); color: white; box-shadow: 0 2px 6px rgba(217,119,87,0.25); }
+.msg-avatar.user { background: var(--fg-2); color: var(--surface); }
+.msg-name { font-size: 10px; font-weight: 600; color: var(--muted); font-family: 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.06em; }
+.msg-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.msg-row.user .msg-content { align-items: flex-end; }
+
+.bubble-user { background: var(--fg-2); color: var(--surface-2); padding: 10px 14px; border-radius: 12px 12px 4px 12px; font-size: 13.5px; line-height: 1.6; max-width: 100%; }
+.bubble-answer { background: var(--accent-surface); border: 1px solid var(--accent-light); color: var(--fg); padding: 12px 16px; border-radius: 4px 12px 12px 12px; font-size: 13.5px; line-height: 1.7; max-width: 100%; }
+
+.tool-wrapper { transition: all 0.2s ease; width: fit-content; max-width: 100%; }
+.tool-wrapper-head { padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; font-weight: 500; user-select: none; background: transparent; border: 1px solid var(--border); border-radius: 100px; transition: all 0.2s ease; }
+.tool-wrapper-head:hover { background: var(--surface-2); border-color: var(--muted); }
+.tool-wrapper-head .chevron { transition: transform 0.2s; margin-left: 2px; }
+.tool-wrapper.open { background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 6px; }
+.tool-wrapper.open .tool-wrapper-head { border: none; background: transparent; padding: 6px 10px; border-radius: 10px; }
+.tool-wrapper.open .tool-wrapper-head:hover { background: var(--bg-warm); }
+.tool-wrapper.open .tool-wrapper-head .chevron { transform: rotate(180deg); }
+.tool-wrapper-body { display: none; margin-top: 2px; }
+.tool-wrapper.open .tool-wrapper-body { display: flex; flex-direction: column; gap: 4px; }
+
+.tool-item { padding: 10px 12px; border-radius: 12px; cursor: pointer; transition: background 0.15s; }
+.tool-item:hover { background: var(--bg-warm); }
+.tool-item.open { background: var(--bg-warm); }
+.tool-item-head { display: flex; align-items: center; gap: 8px; font-size: 12px; user-select: none; }
+.tool-item-head .mono { font-weight: 500; color: var(--fg-2); }
+.tool-item-head .chevron { transition: transform 0.2s; margin-left: auto; }
+.tool-item.open .tool-item-head .chevron { transform: rotate(180deg); }
+.tool-status { font-size: 9px; font-weight: 700; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; padding: 2px 6px; border-radius: 100px; letter-spacing: 0.04em; }
+.tool-status.done { background: var(--sage-light); color: var(--sage); }
+.tool-status.running { background: var(--gold-light); color: var(--gold); }
+
+.tool-item-body { margin-top: 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 12px; }
+.tool-section { display: flex; flex-direction: column; gap: 3px; }
+.tool-section-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: 'Inter', sans-serif; margin-bottom: 2px; }
+.kv-row { display: flex; align-items: baseline; gap: 12px; font-size: 12px; line-height: 1.5; }
+.kv-key { color: var(--muted); font-family: 'Inter', sans-serif; font-weight: 500; width: 70px; flex-shrink: 0; text-align: right; }
+.kv-value { color: var(--fg-2); font-family: 'JetBrains Mono', monospace; font-size: 12px; flex: 1; word-break: break-all; }
+.kv-value.content { white-space: pre-wrap; }
+.kv-value.ok { color: var(--sage); }
+.kv-value.err { color: #DC2626; }
+
+.loading-status { position: absolute; left: 40px; bottom: 72px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; padding: 4px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 100px; box-shadow: 0 4px 12px rgba(60,50,30,0.05); z-index: 10; opacity: 1; transition: opacity 0.3s; }
+.loading-status.hidden { opacity: 0; pointer-events: none; }
+.loading-spinner { width: 9px; height: 9px; border: 1.5px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+.loading-status svg { opacity: 0.7; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.chat-input-bar { padding: 12px 32px 16px; border-top: 1px solid var(--border); background: var(--surface-2); flex-shrink: 0; position: relative; }
+.chat-input { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: flex; align-items: flex-end; gap: 8px; transition: all 0.15s; max-width: 820px; margin: 0 auto; }
+.chat-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.chat-input textarea { flex: 1; border: none; outline: none; background: transparent; resize: none; font-family: 'Inter', sans-serif; font-size: 13.5px; line-height: 1.5; color: var(--fg); max-height: 120px; padding: 4px 0; }
+.chat-input textarea::placeholder { color: var(--muted); }
+.send-btn { width: 32px; height: 32px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: all 0.15s; border: none; }
+.send-btn:hover { background: var(--accent-hover); }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── input queue (排队发送：处理中可继续输入，新消息入队) ── */
+.input-queue { width: fit-content; max-width: 460px; margin: 0 0 8px auto; display: flex; flex-direction: column; gap: 5px; }
+.queue-head { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; padding: 0 4px; }
+.queue-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: qpulse 1.2s ease-in-out infinite; flex-shrink: 0; }
+@keyframes qpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.queue-item { display: flex; align-items: center; gap: 8px; height: 32px; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: 10px; padding: 0 6px 0 10px; transition: height 0.15s ease, border-color 0.15s, background 0.15s; overflow: hidden; }
+.queue-item:hover { border-color: var(--accent); }
+.queue-item.open { height: auto; align-items: flex-start; padding-top: 7px; padding-bottom: 7px; }
+.queue-item.open .queue-text { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word; line-height: 1.55; }
+.queue-index { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--accent); background: var(--accent-light); padding: 1px 7px; border-radius: 100px; flex-shrink: 0; }
+.queue-text { flex: 1; min-width: 0; font-size: 12.5px; line-height: 32px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-expand { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
+.queue-expand:hover { background: var(--bg-warm); color: var(--fg-2); }
+.queue-expand svg { transition: transform 0.15s; }
+.queue-item.open .queue-expand svg { transform: rotate(180deg); }
+.queue-remove { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
+.queue-remove:hover { background: #FEE2E2; color: #DC2626; }
+
+/* ── topbar right: usage + compact / clear ── */
+.topbar-right { display: flex; align-items: center; gap: 4px; position: relative; }
+.topbar-divider { width: 1px; height: 18px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
+.topbar-btn { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; transition: all 0.15s; background: transparent; border: none; flex-shrink: 0; }
+.topbar-btn:hover { background: var(--bg-warm); color: var(--fg-2); }
+.topbar-btn.danger:hover { background: #FEE2E2; color: #DC2626; }
+
+.usage { display: flex; align-items: center; gap: 2px; position: relative; }
+.usage-trigger { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px; position: relative; transition: background 0.15s; }
+.usage-trigger:hover { background: var(--bg-warm); }
+.usage-ring { display: block; flex-shrink: 0; }
+.usage-num { font-size: 11px; color: var(--fg-2); font-weight: 500; line-height: 1; white-space: nowrap; }
+.usage-num .sep { color: var(--muted); margin: 0 1px; }
+.usage-expand { width: 22px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; background: transparent; border: none; transition: all 0.15s; }
+.usage-expand:hover { background: var(--bg-warm); color: var(--fg-2); }
+.usage-expand svg { transition: transform 0.15s; }
+.usage.open .usage-expand svg { transform: rotate(180deg); }
+
+/* hover tooltip: cumulative tokens (only when panel closed) */
+.usage-tip { position: absolute; top: calc(100% + 8px); right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(40,30,20,0.12); padding: 10px 12px; min-width: 184px; z-index: 50; opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity 0.15s, transform 0.15s; }
+.usage:not(.open) .usage-trigger:hover .usage-tip { opacity: 1; transform: translateY(0); }
+.usage-tip-title { font-size: 9px; font-weight: 600; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.06em; font-family: 'Inter', sans-serif; margin-bottom: 6px; }
+.usage-tip-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; padding: 3px 0; }
+.usage-tip-label { color: var(--muted); }
+.usage-tip-val { color: var(--fg-2); font-family: 'JetBrains Mono', monospace; }
+
+/* expand panel: full usage object */
+.usage-panel { position: absolute; top: calc(100% + 6px); right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(40,30,20,0.16); padding: 14px; width: 280px; z-index: 60; opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity 0.15s, transform 0.15s; }
+.usage.open .usage-panel { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.usage-panel-head { margin-bottom: 12px; }
+.usage-panel-title { font-size: 13px; font-weight: 700; color: var(--fg); }
+.usage-panel-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.usage-ctx { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.usage-ctx-info { flex: 1; min-width: 0; }
+.usage-ctx-num { font-size: 14px; font-weight: 600; color: var(--fg); }
+.usage-ctx-num .muted { color: var(--muted); font-weight: 400; }
+.usage-ctx-pct { font-size: 11px; margin-top: 2px; font-weight: 500; }
+.usage-bar { height: 6px; background: var(--bg-warm); border-radius: 100px; overflow: hidden; margin-bottom: 14px; }
+.usage-bar-fill { height: 100%; border-radius: 100px; transition: width 0.3s ease; }
+
+/* context window stacked composition: 系统 / 消息 / 工具 / 输出预留 */
+.ctx-stack { display: flex; height: 8px; background: var(--bg-warm); border-radius: 100px; overflow: hidden; gap: 1px; margin-bottom: 10px; }
+.ctx-seg { height: 100%; min-width: 0; transition: width 0.3s ease; }
+.ctx-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; margin-bottom: 14px; }
+.ctx-leg { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.ctx-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.ctx-leg-label { color: var(--muted-2); }
+.ctx-leg .mono { margin-left: auto; color: var(--fg-2); font-weight: 500; }
+.usage-section-label { font-size: 10px; font-weight: 600; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.06em; font-family: 'Inter', sans-serif; margin-bottom: 8px; }
+.usage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.usage-stat { background: var(--bg-warm); border-radius: 8px; padding: 8px 10px; }
+.usage-stat.total { background: var(--accent-surface); }
+.usage-stat-label { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+.usage-stat-val { font-size: 13px; font-weight: 600; color: var(--fg-2); }
+.usage-stat.total .usage-stat-val { color: var(--accent); }
+
+/* cumulative table: 来源 / 输入 / 缓存 / 输出 / 合计 */
+.cum-table { display: grid; grid-template-columns: 1fr auto auto auto auto; column-gap: 4px; row-gap: 1px; font-size: 11px; }
+.cum-th { padding: 4px 6px 6px; color: var(--muted); font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; font-family: 'Inter', sans-serif; text-align: right; border-bottom: 1px solid var(--border); }
+.cum-th.cum-col-label { text-align: left; }
+.cum-td { padding: 5px 6px; font-family: 'JetBrains Mono', monospace; color: var(--fg-2); text-align: right; white-space: nowrap; }
+.cum-td.label { text-align: left; font-family: 'Inter', sans-serif; font-weight: 500; color: var(--fg); }
+.cum-td.total-row { border-top: 1px solid var(--border); font-weight: 700; color: var(--fg); padding-top: 6px; }
+.cum-td.cache { color: var(--accent); }
+.cum-td.zero { color: var(--muted); }
+
+/* ── workspace panel (right, collapsible + resizable) ── */
+.ws-panel { flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; position: relative; min-width: 0; }
+.ws-resize { position: absolute; left: -2px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 8; }
+.ws-resize::after { content: ''; position: absolute; left: 2px; top: 0; bottom: 0; width: 1px; background: transparent; transition: background 0.15s; }
+.ws-resize:hover::after, .ws-resize:active::after { background: var(--accent); }
+.ws-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 0; gap: 4px; flex-shrink: 0; }
+.ws-tabs { display: flex; gap: 2px; }
+.ws-tab { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted-2); padding: 6px 12px 8px; border-bottom: 2px solid transparent; cursor: pointer; }
+.ws-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.ws-actions { display: flex; gap: 2px; }
+.ws-icon-btn { width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; background: transparent; border: none; transition: all 0.15s; }
+.ws-icon-btn:hover { background: var(--bg-warm); color: var(--fg-2); }
+.ws-switch { margin: 6px 8px 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; box-shadow: 0 6px 18px rgba(40,30,20,0.1); }
+.ws-switch-item { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 6px 8px; border-radius: 6px; cursor: pointer; color: var(--muted-2); }
+.ws-switch-item:hover { background: var(--bg-warm); color: var(--fg-2); }
+.ws-switch-item.active { background: var(--accent-surface); color: var(--accent); }
+.ws-path { font-size: 10px; color: var(--muted); padding: 10px 12px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+.ws-tree { flex: 1; overflow-y: auto; padding: 4px 6px 12px; }
+.ws-item { display: flex; align-items: center; gap: 4px; height: 26px; padding-right: 8px; border-radius: 6px; position: relative; }
+.ws-item:hover { background: var(--bg-warm); }
+.ws-twisty { width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; flex-shrink: 0; }
+.ws-twisty.placeholder { visibility: hidden; }
+.ws-twisty svg { transition: transform 0.12s; }
+.ws-twisty.open svg { transform: rotate(90deg); }
+.ws-ico { display: inline-flex; flex-shrink: 0; }
+.ws-ico.dir { color: var(--gold); }
+.ws-ico.file { color: var(--muted); }
+.ws-name { flex: 1; min-width: 0; font-size: 12.5px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-act { width: 22px; height: 22px; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: transparent; border: none; cursor: pointer; opacity: 0; transition: opacity 0.12s, background 0.12s, color 0.12s; flex-shrink: 0; }
+.ws-item:hover .ws-act { opacity: 1; }
+.ws-act:hover { background: var(--accent-surface); color: var(--accent); }
+.ws-rail { width: 36px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 8px; }
+.ws-rail-btn { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; background: transparent; border: none; transition: all 0.15s; }
+.ws-rail-btn:hover { background: var(--accent-surface); color: var(--accent); }
+
+.empty-state { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px; color: var(--muted); }
+.empty-state-icon { width: 72px; height: 72px; background: var(--bg-warm); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--muted-2); }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+.fade-in { animation: fadeIn 0.3s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('eopc-theme')||'light');</script>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+function Icon({ name, size = 16 }) {
+  const icons = {
+    chat:<g><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></g>,
+    user:<g><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0116 0v1"/></g>,
+    plugin:<g><path d="M14 2v6h6"/><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></g>,
+    dev:<g><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12l8.73-5.04"/><path d="M12 22V12"/></g>,
+    sun:<g><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></g>,
+    moon:<g><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></g>,
+    chevron:<g><path d="M6 9l6 6 6-6"/></g>,
+    wrench:<g><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></g>,
+    send:<g><path d="M5 12h14M13 6l6 6-6 6"/></g>,
+    plus:<g><path d="M12 5v14M5 12h14"/></g>,
+    zap:<g><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></g>,
+    brain:<g><path d="M9.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 01-4.96.44 2.5 2.5 0 01-2.96-3.08 3 3 0 01-.34-5.58 2.5 2.5 0 011.32-4.24 2.5 2.5 0 014.44-1.04zM14.5 2A2.5 2.5 0 0012 4.5v15a2.5 2.5 0 004.96.44 2.5 2.5 0 002.96-3.08 3 3 0 00.34-5.58 2.5 2.5 0 00-1.32-4.24A2.5 2.5 0 0014.5 2z"/></g>,
+    file:<g><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></g>,
+    ghost:<g><path d="M9 10h.01M15 10h.01M12 2a8 8 0 00-8 8v12l3-3 3 3 2-3 2 3 3-3 3 3V10a8 8 0 00-8-8z"/></g>,
+    close:<g><path d="M18 6L6 18M6 6l12 12"/></g>,
+    trash:<g><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></g>,
+    compress:<g><path d="M8 3v3a2 2 0 01-2 2H3M21 8h-3a2 2 0 01-2-2V3M3 16h3a2 2 0 012 2v3M16 21v-3a2 2 0 012-2h3"/></g>,
+    folder:<g><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></g>,
+    folderOpen:<g><path d="M3 7a2 2 0 012-2h4l2 3h8a2 2 0 012 2v1H3z"/><path d="M3 11h19l-2 7a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></g>,
+    chevronRight:<g><path d="M9 18l6-6-6-6"/></g>,
+    chevronLeft:<g><path d="M15 18l-6-6 6-6"/></g>,
+    external:<g><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6M10 14L21 3"/></g>,
+    swap:<g><path d="M8 3L4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></g>,
+    skill:<g><path d="M12 2L14 10 22 12 14 14 12 22 10 14 2 12 10 10Z"/></g>,
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{icons[name]}</svg>;
+}
+
+const mockConversations = [
+  { id: 'c1', title: 'Auth 模块安全审查', time: '2 分钟前', usage: { context: { used: 23400, total: 200000, parts: { system: 4200, messages: 14800, tools: 4400, reserve: 40000 } }, cumulative: [
+    { label: '会话', input: 184200, output: 49800, cache: 0.62 },
+    { label: '整理', input: 12400, output: 3200, cache: 0 },
+    { label: '子Agent', input: 0, output: 0, cache: 0 },
+  ]}, messages: [
+    { id: 'u1', role: 'user', name: '李乐', content: '帮我分析一下 src/auth/ 目录下的登录模块，看是否有安全漏洞。' },
+    { id: 'a1', role: 'agent', name: 'Rocky', blocks: [
+      { type: 'tool_batch', id: 'tb1', label: '工具调用 · 2 次', icon: 'wrench', calls: [
+        { id: 'cl1', name: 'read_file', status: 'done', icon: 'file', args: { path: 'src/auth/login.ts' }, result: { ok: true, content: 'export function login(user, pass) {\n  const token = rawQuery(user, pass);\n  localStorage.setItem("tk", token);\n  return token;\n}' } },
+        { id: 'cl2', name: 'read_file', status: 'done', icon: 'file', args: { path: 'src/auth/session.ts' }, result: { ok: true, content: 'export function getSession() {\n  return localStorage.getItem("tk");\n}' } },
+      ]},
+      { type: 'answer', id: 'a1', content: '发现 2 处安全隐患：\n\n① **明文存储** — `login.ts` 将 token 直接写入 `localStorage`，XSS 攻击可读取。\n\n② **无过期机制** — `session.ts` 的 `getSession()` 永不失效。\n\n建议改用 `httpOnly Cookie` + 服务端 Session 管理，并增加 token 过期校验。' }
+    ]}
+  ]},
+  { id: 'c2', title: '调研 WebGL 点云渲染', time: '昨天', messages: [] },
+  { id: 'c3', title: '配置中心 V4 重构规划', time: '3 天前', messages: [] },
+  { id: 'c4', title: '图标提取脚本优化', time: '12-15', messages: [] },
+];
+
+const NAV_LINKS = [
+  { id:'chat', label:'会话', icon:'chat', href:'mqnbr367-easy-opc-chat-v9a.html' },
+  { id:'app', label:'用户设置', icon:'user', href:'easy-opc-app-config-v10.html' },
+  { id:'plugin', label:'插件设置', icon:'plugin', href:'easy-opc-plugin-config-v10.html' },
+  { id:'dev', label:'系统设置', icon:'dev', href:'easy-opc-dev-config-v10.html' },
+  { id:'skill', label:'Skill', icon:'skill', href:'easy-opc-skill-v10.html' },
+];
+
+function App() {
+  const [theme, setTheme] = useState(() => localStorage.getItem('eopc-theme') || 'light');
+  const [activeConvId, setActiveConvId] = useState(mockConversations[0].id);
+  useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
+  const toggleTheme = () => setTheme(t => { const n = t === 'light' ? 'dark' : 'light'; localStorage.setItem('eopc-theme', n); return n; });
+
+  return (
+    <div className="app-root" style={{ background: 'var(--bg)' }}>
+      <nav className="icon-nav">
+        <a className="brand" href="easy-opc-framework-v10.html" style={{ textDecoration: 'none' }} title="EASY OPC · 首页">E</a>
+        {NAV_LINKS.map(item => (
+          <div key={item.id} className={"nav-icon " + (item.id === 'chat' ? 'active' : '')} onClick={() => { if (item.id !== 'chat') location.href = item.href; }}>
+            <Icon name={item.icon} size={20} />
+            <span className="nav-tooltip">{item.label}</span>
+          </div>
+        ))}
+        <div className="nav-spacer" />
+        <div className="theme-toggle" onClick={toggleTheme} title="切换主题">
+          <Icon name={theme === 'light' ? 'moon' : 'sun'} size={18} />
+        </div>
+      </nav>
+
+      <ChatPage convs={mockConversations} activeConvId={activeConvId} onSelectConv={setActiveConvId} />
+      <WorkspacePanel />
+    </div>
+  );
+}
+
+function ChatPage({ convs, activeConvId, onSelectConv }) {
+  const activeConv = convs.find(c => c.id === activeConvId);
+
+  return (
+    <React.Fragment>
+      {/* Conversation List Panel */}
+      <aside className="conv-panel">
+        <div className="conv-header">
+          <div className="conv-header-title">会话列表</div>
+          <div className="new-chat-btn" title="新建会话">
+            <Icon name="plus" size={14} />
+          </div>
+        </div>
+        <div className="conv-list">
+          {convs.map(c => (
+            <div key={c.id} className={"conv-item " + (c.id === activeConvId ? 'active' : '')} onClick={() => onSelectConv(c.id)}>
+              <div className="conv-item-title">{c.title}</div>
+              <div className="conv-item-meta">{c.time}</div>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      {/* Chat Area */}
+      {activeConv && activeConv.messages.length > 0 ? (
+        <ChatDetail messages={activeConv.messages} title={activeConv.title} usage={activeConv.usage} />
+      ) : (
+        <div className="chat-page empty-state">
+          <div className="empty-state-icon"><Icon name="ghost" size={32} /></div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-3)' }}>空会话</div>
+          <div className="mono" style={{ fontSize: 11 }}>在下方输入消息开始对话</div>
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+function ChatDetail({ messages, title, usage }) {
+  const [phase, setPhase] = useState('thinking');
+  const [input, setInput] = useState('');
+  // 处理中可继续输入：新消息进入队列，等当前回合结束后依次发送（预填 2 条示意）
+  const [queue, setQueue] = useState([
+    { id: 'q1', text: '再把登录超时时间改成可配置的' },
+    { id: 'q2', text: '顺便给 session.ts 补一下单元测试' },
+  ]);
+  const scrollRef = useRef(null);
+  const u = usage || { context: { used: 0, total: 200000, parts: { system: 0, messages: 0, tools: 0, reserve: 0 } }, cumulative: [{ label: '会话', input: 0, output: 0, cache: 0 }] };
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, phase, queue]);
+
+  const phaseLabels = {
+    thinking: { icon: 'brain', label: '思考中…' },
+    answering: { icon: 'chat', label: '生成回答…' },
+    tool_calling: { icon: 'wrench', label: '调用工具…' },
+    tool_executing: { icon: 'zap', label: '执行中…' },
+  };
+
+  const enqueue = () => {
+    const t = input.trim();
+    if (!t) return;
+    setQueue(prev => [...prev, { id: 'q' + Date.now(), text: t }]);
+    setInput('');
+  };
+  const removeQueue = (id) => setQueue(prev => prev.filter(q => q.id !== id));
+  const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enqueue(); } };
+
+  return (
+    <div className="chat-page">
+      <div className="chat-topbar">
+        <div>
+          <span className="chat-title">{title}</span>
+          <span className="chat-model-tag">claude-3-5-sonnet</span>
+        </div>
+        <div className="topbar-right">
+          <Usage usage={u} />
+          <div className="topbar-divider" />
+          <button className="topbar-btn" title="压缩上下文 (Compact)"><Icon name="compress" size={15} /></button>
+          <button className="topbar-btn danger" title="清空会话 (Clear)"><Icon name="trash" size={15} /></button>
+        </div>
+      </div>
+
+      <div className="chat-messages" ref={scrollRef}>
+        {messages.map(msg => <MessageRow key={msg.id} msg={msg} />)}
+      </div>
+
+      <div className={"loading-status " + (phase ? '' : 'hidden')}>
+        <div className="loading-spinner" />
+        <Icon name={phase ? phaseLabels[phase].icon : 'brain'} size={11} />
+        <span>{phase ? phaseLabels[phase].label : '待命'}</span>
+      </div>
+
+      <div className="chat-input-bar">
+        {queue.length > 0 && (
+          <div className="input-queue">
+            <div className="queue-head">
+              <span className="queue-dot" />
+              <span>队列中 · {queue.length} 条 — Rocky 处理完后依次发送</span>
+            </div>
+            {queue.map((q, i) => (
+              <QueueItem key={q.id} q={q} index={i} onRemove={() => removeQueue(q.id)} />
+            ))}
+          </div>
+        )}
+
+        <div className="chat-input">
+          <textarea
+            rows={1}
+            value={input}
+            placeholder={phase ? "Rocky 处理中 — 输入将加入队列，Enter 排队 / Shift+Enter 换行" : "输入消息，按 Enter 发送…"}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={onKey}
+          />
+          <button className="send-btn" onClick={enqueue} disabled={!input.trim()}>
+            <Icon name="send" size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ROCKY_ICON = 'https://maas-log-prod.cn-wlcb.ufileos.com/anthropic/aac13ca6-3443-4ba1-ac85-653820c1eb2e/mqnbsjh8-icon.png?UCloudPublicKey=TOKEN_e15ba47a-d098-4fbd-9afc-a0dcf0e4e621&Expires=1782020314&Signature=9c7rkQqS4BKhhCjxPiljtPOyc3Y=';
+
+function MessageRow({ msg }) {
+  const isUser = msg.role === 'user';
+  return (
+    <div className={"msg-row " + msg.role + " fade-in"}>
+      <div className="msg-avatar-col">
+        <div className={"msg-avatar " + msg.role}>
+          {isUser ? 'L' : <img src={ROCKY_ICON} alt="Rocky" onError={(e) => { e.target.onerror = null; e.target.src = 'mqnbsjh8-icon.png'; }} style={{ width:'100%', height:'100%', borderRadius:8, objectFit:'cover', display:'block' }} />}
+        </div>
+        <div className="msg-name">{msg.name}</div>
+      </div>
+      <div className="msg-content">
+        {isUser ? (
+          <div className="bubble-user">{msg.content}</div>
+        ) : (
+          <React.Fragment>
+            {(msg.blocks || []).map(block => <BlockRenderer key={block.id} block={block} />)}
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BlockRenderer({ block }) {
+  if (block.type === 'answer') {
+    return <div className="bubble-answer">{renderMarkdownLite(block.content)}</div>;
+  }
+  if (block.type === 'tool_batch') {
+    return <ToolBatch block={block} />;
+  }
+  return null;
+}
+
+function renderMarkdownLite(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) => {
+    if (p.startsWith('**') && p.endsWith('**')) {
+      return <strong key={i} style={{ fontWeight: 700 }}>{p.slice(2, -2)}</strong>;
+    }
+    return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{p}</span>;
+  });
+}
+
+function ToolBatch({ block }) {
+  const [open, setOpen] = useState(false);
+  const doneCount = block.calls.filter(c => c.status === 'done').length;
+  return (
+    <div className={"tool-wrapper " + (open ? 'open' : '')} onClick={() => setOpen(!open)}>
+      <div className="tool-wrapper-head">
+        <Icon name={block.icon || 'wrench'} size={10} />
+        <span>{block.label || '工具调用'}</span>
+        <span style={{ fontSize: 9, opacity: 0.7 }}>{doneCount}/{block.calls.length}</span>
+        <Icon name="chevron" size={10} className="chevron" />
+      </div>
+      <div className="tool-wrapper-body" onClick={e => e.stopPropagation()}>
+        {block.calls.map(call => <ToolCallItem key={call.id} call={call} />)}
+      </div>
+    </div>
+  );
+}
+
+function ToolCallItem({ call }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={"tool-item " + (open ? 'open' : '')} onClick={() => setOpen(!open)}>
+      <div className="tool-item-head">
+        <Icon name={call.icon || 'wrench'} size={11} />
+        <span className="mono">{call.name}</span>
+        <span className={"tool-status " + call.status}>{call.status === 'done' ? '✓ done' : 'running'}</span>
+        <Icon name="chevron" size={11} className="chevron" />
+      </div>
+      {open && (
+        <div className="tool-item-body" onClick={e => e.stopPropagation()}>
+          <div className="tool-section">
+            <div className="tool-section-label">参数</div>
+            {Object.entries(call.args).map(([k, v]) => (
+              <div className="kv-row" key={k}>
+                <span className="kv-key">{k}</span>
+                <span className="kv-value">{String(v)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="tool-section">
+            <div className="tool-section-label">结果</div>
+            <div className="kv-row">
+              <span className="kv-key">status</span>
+              <span className={"kv-value " + (call.result.ok ? 'ok' : 'err')}>{call.result.ok ? 'Success' : 'Error'}</span>
+            </div>
+            <div className="kv-row" style={{ alignItems: 'flex-start' }}>
+              <span className="kv-key">content</span>
+              <span className="kv-value content">{call.result.content}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QueueItem({ q, index, onRemove }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={"queue-item " + (open ? 'open' : '')}>
+      <span className="queue-index">#{index + 1}</span>
+      <span className="queue-text">{q.text}</span>
+      <div className="queue-expand" onClick={() => setOpen(!open)} title={open ? '收起' : '展开全文'}>
+        <Icon name="chevron" size={12} />
+      </div>
+      <div className="queue-remove" onClick={onRemove} title="移出队列">
+        <Icon name="close" size={12} />
+      </div>
+    </div>
+  );
+}
+
+const fmtK = (n) => n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
+
+function UsageRing({ used, total, size = 28, stroke = 4 }) {
+  const pct = Math.min(1, total > 0 ? used / total : 0);
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const color = pct < 0.5 ? 'var(--sage)' : pct < 0.8 ? 'var(--gold)' : '#DC2626';
+  return (
+    <svg className="usage-ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border-2)" strokeWidth={stroke} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+        strokeDasharray={`${c*pct} ${c}`} transform={`rotate(-90 ${size/2} ${size/2})`} style={{ transition: 'stroke-dasharray 0.3s ease' }} />
+    </svg>
+  );
+}
+
+function Usage({ usage }) {
+  const [open, setOpen] = useState(false);
+  const total = usage.context.total;
+  const parts = usage.context.parts || { system: 0, messages: 0, tools: 0, reserve: 0 };
+  const used = usage.context.used != null ? usage.context.used : (parts.system + parts.messages + parts.tools);
+  const free = Math.max(0, total - used - parts.reserve);
+  const pct = Math.min(1, total > 0 ? used / total : 0);
+  const color = pct < 0.5 ? 'var(--sage)' : pct < 0.8 ? 'var(--gold)' : '#DC2626';
+  // 累积消耗按来源拆分：会话始终展示；整理 / 子Agent 仅在 total>0 时展示
+  const rows = (usage.cumulative || []).filter(c => c.label === '会话' || (c.input + c.output) > 0);
+  const sumIn = rows.reduce((a, c) => a + c.input, 0);
+  const sumOut = rows.reduce((a, c) => a + c.output, 0);
+  const sumCache = sumIn > 0 ? rows.reduce((a, c) => a + c.input * (c.cache || 0), 0) / sumIn : 0;
+  return (
+    <div className={"usage " + (open ? 'open' : '')}>
+      <div className="usage-trigger">
+        <UsageRing used={used} total={total} />
+        <span className="usage-num mono">{fmtK(used)}<span className="sep">/</span>{fmtK(total)}</span>
+      </div>
+      <button className="usage-expand" onClick={() => setOpen(o => !o)} title={open ? '收起' : '展开用量详情'}>
+        <Icon name="chevron" size={12} />
+      </button>
+      <div className="usage-panel" onClick={e => e.stopPropagation()}>
+        <div className="usage-panel-head">
+          <div className="usage-panel-title">Token 用量</div>
+          <div className="usage-panel-sub mono">claude-3-5-sonnet · 200k context</div>
+        </div>
+        <div className="usage-ctx">
+          <UsageRing used={used} total={total} size={52} stroke={6} />
+          <div className="usage-ctx-info">
+            <div className="usage-ctx-num mono">{used.toLocaleString()} <span className="muted">/ {total.toLocaleString()}</span></div>
+            <div className="usage-ctx-pct" style={{ color }}>{Math.round(pct*100)}% 已占用 · 剩余 {free.toLocaleString()}</div>
+          </div>
+        </div>
+        <div className="ctx-stack" title="上下文构成">
+          <div className="ctx-seg" style={{ width: (parts.system/total*100) + '%', background: 'var(--accent)' }} />
+          <div className="ctx-seg" style={{ width: (parts.messages/total*100) + '%', background: 'var(--sage)' }} />
+          <div className="ctx-seg" style={{ width: (parts.tools/total*100) + '%', background: 'var(--gold)' }} />
+          <div className="ctx-seg" style={{ width: (parts.reserve/total*100) + '%', background: '#475569' }} />
+        </div>
+        <div className="ctx-legend">
+          <div className="ctx-leg"><span className="ctx-dot" style={{ background: 'var(--accent)' }} /><span className="ctx-leg-label">系统</span><span className="mono">{parts.system.toLocaleString()}</span></div>
+          <div className="ctx-leg"><span className="ctx-dot" style={{ background: 'var(--sage)' }} /><span className="ctx-leg-label">消息</span><span className="mono">{parts.messages.toLocaleString()}</span></div>
+          <div className="ctx-leg"><span className="ctx-dot" style={{ background: 'var(--gold)' }} /><span className="ctx-leg-label">工具</span><span className="mono">{parts.tools.toLocaleString()}</span></div>
+          <div className="ctx-leg"><span className="ctx-dot" style={{ background: '#475569' }} /><span className="ctx-leg-label">输出预留</span><span className="mono">{parts.reserve.toLocaleString()}</span></div>
+        </div>
+        <div className="usage-section-label">累积消耗 (cumulative)</div>
+        <div className="cum-table">
+          <div className="cum-th cum-col-label">来源</div>
+          <div className="cum-th">输入</div>
+          <div className="cum-th">缓存</div>
+          <div className="cum-th">输出</div>
+          <div className="cum-th">合计</div>
+          {rows.map(c => {
+            const ct = c.input + c.output;
+            const cz = (c.cache || 0) > 0;
+            return (
+              <React.Fragment key={c.label}>
+                <div className="cum-td label">{c.label}</div>
+                <div className="cum-td">{c.input.toLocaleString()}</div>
+                <div className={"cum-td " + (cz ? 'cache' : 'zero')}>{Math.round((c.cache||0)*100)}%</div>
+                <div className="cum-td">{c.output.toLocaleString()}</div>
+                <div className="cum-td">{ct.toLocaleString()}</div>
+              </React.Fragment>
+            );
+          })}
+          <div className="cum-td label total-row">合计</div>
+          <div className="cum-td total-row">{sumIn.toLocaleString()}</div>
+          <div className={"cum-td total-row " + (sumCache > 0 ? 'cache' : 'zero')}>{Math.round(sumCache*100)}%</div>
+          <div className="cum-td total-row">{sumOut.toLocaleString()}</div>
+          <div className="cum-td total-row">{(sumIn + sumOut).toLocaleString()}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const WORKSPACES = [
+  { path: '~/projects/easy-opc', files: [
+    { id: 'src', name: 'src', type: 'dir', children: [
+      { id: 'src/auth', name: 'auth', type: 'dir', children: [
+        { id: 'src/auth/login.ts', name: 'login.ts', type: 'file' },
+        { id: 'src/auth/session.ts', name: 'session.ts', type: 'file' },
+      ]},
+      { id: 'src/main.ts', name: 'main.ts', type: 'file' },
+      { id: 'src/config.ts', name: 'config.ts', type: 'file' },
+    ]},
+    { id: 'package.json', name: 'package.json', type: 'file' },
+    { id: 'README.md', name: 'README.md', type: 'file' },
+    { id: 'tsconfig.json', name: 'tsconfig.json', type: 'file' },
+  ]},
+  { path: '~/design/rocky', files: [
+    { id: 'rocky/easy-opc-config-v10.html', name: 'easy-opc-config-v10.html', type: 'file' },
+    { id: 'rocky/notes.md', name: 'notes.md', type: 'file' },
+    { id: 'rocky/assets', name: 'assets', type: 'dir', children: [
+      { id: 'rocky/assets/icon.png', name: 'icon.png', type: 'file' },
+    ]},
+  ]},
+];
+
+function WorkspacePanel() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [width, setWidth] = useState(272);
+  const [wsIdx, setWsIdx] = useState(0);
+  const [showSwitch, setShowSwitch] = useState(false);
+  const [expanded, setExpanded] = useState({ 'src': true, 'src/auth': true });
+  const drag = useRef(false);
+
+  useEffect(() => {
+    const move = (e) => {
+      if (!drag.current) return;
+      const w = window.innerWidth - e.clientX;
+      setWidth(Math.max(232, Math.min(560, w)));
+    };
+    const up = () => { if (drag.current) { drag.current = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; } };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+  }, []);
+
+  const startDrag = (e) => { e.preventDefault(); drag.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; };
+
+  if (collapsed) {
+    return (
+      <div className="ws-rail">
+        <button className="ws-rail-btn" onClick={() => setCollapsed(false)} title="展开工作区"><Icon name="chevronLeft" size={16} /></button>
+      </div>
+    );
+  }
+
+  const ws = WORKSPACES[wsIdx];
+  return (
+    <div className="ws-panel" style={{ width }}>
+      <div className="ws-resize" onMouseDown={startDrag} title="拖动调节宽度" />
+      <div className="ws-header">
+        <div className="ws-tabs">
+          <div className="ws-tab active"><Icon name="folder" size={12} /> 工作区</div>
+        </div>
+        <div className="ws-actions">
+          <button className="ws-icon-btn" onClick={() => setShowSwitch(s => !s)} title="切换工作区目录"><Icon name="swap" size={14} /></button>
+          <button className="ws-icon-btn" onClick={() => setCollapsed(true)} title="收起面板"><Icon name="chevronRight" size={15} /></button>
+        </div>
+      </div>
+      {showSwitch && (
+        <div className="ws-switch">
+          {WORKSPACES.map((w, i) => (
+            <div key={i} className={"ws-switch-item " + (i === wsIdx ? 'active' : '')} onClick={() => { setWsIdx(i); setShowSwitch(false); }}>
+              <Icon name="folder" size={12} /><span className="mono">{w.path}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="ws-path mono" title={ws.path}>{ws.path}</div>
+      <div className="ws-tree">
+        <WsTree items={ws.files} depth={0} expanded={expanded} setExpanded={setExpanded} />
+      </div>
+    </div>
+  );
+}
+
+function WsTree({ items, depth, expanded, setExpanded }) {
+  return items.map(it => {
+    const open = !!expanded[it.id];
+    return (
+      <div key={it.id}>
+        <div className="ws-item" style={{ paddingLeft: 6 + depth * 14 }}>
+          {it.type === 'dir' ? (
+            <React.Fragment>
+              <span className={"ws-twisty " + (open ? 'open' : '')} onClick={() => setExpanded(p => ({ ...p, [it.id]: !p[it.id] }))} title={open ? '收起' : '展开'}>
+                <Icon name="chevronRight" size={10} />
+              </span>
+              <span className="ws-ico dir"><Icon name={open ? 'folderOpen' : 'folder'} size={13} /></span>
+              <span className="ws-name">{it.name}</span>
+              <button className="ws-act" title="打开文件夹"><Icon name="external" size={11} /></button>
+            </React.Fragment>
+          ) : (
+            <React.Fragment>
+              <span className="ws-twisty placeholder" />
+              <span className="ws-ico file"><Icon name="file" size={13} /></span>
+              <span className="ws-name">{it.name}</span>
+              <button className="ws-act" title="打开文件"><Icon name="external" size={11} /></button>
+            </React.Fragment>
+          )}
+        </div>
+        {it.type === 'dir' && open && it.children && (
+          <WsTree items={it.children} depth={depth + 1} expanded={expanded} setExpanded={setExpanded} />
+        )}
+      </div>
+    );
+  });
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

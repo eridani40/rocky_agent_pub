@@ -1,0 +1,55 @@
+{
+  "name": "rocky-agent",
+  "private": true,
+  "version": "0.0.259",
+  "description": "Local-first desktop multi-agent orchestrator — run squads of LLM agents with tool use, computer control, skills and memory in one Electron app.",
+  "license": "MIT",
+  "author": "eridani40 <ayhon@qq.com>",
+  "keywords": [
+    "agent",
+    "multi-agent",
+    "llm",
+    "orchestrator",
+    "electron",
+    "desktop",
+    "ai",
+    "claude",
+    "automation",
+    "computer-use",
+    "squad"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eridani40/rocky_agent_pub.git"
+  },
+  "homepage": "https://github.com/eridani40/rocky_agent_pub",
+  "bugs": {
+    "url": "https://github.com/eridani40/rocky_agent_pub/issues"
+  },
+  "workspaces": [
+    "app/electron",
+    "app/web",
+    "app/server",
+    "app/protocols",
+    "app/shared",
+    "app/computer-native"
+  ],
+  "scripts": {
+    "test": "bun --bun x vitest run",
+    "typecheck": "tsc -b",
+    "gen-version": "bun run scripts/gen-version.ts",
+    "build:worker": "bun build app/server/src/tools/browser/worker-entry.ts --target=node --format=cjs --external=playwright --outfile=app/server/src/tools/browser/browser-worker.cjs",
+    "build:plugins": "bun run scripts/build-plugins.ts",
+    "prebuild": "bun run build:worker",
+    "postinstall": "playwright install chromium || echo '[rocky] skip: playwright install chromium failed (browser headless/profile 模式将不可用；可手动 bunx playwright install chromium)'"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.70.0",
+    "playwright": "^1.61.1"
+  }
+}

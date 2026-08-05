@@ -1,0 +1,39 @@
+# v0.0.210 academy-head_teacher:parent:main profile
+# 参考: specs/tech/academy/[P0]session_kind_extension.md §3.1（head 工具集 — 教室资产管理 + 训练发起）
+# 等价 TOOL_POLICY['academy-head_teacher'].bound（20 标准 + 3 academy）。
+# head 可与用户直接对话（userReachable 语义由 handler 层消费；profile 层不约束）。
+id: academy-head_teacher:parent:main
+extends: default
+autoNaming: false                  # head 有固定名（教室名 + "班主任"）
+toolBound:
+  # 文件基础
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+  - bash
+  # self-evolution
+  - skill
+  - skill_manage
+  - memory
+  - memory_manage
+  # 网络学习
+  - web_search
+  - web_fetch
+  - browser
+  - see_image
+  # multi-agent（可派生 explorer subagent 做调研）
+  - agent
+  - send_message
+  # 任务调度
+  - cron
+  - ask-question
+  - todo                   # session 级双层待办（v0.0.223）
+  # 历史召回
+  - history_search
+  - history_get_context
+  # ── academy 专属 ──
+  - manage-classroom        # 教室层全权（20 action：教室资产 + 学生 CRUD + 任务监督 start/list/get/update）
+                            # head 不再绑 manage-task（coach 专属）；task 内部动作 → send_message 给 coach
+skillSource: global-enabled

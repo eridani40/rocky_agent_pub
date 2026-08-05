@@ -1,0 +1,30 @@
+/**
+ * member-card —— 关键实现示意（生产实现见 app/web/src/components/studio-page/component-member-card.tsx）
+ * 成员卡片：avatar(identity 色) + 名称(leader 标签) + state badge + 操作（leader 无 bench）。
+ */
+// 示意用最小类型（生产类型见 app/web/src/components/studio-page/squad-types.ts）
+type Member = { id: string; name: string; role: 'leader' | 'mate'; state: 'deployed' | 'benched' };
+
+export function MemberCard({ member, onBench, onDeploy, onEdit }: {
+  member: Member; onBench: (m: Member) => void; onDeploy: (id: string) => void; onEdit: (m: Member) => void;
+}) {
+  const isLeader = member.role === 'leader';
+  const deployed = member.state === 'deployed';
+  return (
+    <div data-testid={`member-row-${member.id}`} className={'rounded-lg border bg-surface-2 p-3.5 ' + (isLeader ? 'border-accent' : 'border-border')}>
+      <div className="flex items-center gap-2.5">
+        <div className="flex h-[34px] w-[34px] items-center justify-center rounded-md text-white" style={{ background: isLeader ? 'var(--color-accent)' : 'var(--color-gold)' }}>
+          {member.name.charAt(0).toUpperCase()}
+        </div>
+        <div className="text-[13.5px] font-semibold text-fg">{member.name}{isLeader && <span className="ml-1 text-[10px] text-accent">leader</span>}</div>
+      </div>
+      <div className="mt-3 flex gap-1.5">
+        {/* leader 无 bench（硬规则） */}
+        {!isLeader && (deployed
+          ? <button data-testid={`member-row-${member.id}-bench`} onClick={() => onBench(member)}>bench</button>
+          : <button data-testid={`member-row-${member.id}-deploy`} onClick={() => onDeploy(member.id)}>deploy</button>)}
+        <button data-testid={`member-row-${member.id}-edit`} onClick={() => onEdit(member)}>edit</button>
+      </div>
+    </div>
+  );
+}

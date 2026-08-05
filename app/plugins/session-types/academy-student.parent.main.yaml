@@ -1,0 +1,23 @@
+# v0.0.210 academy-student:parent:main profile
+# 参考: specs/tech/academy/[P0]session_kind_extension.md §3.3（student 工具集 — 学习工具子集）
+# 等价 TOOL_POLICY['academy-student'].bound（9 学习工具）。
+# 用户裁决 v0.0.215：默认给基础文件读写工具（write/edit 同其他 agent），除非特意收窄；
+# 学生仍不自改 skill/memory（无 *_manage）、不与外部沟通（无 agent/send_message）、不操纵训练（无 train-student）。
+# version.json.tools 可作 instanceOverride 进一步收窄（详见 session_kind_extension §6）。
+id: academy-student:parent:main
+extends: default
+autoNaming: false                  # 学生 session 名 = 学生名 + 版本号
+toolBound:
+  - read
+  - write                 # 基础文件写（用户裁决 v0.0.215：默认给，除非特意收窄）
+  - edit                  # 基础文件改（同上）
+  - glob
+  - grep
+  - bash
+  - skill
+  - memory
+  - web_search
+  - web_fetch
+  - see_image
+  - todo                   # session 级双层待办（v0.0.223）
+skillSource: global-enabled

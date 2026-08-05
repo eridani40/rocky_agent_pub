@@ -1,0 +1,17 @@
+{
+  "//": "web：浏览器目标，lib DOM，jsx react-jsx，types vite/client。不依赖 electron（package_structure §3.2）。[v0.0.59 i18n] include 显式列 *.json：composite project 模式下 JSON imports 需显式列出（TS6307 workaround）",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],
+  "exclude": ["src/**/soft_deleted/**"],
+  "references": [{ "path": "../protocols" }, { "path": "../shared" }]
+}

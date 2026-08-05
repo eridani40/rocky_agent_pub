@@ -1,0 +1,139 @@
+# agent-profile-inject — squad session system prompt 含「定义你的 agent」section + 两级 AGENTS.md 注入
+#
+# 覆盖契约：
+#   - specs/prd/overall/13-agent-definition.md §13.2.1（agent_profile section：a/b/c 三条 + 状态标注）
+#     + v0.0.238 specs/prd/overall/14-prompt-quality-governance.md §14.2.1（新增 d) 自律治理段：
+#       4 条质量标准 + 按 biz 渲染的 scope 可用表 + scope 必填规则）
+#     + §13.2.2（团队+个人两级 AGENTS.md 注入、叠加语义）+ §13.2.4（来源标注 + 未配置兜底）
+#     + §13.5 验收标准 1/2/5/8（经 GET /session/:id/debug/system-prompt 验证）
+#   - specs/tech/agent/context/[P1]agent_profile.md §3（section 骨架文案）+ §4（squad kind a/b/c 路径表）
+#   - specs/tech/agent/context/[P0]prompt_content_files.md §7.7（ContextFilesHandler 两级读取，
+#     各自独立截断 + 各自带来源标注，团队在前个人在后）
+#   - specs/tech/version_logs/v0.0.232/change_plan.md D 行（skills L0 行格式加 [scope={scope}]）
+#   - specs/api/overall/06-skill.md §11（GET /session/:id/debug/system-prompt 测试调试端点，
+#     200 {sessionId, systemPrompt}，仅 test 环境开放）
+#   - specs/api/overall/11a-squad-endpoints.md §1.1（POST /squad）+ §2.1（POST /squad/:id/member）
+#
+# 断言面（PRD §13.3 关键路径 1/2/3/4 的端到端集成点）：
+#   【section 结构】leader + mate 的 prompt 均含 # 定义你的 agent + a)/b)/c)/d) 四个子标题（v0.0.238
+#          起加 d) 自律治理段，PRD §14.2.1）+ b) 条 memory_manage 工具说明（agent_profile §3
+#          骨架文案逐字断言）
+#   【a) 条状态标注】leader：团队行 已配置 + 个人行 未配置·可选（未配置兜底，PRD 路径 4 / UC-4）
+#          + 未配置引导路径 .rocky/agents/apx-leader-（agent_profile §6 决策 4）
+#          mate：团队+个人均 已配置 → prompt 不含 未配置·可选（!~=）
+#   【正文两级注入】mate prompt 含团队 marker + 个人 marker（UC-5/6）；leader prompt 含团队 marker、
+#          不含 mate 个人 marker（个人文件按需注入、不串人 — 隔离性）
+#   【skills 标注】两人 prompt 的 skills L0 含 [scope=builtin]（change_plan D 行 / UC-11）
+#
+# DSL 表达不了、由 UT 兜底的断言（change_plan H：agent_profile.test.ts + prompt-mappers-reducers.test.ts）：
+#   - 「团队在前、个人在后」叠加顺序（check 无子串位置谓词；stream.order 仅 SSE 帧）
+#   - 来源标注精确文案与「标注↔正文」邻近关系（标注样式「来自…」与 c) 条模板文本
+#     「你的 skills 来自 N 个位置」子串冲突，AT 层面无法区分性断言）
+#
+# 不调 LLM：纯 HTTP 事务（建 squad + hire + debug system-prompt 直查）+ files 原语，全确定性，
+#           无 429/flaky 风险。prompt 组装是确定性文本渲染，debug 端点（PRD §13.5 验收指定路径）
+#           按需 build 读盘，无需真 run session；modelDefault=MiniMax-M3 仅过建队写入校验。
+#
+# 前置依赖：v0.0.232 T1（squad ws 指向 squads/{sid}）+ T2（agent_profile mapper + 两级读取 +
+#           skills [scope=] 标注）落地；未落地时本 case 内容断言 fail = 正确暴露缺失。
+case: agent-profile-inject
+module: squad
+timeout: 60
+
+setup:
+  - name: 建 squad（事务：record + leader member/session + squadChat session + 办公室目录骨架）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "agent-profile-inject-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "apx-leader"
+    save:
+      squad_id: .id
+      leader_sid: .members[0].sessionId
+    check:
+      - .id exists
+      - .leaderId exists
+      - .squadChatSessionId exists
+      - .members[0].role == "leader"
+      - .members[0].sessionId exists
+
+  - name: hire mate（建 mate session；响应直连 {member, sessionId}）
+    requests:
+      - method: POST
+        path: /squad/{squad_id}/member
+        body:
+          mode: "fresh"
+          name: "apx-mate"
+          intro: "agent-profile-inject 验证用 mate"
+    save:
+      mate_sid: .sessionId
+      mate_mid: .member.id
+    check:
+      - .sessionId exists
+      - .member.id exists
+
+  - name: 植团队 AGENTS.md + mate 个人差异文件（DATA_DIR 相对路径，base64 文本）
+    files:
+      - path: "squads/{squad_id}/AGENTS.md"
+        content: "IyDlm6LpmJ8gQUdFTlRTLm1kIOKAlCBhZ2VudC1wcm9maWxlLWluamVjdCBBVCBmaXh0dXJlCgpURUFNX0FHRU5UU19NRF9NQVJLRVJfVjBfMF8yMzIKCuWFqOmYn+WFseS6q+eahOinkuiJsuS4juinhOWIme+8iOa1i+ivleazqOWFpeeUqO+8ieOAggo="
+        encoding: base64
+      - path: "squads/{squad_id}/.rocky/agents/apx-mate-{mate_mid}.md"
+        content: "IyBhcHgtbWF0ZSDkuKrkurrlt67lvILlrprkuYkg4oCUIGFnZW50LXByb2ZpbGUtaW5qZWN0IEFUIGZpeHR1cmUKCk1BVEVfREVMVEFfRklMRV9NQVJLRVJfVjBfMF8yMzIKCuS4quS6uuW3ruW8guWMluWumuS5ie+8jOWPoOWKoOWcqOWboumYn+WumuS5ieS5i+S4iu+8iOa1i+ivleazqOWFpeeUqO+8ieOAggo="
+        encoding: base64
+
+steps:
+  - name: 取 leader system prompt（debug 端点按需组装，直查注入结果）
+    requests:
+      - GET /session/{leader_sid}/debug/system-prompt
+    check:
+      - .sessionId exists
+      - .systemPrompt exists
+      # section 结构（agent_profile §3 骨架）
+      - .systemPrompt ~= "# 定义你的 agent"
+      - .systemPrompt ~= "## a) System Prompt（AGENTS.md）"
+      - .systemPrompt ~= "## b) Memories（长期记忆）"
+      - .systemPrompt ~= "## c) Skills（技能）"
+      - .systemPrompt ~= "## d) 自律治理"
+      - .systemPrompt ~= "memory_manage"
+      # a) 条状态标注：团队行 已配置；个人行 未配置·可选（兜底，PRD 路径 4）+ 引导路径
+      - .systemPrompt ~= "已配置"
+      - .systemPrompt ~= "未配置·可选"
+      - .systemPrompt ~= ".rocky/agents/apx-leader-"
+      # 团队 AGENTS.md 正文注入（UC-5）；mate 个人正文不串入 leader（隔离性）
+      - .systemPrompt ~= "TEAM_AGENTS_MD_MARKER_V0_0_232"
+      - .systemPrompt !~= "MATE_DELTA_FILE_MARKER_V0_0_232"
+      # skills L0 来源层标注（change_plan D 行）
+      - .systemPrompt ~= "[scope=builtin]"
+
+  - name: 取 mate system prompt（团队+个人两级叠加，UC-6）
+    requests:
+      - GET /session/{mate_sid}/debug/system-prompt
+    check:
+      - .sessionId exists
+      - .systemPrompt exists
+      # section 结构
+      - .systemPrompt ~= "# 定义你的 agent"
+      - .systemPrompt ~= "## a) System Prompt（AGENTS.md）"
+      - .systemPrompt ~= "## b) Memories（长期记忆）"
+      - .systemPrompt ~= "## c) Skills（技能）"
+      - .systemPrompt ~= "## d) 自律治理"
+      # a) 条：团队+个人均 已配置 → 无 未配置·可选
+      - .systemPrompt ~= "已配置"
+      - .systemPrompt !~= "未配置·可选"
+      # 团队 + 个人两份正文均注入（叠加语义；顺序由 UT 覆盖）
+      - .systemPrompt ~= "TEAM_AGENTS_MD_MARKER_V0_0_232"
+      - .systemPrompt ~= "MATE_DELTA_FILE_MARKER_V0_0_232"
+      # 个人文件路径浮现（a) 条路径行 + 正文来源标注均含此静态前缀）
+      - .systemPrompt ~= ".rocky/agents/apx-mate-"
+      # skills L0 来源层标注
+      - .systemPrompt ~= "[scope=builtin]"
+
+teardown:
+  - name: 删 squad（级联删 leader/mate/squadChat session；植入文件由 files 原语自动清理）
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+        status: [200, 404]

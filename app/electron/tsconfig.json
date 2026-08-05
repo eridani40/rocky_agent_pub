@@ -1,0 +1,19 @@
+{
+  "//": "electron：主进程壳，输出 CommonJS（Electron 主进程 Node loader 传统，避免 ESM 相对 import 必须带扩展）；lib ES2022，types electron。唯一直接依赖 electron 的包（package_structure §3.2）",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["electron", "node"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../protocols" },
+    { "path": "../server" }
+  ]
+}

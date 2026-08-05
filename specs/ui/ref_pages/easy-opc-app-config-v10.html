@@ -1,0 +1,582 @@
+
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EASY OPC — 用户设置 v10</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── design tokens (shared across all 5 pages) ── */
+:root {
+  --accent: #D97757; --accent-hover: #C25E3F; --accent-light: #F4E5DE; --accent-surface: #FBF1ED;
+  --sage: #5B7A6B; --sage-light: #E3F0E8; --gold: #B89160; --gold-light: #F5E8D5; --indigo: #3730A3;
+  --bg: #FAF6F0; --bg-warm: #F0EEE6; --surface: #FAF9F6; --surface-2: #FFFDF8;
+  --fg: #1A1A1A; --fg-2: #3D3929; --fg-3: #5C5A52; --muted: #87867F; --muted-2: #6B6A63;
+  --border: #E3E1DA; --border-2: #D9D6CE; --border-strong: #C7C4BB;
+  --danger: #DC2626; --danger-light: #FEE2E2;
+}
+[data-theme="dark"] {
+  --accent: #E0916F; --accent-hover: #D97757; --accent-light: #3D2E26; --accent-surface: #2A1F1A;
+  --sage: #7A9B8C; --sage-light: #1E2D27; --gold: #D4AB78; --gold-light: #2E2519; --indigo: #818CF8;
+  --bg: #1A1816; --bg-warm: #232120; --surface: #1E1C1A; --surface-2: #252321;
+  --fg: #F0EDE8; --fg-2: #D8D4CE; --fg-3: #B5B0A8; --muted: #807C75; --muted-2: #9A9590;
+  --border: #353231; --border-2: #423E3C; --border-strong: #555150;
+  --danger: #EF4444; --danger-light: #3D2222;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--fg); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.5; height: 100vh; overflow: hidden; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.app-root { display: flex; height: 100vh; }
+
+/* ── icon-nav shell (shared) ── */
+.icon-nav { width: 56px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 14px 0; }
+.brand { width: 34px; height: 34px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-family: 'Playfair Display', serif; font-weight: 700; font-size: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(217,119,87,0.3); text-decoration: none; }
+.nav-spacer { flex: 1; }
+.nav-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; position: relative; color: var(--muted); margin-bottom: 4px; }
+.nav-icon:hover { background: var(--accent-surface); color: var(--accent); }
+.nav-icon.active { background: var(--accent-surface); color: var(--accent); }
+.nav-icon.active::before { content: ''; position: absolute; left: -8px; top: 50%; transform: translateY(-50%); width: 3px; height: 20px; background: var(--accent); border-radius: 0 3px 3px 0; }
+.nav-tooltip { position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); background: var(--fg); color: var(--surface); font-size: 11px; padding: 4px 10px; border-radius: 6px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 100; font-family: 'JetBrains Mono', monospace; }
+.nav-icon:hover .nav-tooltip { opacity: 1; }
+.theme-toggle { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; color: var(--muted); }
+.theme-toggle:hover { background: var(--bg-warm); color: var(--fg); }
+
+/* ── settings three-column ── */
+.group-panel { width: 200px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.group-header { padding: 16px 16px 12px; flex-shrink: 0; }
+.group-header-title { font-size: 11px; font-weight: 600; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'JetBrains Mono', monospace; margin-bottom: 2px; }
+.group-header-sub { font-size: 12px; color: var(--muted); }
+.group-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.group-item { padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted-2); display: flex; align-items: center; gap: 8px; margin-bottom: 2px; transition: all 0.15s; position: relative; }
+.group-item:hover { background: var(--bg-warm); color: var(--fg); }
+.group-item.active { background: var(--accent-surface); color: var(--accent); }
+.group-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 20px; background: var(--accent); border-radius: 0 3px 3px 0; }
+.group-item .dirty-dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: none; }
+.group-item.dirty .dirty-dot { display: block; }
+.group-count { margin-left: auto; font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; background: var(--bg-warm); padding: 1px 6px; border-radius: 4px; }
+.group-item.active .group-count { background: var(--accent-light); color: var(--accent); }
+
+.config-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.config-header { padding: 24px 32px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.config-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); }
+.config-desc { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 3px; }
+.config-body { padding: 24px 32px; flex: 1; }
+
+.key-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 8px; transition: all 0.15s; }
+.key-card:hover { border-color: var(--border-strong); }
+.key-card.dirty { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.key-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.key-label { font-size: 13px; font-weight: 600; color: var(--fg); }
+.key-id { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+.key-desc { font-size: 12px; color: var(--muted-2); line-height: 1.5; }
+.key-control { flex-shrink: 0; min-width: 280px; }
+
+.save-bar { display: flex; align-items: center; gap: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.dirty-indicator { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--accent); display: flex; align-items: center; gap: 5px; }
+.dirty-indicator::before { content: '●'; font-size: 10px; }
+.dirty-indicator.clean { color: var(--muted); }
+.dirty-indicator.clean::before { content: '✓'; color: var(--sage); }
+
+.f-input { padding: 8px 12px; border: 1px solid var(--border-2); border-radius: 8px; font-size: 13px; color: var(--fg); background: var(--surface-2); outline: none; transition: all 0.15s; width: 100%; font-family: 'JetBrains Mono', monospace; }
+.f-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.f-input::placeholder { color: var(--muted); }
+.f-label { display: block; font-size: 12px; font-weight: 600; color: var(--fg-2); margin-bottom: 6px; }
+.f-label .f-label-hint { font-weight: 400; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-left: 8px; font-size: 11px; }
+.f-row { margin-bottom: 20px; }
+.f-row-inline { display: flex; gap: 12px; }
+.f-row-inline > .f-row { flex: 1; }
+
+.toggle { width: 36px; height: 20px; background: var(--border-strong); border-radius: 100px; position: relative; cursor: pointer; transition: background 0.2s; flex-shrink: 0; display: inline-block; }
+.toggle.on { background: var(--accent); }
+.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+.toggle.on::after { transform: translateX(16px); }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; border: none; outline: none; font-family: 'Inter', sans-serif; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-secondary { background: var(--surface-2); border: 1px solid var(--border-2); color: var(--fg-3); }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; }
+.badge-enabled { background: var(--sage-light); color: var(--sage); }
+.badge-disabled { background: var(--bg-warm); color: var(--muted); }
+.badge-default { background: var(--accent-light); color: var(--accent); }
+
+.provider-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 8px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: all 0.15s; position: relative; }
+.provider-card:hover { border-color: var(--border-strong); box-shadow: 0 2px 12px rgba(60,50,30,0.05); }
+.provider-logo { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; flex-shrink: 0; font-family: 'Playfair Display', serif; color: white; }
+.provider-info { flex: 1; min-width: 0; }
+.provider-name { font-size: 14px; font-weight: 600; color: var(--fg); margin-bottom: 3px; display: flex; align-items: center; gap: 8px; }
+.provider-desc { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+.provider-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+.add-card { border: 1px dashed var(--border-strong); border-radius: 10px; padding: 16px 20px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: all 0.15s; }
+.add-card:hover { border-color: var(--accent); background: var(--accent-surface); }
+.add-card-icon { width: 40px; height: 40px; border-radius: 10px; border: 1px dashed var(--border-strong); display: flex; align-items: center; justify-content: center; color: var(--muted); flex-shrink: 0; transition: all 0.15s; }
+.add-card:hover .add-card-icon { border-color: var(--accent); color: var(--accent); background: var(--surface-2); }
+
+.breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.breadcrumb-item { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--muted-2); cursor: pointer; transition: color 0.15s; }
+.breadcrumb-item:hover { color: var(--accent); }
+.breadcrumb-item.current { color: var(--accent); font-weight: 600; }
+.breadcrumb-sep { color: var(--border-strong); font-size: 12px; }
+
+.section-title { font-size: 14px; font-weight: 700; color: var(--fg); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.section-desc { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-bottom: 14px; }
+.section-divider { height: 1px; background: var(--border); border: none; margin: 28px 0; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+.fade-in { animation: fadeIn 0.2s ease-out; }
+@keyframes fadeIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+</style>
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('eopc-theme')||'light');</script>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+const NAV_LINKS = [
+  { id:'chat', label:'会话', icon:'chat', href:'mqnbr367-easy-opc-chat-v9a.html' },
+  { id:'app', label:'用户设置', icon:'user', href:'easy-opc-app-config-v10.html' },
+  { id:'plugin', label:'插件设置', icon:'plugin', href:'easy-opc-plugin-config-v10.html' },
+  { id:'dev', label:'系统设置', icon:'dev', href:'easy-opc-dev-config-v10.html' },
+  { id:'skill', label:'Skill', icon:'skill', href:'easy-opc-skill-v10.html' },
+];
+
+function Icon({ name, size = 18 }) {
+  const icons = {
+    chat:<g><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></g>,
+    user:<g><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0116 0v1"/></g>,
+    plugin:<g><path d="M14 2v6h6"/><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></g>,
+    dev:<g><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12l8.73-5.04"/><path d="M12 22V12"/></g>,
+    sun:<g><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></g>,
+    moon:<g><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></g>,
+    chevronRight:<g><path d="M9 18l6-6-6-6"/></g>,
+    plus:<g><path d="M12 5v14M5 12h14"/></g>,
+    check:<g><path d="M20 6L9 17l-5-5"/></g>,
+    close:<g><path d="M18 6L6 18M6 6l12 12"/></g>,
+    zap:<g><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></g>,
+    box:<g><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12l8.73-5.04"/><path d="M12 22V12"/></g>,
+    layers:<g><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g>,
+    skill:<g><path d="M12 2L14 10 22 12 14 14 12 22 10 14 2 12 10 10Z"/></g>,
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{icons[name]}</svg>;
+}
+
+function AppShell({ current, children }) {
+  const [theme, setTheme] = React.useState(() => localStorage.getItem('eopc-theme') || 'light');
+  React.useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
+  const toggleTheme = () => setTheme(t => { const n = t === 'light' ? 'dark' : 'light'; localStorage.setItem('eopc-theme', n); return n; });
+  return (
+    <div className="app-root">
+      <nav className="icon-nav">
+        <a className="brand" href="easy-opc-framework-v10.html" title="EASY OPC · 首页">E</a>
+        {NAV_LINKS.map(item => (
+          <div key={item.id} className={"nav-icon " + (current === item.id ? 'active' : '')} onClick={() => { location.href = item.href; }}>
+            <Icon name={item.icon} size={20} />
+            <span className="nav-tooltip">{item.label}</span>
+          </div>
+        ))}
+        <div className="nav-spacer" />
+        <div className="theme-toggle" onClick={toggleTheme} title="切换主题">
+          <Icon name={theme === 'light' ? 'moon' : 'sun'} size={18} />
+        </div>
+      </nav>
+      {children}
+    </div>
+  );
+}
+
+const appConfigGroups = [
+  { id: 'llm_request', label: 'LLM 请求', desc: 'llm_request · 4 keys', keys: [
+    { key: 'stall_timeout_s', label: '卡顿超时', type: 'number', value: 30, desc: '请求无进展超过此秒数后判定为卡顿，触发重试或中断。' },
+    { key: 'max_retry_times', label: '最大重试次数', type: 'number', value: 3, desc: '单次请求失败后的自动重试上限。' },
+    { key: 'default_model', label: '默认模型', type: 'select', value: 'claude-3-5-sonnet', desc: '新建会话时默认使用的模型。', options: ['claude-3-5-sonnet','claude-3-opus','claude-3-haiku'] },
+    { key: 'stream_response', label: '流式响应', type: 'boolean', value: true, desc: '开启后 Rocky 回复以流式打字呈现。' },
+  ]},
+  { id: 'ui_appearance', label: '界面外观', desc: 'ui_appearance · 3 keys', keys: [
+    { key: 'font_size', label: '字体大小', type: 'select', value: '14', desc: '全局基础字号。', options: ['12','13','14','15','16'] },
+    { key: 'compact_mode', label: '紧凑模式', type: 'boolean', value: false, desc: '减小间距与内边距。' },
+    { key: 'enable_animations', label: '启用动画', type: 'boolean', value: true, desc: '关闭后界面切换均为即时。' },
+  ]},
+];
+
+const modelProviders = [
+  { id: 'pv1', name: 'Anthropic', type: 'anthropic', color: '#D97757', baseUrl: 'https://api.anthropic.com', apiKey: 'sk-ant-api03-••••', apiVersion: '2023-06-01', status: 'connected', desc: '官方 API · 48ms', models: [
+    { id: 'm1', implId: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet', contextLength: 200000, maxOutputTokens: 8192, temperature: 0.7, isDefault: true, enabled: true },
+    { id: 'm2', implId: 'claude-3-opus', label: 'Claude 3 Opus', contextLength: 200000, maxOutputTokens: 4096, temperature: 0.7, isDefault: false, enabled: true },
+  ]},
+  { id: 'pv2', name: 'OpenAI', type: 'openai', color: '#5B7A6B', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-proj-••••', apiVersion: '', status: 'connected', desc: '官方 API · 120ms', models: [
+    { id: 'm3', implId: 'gpt-4o', label: 'GPT-4o', contextLength: 128000, maxOutputTokens: 16384, temperature: 0.7, isDefault: false, enabled: true },
+  ]},
+];
+
+function SettingsPage({ groups, customGroups = [], pageTitle, pageDesc }) {
+  const [activeGroupId, setActiveGroupId] = useState(groups[0].id);
+  const [values, setValues] = useState(() => {
+    const v = {};
+    groups.forEach(g => g.keys.forEach(k => { v[g.id + '__' + k.key] = k.value; }));
+    return v;
+  });
+  const [savedValues, setSavedValues] = useState({ ...values });
+  const vk = (gid, k) => gid + '__' + k;
+  const isDirty = (gid) => {
+    const g = groups.find(x => x.id === gid);
+    if(!g) return false;
+    return g.keys.some(k => values[vk(gid, k.key)] !== savedValues[vk(gid, k.key)]);
+  };
+  const setValue = (gid, key, val) => setValues(prev => { const n = {...prev}; n[vk(gid, key)] = val; return n; });
+  const saveGroup = (gid) => {
+    const g = groups.find(x => x.id === gid);
+    const snap = { ...savedValues };
+    g.keys.forEach(k => { snap[vk(gid, k.key)] = values[vk(gid, k.key)]; });
+    setSavedValues(snap);
+  };
+  const revertGroup = (gid) => {
+    const g = groups.find(x => x.id === gid);
+    const snap = { ...values };
+    g.keys.forEach(k => { snap[vk(gid, k.key)] = savedValues[vk(gid, k.key)]; });
+    setValues(snap);
+  };
+
+  const allGroups = [
+    ...groups.map(g => ({...g, isCustom: false})),
+    ...customGroups.map(g => ({...g, isCustom: true}))
+  ];
+  const activeGroup = allGroups.find(g => g.id === activeGroupId);
+  const ActiveCustomComponent = activeGroup?.component;
+
+  return (
+    <React.Fragment>
+      <aside className="group-panel">
+        <div className="group-header">
+          <div className="group-header-title">{pageTitle}</div>
+          <div className="group-header-sub">{pageDesc} · 用户偏好</div>
+        </div>
+        <div className="group-list">
+          {allGroups.map(g => (
+            <div key={g.id} className={"group-item " + (activeGroupId === g.id ? 'active' : '')} onClick={() => setActiveGroupId(g.id)}>
+              <span>{g.label}</span>
+              <span className="group-count">{g.keys ? g.keys.length : g.count}</span>
+              {g.keys && isDirty(g.id) && <span className="dirty-dot" />}
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <main className="config-area fade-in" key={activeGroupId}>
+        {activeGroup.isCustom && ActiveCustomComponent ? (
+          <ActiveCustomComponent />
+        ) : (
+          <React.Fragment>
+            <div className="config-header">
+              <div>
+                <div className="config-title">{activeGroup.label}</div>
+                <div className="config-desc">{activeGroup.desc}</div>
+              </div>
+            </div>
+            <div className="config-body">
+              {activeGroup.keys.map(k => {
+                const dirty = values[vk(activeGroup.id, k.key)] !== savedValues[vk(activeGroup.id, k.key)];
+                return (
+                  <div key={k.key} className={"key-card " + (dirty ? 'dirty' : '')}>
+                    <div className="key-card-top">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="key-label">{k.label}</div>
+                        <div className="key-id">{k.key}</div>
+                        <div className="key-desc" style={{ marginTop: 6 }}>{k.desc}</div>
+                      </div>
+                      <div className="key-control">
+                        <KeyControl type={k.type} value={values[vk(activeGroup.id, k.key)]} options={k.options} onChange={(v) => setValue(activeGroup.id, k.key, v)} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="save-bar">
+                <div className={"dirty-indicator " + (isDirty(activeGroup.id) ? '' : 'clean')}>
+                  {isDirty(activeGroup.id) ? '有未保存的更改' : '所有更改已保存'}
+                </div>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                  <button className="btn btn-secondary" disabled={!isDirty(activeGroup.id)} onClick={() => revertGroup(activeGroup.id)}>重置</button>
+                  <button className="btn btn-primary" disabled={!isDirty(activeGroup.id)} onClick={() => saveGroup(activeGroup.id)}>
+                    <Icon name="check" size={12} /> 保存 {activeGroup.label}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </React.Fragment>
+        )}
+      </main>
+    </React.Fragment>
+  );
+}
+
+function KeyControl({ type, value, options, onChange }) {
+  if (type === 'boolean') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+        <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{value ? 'ON' : 'OFF'}</span>
+        <div className={"toggle " + (value ? 'on' : '')} onClick={() => onChange(!value)} />
+      </div>
+    );
+  }
+  if (type === 'select') return <select className="f-input" style={{appearance:'none', padding:'8px 32px 8px 12px', cursor:'pointer'}} value={value} onChange={e => onChange(e.target.value)}>{options.map(o => <option key={o} value={o}>{o}</option>)}</select>;
+  if (type === 'number') return <input type="number" className="f-input" value={value} onChange={e => onChange(parseFloat(e.target.value) || 0)} />;
+  return <input type="text" className="f-input" value={value || ''} placeholder="—" onChange={e => onChange(e.target.value)} />;
+}
+
+// ── Model Config Group (provider → model drill-down) ──
+function ModelConfigGroup() {
+  const [providers, setProviders] = useState(modelProviders);
+  const [view, setView] = useState({ level: 'list' });
+
+  const updateProvider = (pid, patch) => setProviders(prev => prev.map(p => p.id === pid ? { ...p, ...patch } : p));
+  const updateModel = (pid, mid, patch) => setProviders(prev => prev.map(p => p.id === pid ? { ...p, models: p.models.map(m => m.id === mid ? { ...m, ...patch } : m) } : p));
+
+  if (view.level === 'list') {
+    return (
+      <React.Fragment>
+        <div className="config-header">
+          <div>
+            <div className="config-title">模型提供商</div>
+            <div className="config-desc">model_config · {providers.length} 个提供商</div>
+          </div>
+        </div>
+        <div className="config-body">
+          {providers.map(pv => (
+            <div key={pv.id} className="provider-card" onClick={() => setView({ level: 'provider', pid: pv.id })}>
+              <div className="provider-logo" style={{ background: pv.color }}>{pv.name.charAt(0)}</div>
+              <div className="provider-info">
+                <div className="provider-name">
+                  <span className="provider-status-dot" style={{ background: pv.status === 'connected' ? 'var(--sage)' : 'var(--danger)' }} />
+                  {pv.name}
+                  {pv.status === 'connected' ? <span className="badge badge-enabled">已连接</span> : <span className="badge badge-disabled">异常</span>}
+                </div>
+                <div className="provider-desc">{pv.baseUrl} · {pv.models.length} 个模型 · {pv.desc}</div>
+              </div>
+              <Icon name="chevronRight" size={16} />
+            </div>
+          ))}
+          <div className="add-card" style={{ marginTop: 12 }}>
+            <div className="add-card-icon"><Icon name="plus" size={16} /></div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>添加提供商</div>
+              <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Anthropic / OpenAI 兼容 / 自定义</div>
+            </div>
+          </div>
+        </div>
+      </React.Fragment>
+    );
+  }
+
+  if (view.level === 'provider') {
+    const pv = providers.find(p => p.id === view.pid);
+    return <ProviderDetail provider={pv} onBack={() => setView({ level: 'list' })} onOpenModel={(mid) => setView({ level: 'model', pid: pv.id, mid })} onUpdate={(patch) => updateProvider(pv.id, patch)} />;
+  }
+
+  if (view.level === 'model') {
+    const pv = providers.find(p => p.id === view.pid);
+    const md = pv.models.find(m => m.id === view.mid);
+    return <ModelDetail model={md} provider={pv} onBack={() => setView({ level: 'provider', pid: pv.id })} onUpdate={(patch) => updateModel(pv.id, md.id, patch)} />;
+  }
+  return null;
+}
+
+function ProviderDetail({ provider, onBack, onOpenModel, onUpdate }) {
+  const [draft, setDraft] = useState({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, apiVersion: provider.apiVersion });
+  const [saved, setSaved] = useState({ ...draft });
+  const isDirty = Object.keys(draft).some(k => draft[k] !== saved[k]);
+  const setVal = (k, v) => setDraft(prev => { const n = {...prev}; n[k] = v; return n; });
+  const save = () => { onUpdate({ ...draft }); setSaved({...draft}); };
+
+  return (
+    <React.Fragment>
+      <div className="config-header">
+        <div>
+          <div className="breadcrumb">
+            <span className="breadcrumb-item" onClick={onBack}>模型提供商</span>
+            <span className="breadcrumb-sep">/</span>
+            <span className="breadcrumb-item current">{provider.name}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <div className="provider-logo" style={{ background: provider.color, width: 36, height: 36, fontSize: 14 }}>{provider.name.charAt(0)}</div>
+            <div>
+              <div className="config-title">{provider.name}</div>
+              <div className="config-desc">{provider.type} 兼容 · {provider.baseUrl}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="config-body">
+        <div className="section-title"><Icon name="zap" size={14} /> 连接配置</div>
+        <div className="section-desc">// API 端点与认证信息</div>
+        <div className="f-row">
+          <label className="f-label">Base URL <span className="f-label-hint">base_url</span></label>
+          <input className="f-input" value={draft.baseUrl} onChange={e => setVal('baseUrl', e.target.value)} placeholder="https://api.example.com" />
+        </div>
+        <div className="f-row">
+          <label className="f-label">API Key <span className="f-label-hint">api_key · 本地存储</span></label>
+          <input className="f-input" type="password" value={draft.apiKey} onChange={e => setVal('apiKey', e.target.value)} placeholder="sk-..." />
+        </div>
+        {provider.type === 'anthropic' && (
+          <div className="f-row">
+            <label className="f-label">API 版本 <span className="f-label-hint">api_version</span></label>
+            <input className="f-input" value={draft.apiVersion} onChange={e => setVal('apiVersion', e.target.value)} placeholder="2023-06-01" />
+          </div>
+        )}
+
+        <div className="save-bar" style={{ marginTop: 0, marginBottom: 28 }}>
+          <div className={"dirty-indicator " + (isDirty ? '' : 'clean')}>{isDirty ? '有未保存的更改' : '已保存'}</div>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" disabled={!isDirty} onClick={() => setDraft({...saved})}>重置</button>
+            <button className="btn btn-primary" disabled={!isDirty} onClick={save}><Icon name="check" size={12} /> 保存连接配置</button>
+          </div>
+        </div>
+
+        <hr className="section-divider" />
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div>
+            <div className="section-title"><Icon name="layers" size={14} /> 关联模型 <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'JetBrains Mono, monospace', fontWeight: 400 }}>· {provider.models.length}</span></div>
+            <div className="section-desc">// 点击模型进入编辑</div>
+          </div>
+          <button className="btn btn-secondary"><Icon name="plus" size={12} /> 添加模型</button>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          {provider.models.length === 0 && (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', fontSize: 12, fontFamily: 'JetBrains Mono, monospace', border: '1px dashed var(--border)', borderRadius: 8 }}>
+              该提供商暂无模型<br/>点击「添加模型」创建
+            </div>
+          )}
+          {provider.models.map(m => (
+            <div key={m.id} className="provider-card" style={{padding: '12px 16px'}} onClick={() => onOpenModel(m.id)}>
+              <div className="provider-logo" style={{ width: 32, height: 32, fontSize: 11, background: m.isDefault ? 'var(--accent-surface)' : 'var(--bg-warm)', color: m.isDefault ? 'var(--accent)' : 'var(--muted)' }}>
+                {m.label.substring(0, 2).toUpperCase()}
+              </div>
+              <div className="provider-info">
+                <div className="provider-name" style={{fontSize: '13px'}}>
+                  {m.label}
+                  {m.isDefault && <span className="badge badge-default">默认</span>}
+                  {!m.enabled && <span className="badge badge-disabled">已禁用</span>}
+                </div>
+                <div className="provider-desc">{m.implId} · {m.contextLength.toLocaleString()} ctx</div>
+              </div>
+              <Icon name="chevronRight" size={14} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
+
+function ModelDetail({ model, provider, onBack, onUpdate }) {
+  const [draft, setDraft] = useState({
+    label: model.label, implId: model.implId, contextLength: model.contextLength,
+    maxOutputTokens: model.maxOutputTokens, temperature: model.temperature,
+    isDefault: model.isDefault, enabled: model.enabled
+  });
+  const [saved, setSaved] = useState({ ...draft });
+  const isDirty = Object.keys(draft).some(k => draft[k] !== saved[k]);
+  const setVal = (k, v) => setDraft(prev => { const n = {...prev}; n[k] = v; return n; });
+  const save = () => { onUpdate({ ...draft }); setSaved({...draft}); };
+
+  return (
+    <React.Fragment>
+      <div className="config-header">
+        <div>
+          <div className="breadcrumb">
+            <span className="breadcrumb-item" onClick={onBack}>{provider.name}</span>
+            <span className="breadcrumb-sep">/</span>
+            <span className="breadcrumb-item current">{model.label}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <div className="provider-logo" style={{ background: draft.isDefault ? 'var(--accent-surface)' : 'var(--bg-warm)', color: draft.isDefault ? 'var(--accent)' : 'var(--muted)', width: 36, height: 36, fontSize: 13 }}>
+              {draft.label.substring(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <div className="config-title">{draft.label}</div>
+              <div className="config-desc">{provider.name} · {draft.implId}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="config-body">
+        <div className="section-title"><Icon name="box" size={14} /> 基础信息</div>
+        <div className="section-desc">// 模型标识与显示名称</div>
+        <div className="f-row-inline">
+          <div className="f-row">
+            <label className="f-label">显示名称 <span className="f-label-hint">label</span></label>
+            <input className="f-input" value={draft.label} onChange={e => setVal('label', e.target.value)} />
+          </div>
+          <div className="f-row">
+            <label className="f-label">模型 ID <span className="f-label-hint">model_name / impl_id</span></label>
+            <input className="f-input" value={draft.implId} onChange={e => setVal('implId', e.target.value)} />
+          </div>
+        </div>
+
+        <hr className="section-divider" />
+
+        <div className="section-title"><Icon name="zap" size={14} /> 参数限制</div>
+        <div className="section-desc">// 上下文窗口与生成参数</div>
+        <div className="f-row-inline">
+          <div className="f-row">
+            <label className="f-label">上下文长度 <span className="f-label-hint">context_length</span></label>
+            <input type="number" className="f-input" value={draft.contextLength} onChange={e => setVal('contextLength', parseInt(e.target.value) || 0)} />
+          </div>
+          <div className="f-row">
+            <label className="f-label">最大输出 <span className="f-label-hint">max_output_tokens</span></label>
+            <input type="number" className="f-input" value={draft.maxOutputTokens} onChange={e => setVal('maxOutputTokens', parseInt(e.target.value) || 0)} />
+          </div>
+        </div>
+
+        <hr className="section-divider" />
+
+        <div className="section-title"><Icon name="check" size={14} /> 启用状态</div>
+        <div className="section-desc">// 控制该模型是否在会话中可用</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="provider-card" style={{padding:'10px 14px', cursor: 'pointer', alignItems: 'center'}} onClick={() => setVal('enabled', !draft.enabled)}>
+            <div className="provider-info"><div className="provider-name" style={{fontSize: '13px'}}>启用此模型</div></div>
+            <div className={"toggle " + (draft.enabled ? 'on' : '')} />
+          </div>
+          <div className="provider-card" style={{padding:'10px 14px', cursor: 'pointer', alignItems: 'center'}} onClick={() => setVal('isDefault', !draft.isDefault)}>
+            <div className="provider-info"><div className="provider-name" style={{fontSize: '13px'}}>设为默认模型</div></div>
+            <div className={"toggle " + (draft.isDefault ? 'on' : '')} />
+          </div>
+        </div>
+
+        <div className="save-bar">
+          <div className={"dirty-indicator " + (isDirty ? '' : 'clean')}>{isDirty ? '有未保存的更改' : '已保存'}</div>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" disabled={!isDirty} onClick={() => setDraft({...saved})}>重置</button>
+            <button className="btn btn-primary" disabled={!isDirty} onClick={save}><Icon name="check" size={12} /> 保存模型</button>
+          </div>
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <AppShell current="app">
+    <SettingsPage groups={appConfigGroups} customGroups={[{id:'model_config', label:'模型配置', desc:'提供商 / 模型', component: ModelConfigGroup, count: modelProviders.length}]} pageTitle="用户设置" pageDesc="app config" />
+  </AppShell>
+);
+</script>
+</body>
+</html>

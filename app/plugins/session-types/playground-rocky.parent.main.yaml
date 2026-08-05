@@ -1,0 +1,5 @@
+# v0.0.204 playground-rocky:parent:main profile
+# 等价 TOOL_POLICY['playground-rocky'].bound（迁自 SHARED_PLAYGROUND_BOUND）。
+id: playground-rocky:parent:main
+extends: default
+autoNaming: true

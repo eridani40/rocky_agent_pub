@@ -1,0 +1,371 @@
+{
+  "sidebar": {
+    "title": "教室",
+    "create": "新建教室",
+    "createPlaceholder": "教室名称",
+    "resources": "训练资源",
+    "datasets": "数据集",
+    "graders": "评估器",
+    "skills": "优化 skill",
+    "foot": "academy · 培养专家的地方",
+    "studentCount": "{{count}} 学生",
+    "taskActive": "{{count}} 任务中"
+  },
+  "hero": {
+    "title": "选一间教室开始，或新建一间",
+    "desc": "教室是培养专家 agent 的独立空间。每间教室有一位班主任，帮你准备数据集、评估器，再通过「训练」把一个空学生逐步打磨成可用的专家版本。",
+    "card1Title": "班主任全程陪伴",
+    "card1Desc": "和班主任对话，它帮你建好环境、备好数据，点击开始就能跑。",
+    "card2Title": "两种训练模式",
+    "card2Desc": "简单模式一键优化；多轮模式带评估持续迭代，看每轮进化。",
+    "card3Title": "版本树清晰可见",
+    "card3Desc": "每个版本是一个 agent，正式版可直接发起会话或派生到团队。",
+    "createBtn": "＋ 新建教室"
+  },
+  "badge": {
+    "formal": "正式版",
+    "process": "过程版",
+    "current": "当前",
+    "training": "训练中",
+    "ready": "可用",
+    "untrained": "未训练"
+  },
+  "task": {
+    "pending": "待开始",
+    "running": "进行中",
+    "paused": "已暂停",
+    "pausedReason": {
+      "maxturns": "已到上限 · 调大后可续",
+      "completed": "已完成 · 可续训",
+      "stopped": "已手动暂停 · 可续训",
+      "earlystop": "连续无提升 · 可续训"
+    },
+    "awaiting_confirm": "等待审核",
+    "done": "已完成",
+    "rejected": "已拒绝",
+    "aborted": "已停止"
+  },
+  "optimize": {
+    "learn": "学习优化",
+    "train": "训练优化"
+  },
+  "gate": {
+    "baseline": "✓ 成为临时基线",
+    "regressed": "✗ 退化 · 未替换",
+    "pending": "进行中",
+    "kept": "未替换",
+    "wasBaseline": "✓ 曾成为基线"
+  },
+  "classroom": {
+    "settings": "教室设置",
+    "settingsTitle": "教室设置",
+    "nameLabel": "教室名称",
+    "studentCount": "{{count}} 学生",
+    "createFail": "创建教室失败",
+    "renameFail": "保存失败",
+    "defaultModelLabel": "默认模型",
+    "defaultModelFail": "保存默认模型失败",
+    "createRequireModel": "请选择默认模型"
+  },
+  "tabs": {
+    "students": "学生",
+    "trainingTasks": "训练任务",
+    "datasets": "数据集",
+    "graders": "评估器",
+    "runningCount": "{{count}} 进行中"
+  },
+  "students": {
+    "title": "学生（{{count}}）",
+    "add": "添加学生",
+    "addPlaceholder": "学生名称",
+    "currentFormal": "当前正式版 {{label}}",
+    "initialVersion": "初始版 {{label}}",
+    "statVersions": "版本",
+    "statTasks": "训练任务",
+    "statGain": "最近提升",
+    "createFail": "创建学生失败"
+  },
+  "head": {
+    "teacher": "班主任",
+    "online": "● 在线 · 随时可聊",
+    "expand": "展开对话",
+    "placeholder": "和班主任聊聊，让它帮你准备训练…"
+  },
+  "tasks": {
+    "enterObserve": "进入观察 →",
+    "name": "任务 #{{seq}}",
+    "nameWithMode": "任务 #{{seq}} · {{mode}}",
+    "nameWithVersion": "{{label}} 训练任务 · {{mode}}",
+    "progressSub": "评估器：{{grader}} · 已跑 {{count}} 轮",
+    "empty": "还没有训练任务"
+  },
+  "student": {
+    "back": "教室",
+    "formalTag": "{{label}} 正式版",
+    "heroSub": "每个版本是一个 agent · 基于工作区目录",
+    "startChat": "💬 发起会话",
+    "derive": "⇪ 派生到团队",
+    "startTraining": "＋ 发起训练",
+    "adoptFail": "采纳失败",
+    "adoptNoTask": "该过程版未关联任务，无法采纳"
+  },
+  "versionTree": {
+    "title": "版本树",
+    "initial": "初始版本",
+    "formalN": "第 {{n}} 正式版",
+    "taskN": "任务 #{{n}}",
+    "procName": "v{{label}}",
+    "current": "当前",
+    "emptyFormal": "全空 · 正式版",
+    "adoptedFrom": "任务 #{{n}} 采纳",
+    "adoptedFromLabel": "采纳自 v{{label}}",
+    "modeSimple": "简单",
+    "modeMulti": "多轮",
+    "turn": "第 {{cur}}/{{max}} 轮",
+    "adoptBtn": "采纳"
+  },
+  "verHero": {
+    "title": "正式版 {{label}}",
+    "processTitle": "过程版 {{label}}",
+    "sub": "一个版本 = 一个工作区目录 · 含 prompt / memory / skills / 模型",
+    "edit": "✏️ 编辑版本",
+    "readonlyProcess": "过程版只读"
+  },
+  "tuple": {
+    "systemPrompt": "System Prompt",
+    "skills": "Skills",
+    "memory": "Memory",
+    "tools": "Tools",
+    "model": "模型",
+    "skillsCount": "{{count}} 个",
+    "skillsSub": "{{skills}} 个 skill · {{files}} 个文件",
+    "skillFileCount": "{{count}} 文件",
+    "memorySession": "session 级",
+    "memoryEmpty": "暂无记忆条目",
+    "memoryPending": "记忆摘要读取暂未实现",
+    "memoryView": "查看",
+    "memoryCount": "{{count}} 个条目",
+    "toolsDefault": "默认集",
+    "toolsCustom": "自定义",
+    "viewEdit": "查看 / 编辑",
+    "view": "查看",
+    "customize": "自定义",
+    "change": "更换",
+    "emptyAgents": "（空）",
+    "modelUnset": "未设置（跟随默认模型）"
+  },
+  "observe": {
+    "back": "学生",
+    "taskName": "{{label}} 训练任务",
+    "modeMulti": "多轮 · 训练优化",
+    "modeSimple": "简单 · 学习优化",
+    "turnProgress": "进行中 · 第 {{cur}}/{{max}} 轮",
+    "pause": "⏸ 暂停",
+    "pauseFail": "暂停失败",
+    "resume": "▶ 续训",
+    "resumeFail": "续训失败（maxTurns 到顶须先调大）",
+    "increaseMaxTurns": "⬆ 调大至 {{max}} 轮",
+    "increaseMaxTurnsFail": "调大 maxTurns 失败",
+    "stop": "⏹ 停止",
+    "stopFail": "停止失败",
+    "review": "去审核采纳 →"
+  },
+  "coach": {
+    "name": "教练",
+    "working": "● 工作中",
+    "idle": "● 空闲",
+    "tag": "academy-coach",
+    "placeholder": "和教练说点什么，指导训练方向…"
+  },
+  "trainView": {
+    "title": "训练视图",
+    "baseSub": "base {{label}} · 评估器：{{grader}}",
+    "baseSubNoGrader": "base {{label}}"
+  },
+  "trainStatus": {
+    "status": "任务状态",
+    "turn": "当前轮次",
+    "baseline": "临时基线",
+    "bestScore": "最高分"
+  },
+  "iter": {
+    "title": "迭代记录",
+    "vsTemp": "vs 临时基线",
+    "vsBase": "vs 训练 base",
+    "stepFork": "fork {{from}} → {{to}}",
+    "stepOptimize": "优化 agent 改写 prompt（训练优化）",
+    "stepOptimizeLearn": "优化 agent 学习改写（学习优化）",
+    "stepEval": "评估（每 case 独立打分）",
+    "stepReflect": "反思 + 决策是否替换基线",
+    "watch": "👁 观察 →",
+    "empty": "还没有迭代记录"
+  },
+  "caseTable": {
+    "title": "每题得分（{{count}} case，独立 LLM 打分）",
+    "total": "… 共 {{count}} 条",
+    "positive": "正",
+    "negative": "负",
+    "neutral": "中"
+  },
+  "reflect": {
+    "label": "反思："
+  },
+  "result": {
+    "back": "学生",
+    "title": "{{label}} 训练任务 · 完成，待审核",
+    "gain": "+{{pct}}% 提升",
+    "verdictTitle": "训练完成，临时基线已进化，提议采纳为 {{label}}",
+    "verdictSub": "{{turns}} 轮迭代 · {{improve}} 进化 {{regress}} 退化 · 最终基线 {{label}} 优于 base {{base}}",
+    "verdictNoGain": "训练完成，但候选未超越基线，无可采纳的新版本",
+    "verdictNoGainSub": "{{turns}} 轮迭代 · {{improve}} 进化 {{regress}} 退化 · 临时基线仍为 base {{base}}",
+    "baseCell": "base {{label}}",
+    "candCell": "候选 {{label}}",
+    "netGain": "净提升",
+    "turnsCell": "迭代轮次",
+    "footHint": "采纳后创建全新正式版 {{label}} 并标记「已采纳」；拒绝保留全部过程版数据。",
+    "footHintNoGain": "无提升：没有可采纳的过程版本。可拒绝结束任务，或继续训练。",
+    "reject": "✕ 拒绝",
+    "continue": "↺ 继续训练",
+    "accept": "✓ 采纳为 {{label}}",
+    "acceptFail": "采纳失败",
+    "rejectFail": "拒绝失败"
+  },
+  "diff": {
+    "baseTag": "base · {{label}}",
+    "candTag": "候选 · {{label}}",
+    "unchanged": "未变",
+    "newSkill": "整体新增",
+    "removedSkill": "已移除",
+    "modSkill": "文件修改",
+    "fileAdded": "新增文件",
+    "fileRemoved": "删除文件",
+    "fileModified": "修改",
+    "fileBinary": "二进制变更",
+    "fileUnchanged": "不变",
+    "filesTruncated": "文件较多，未加载全部行级 diff",
+    "systemSummary": "AGENTS.md 内容对比",
+    "memorySummary": "记忆条目对照",
+    "skillsSummary": "skill 文件对比",
+    "modelSummary": "模型配置"
+  },
+  "mdEditor": {
+    "view": "👁 查看",
+    "edit": "✏️ 编辑",
+    "hint": "直接编辑 · 保存后版本号不变（{{label}} 仍是 {{label}}）",
+    "close": "关闭",
+    "save": "保存",
+    "saving": "保存中…",
+    "saveFail": "保存失败",
+    "subtitle": "{{student}} · {{label}} · {{field}}"
+  },
+  "fileEditor": {
+    "format": "格式化",
+    "validate": "校验",
+    "formatFail": "格式错误，无法格式化",
+    "validateOk": "✓ 格式正确",
+    "validateFailLine": "第 {{line}} 行: {{msg}}",
+    "validateFail": "{{msg}}"
+  },
+  "skillBrowser": {
+    "title": "🧩 Skills · {{student}}",
+    "sub": "{{label}} · .rocky/skills/ · {{skills}} 个 skill · {{files}} 个文件",
+    "emptyTree": "该版本还没有 skill",
+    "selectHint": "从左侧选择一个文件查看",
+    "loading": "读取中…",
+    "binary": "二进制文件，不可预览",
+    "unpreviewable": "该文件类型不支持预览",
+    "truncated": "（内容过长已截断，仅显示前 256KB）",
+    "readFail": "读取失败",
+    "view": "👁 查看",
+    "edit": "✏️ 编辑",
+    "save": "保存",
+    "saving": "保存中…",
+    "saved": "已保存",
+    "saveFail": "保存失败",
+    "readOnlyHint": "过程版本只读，不可编辑",
+    "close": "关闭"
+  },
+  "versionMemory": {
+    "title": "长期记忆 · {{label}}",
+    "bytes": "{{size}} B"
+  },
+  "create": {
+    "title": "发起训练 · 学生「{{name}}」",
+    "modeLabel": "选择训练模式",
+    "simple": "简单模式",
+    "simpleDesc": "单轮优化。优化 skill 直接基于当前版本改出新版，无需数据集和评估器。",
+    "multi": "多轮模式",
+    "multiDesc": "带评估的迭代优化。每轮生成 → 评估 → 决策，持续进化，类似 skillopt。",
+    "reqOk": "✓ 随时可用",
+    "reqReady": "✓ 评估能力就绪",
+    "reqMiss": "需先备评估能力",
+    "baseLabel": "📌 基线版本",
+    "baseCurrent": "{{label}}（当前正式版）",
+    "baseSub": "基于它发起本次训练",
+    "datasetLabel": "📚 数据集",
+    "graderLabel": "⚖️ 评估器",
+    "datasetCaseCount": "{{count}} 条",
+    "graderJudge": "LLM judge · 每题独立打分",
+    "graderEm": "精确匹配",
+    "selectPlaceholder": "请选择",
+    "directiveLabel": "🎯 本次训练目标",
+    "directiveSub": "透传给教练和优化 agent",
+    "directivePlaceholder": "例：这次重点学学《旧猫咪》这本书的叙事感，优化成分向产品的写法…",
+    "strategyLabel": "🎛️ 迭代策略（默认值，可调）",
+    "maxTurns": "最大轮次",
+    "earlyStop": "早停（连续无提升）",
+    "acceptRule": "接受决策",
+    "acceptRuleValue": "新版分 > 基线分",
+    "autoFix": "允许教练在训练中自主修复数据格式等小问题（消耗更多 token 换可靠性）",
+    "hint": "💡 本次将创建 {{name}} 训练任务，由一位专属教练全程跟进。每轮产生的过程版都会保留，你可随时观察、与教练对话，跑完后确认是否采纳为新正式版。",
+    "cancel": "取消",
+    "submit": "发起训练 →",
+    "submitting": "创建中…",
+    "submitFail": "发起训练失败"
+  },
+  "derive": {
+    "head": "🎓 从教室派生 · 选择来源",
+    "step1": "① 教室",
+    "step2": "② 学生 · 版本",
+    "studentCount": "{{count}} 学生",
+    "latestRecommended": "最新正式版 · 推荐",
+    "latest": "最新正式版",
+    "emptyInitial": "仅初始版 · 内容为空",
+    "copyNote": "派生 = 把该学生版本的 system prompt（AGENTS.md）、memory、skills 复制为新成员初始工作区内容。新成员独立演化，不影响教室里的学生。",
+    "srcChain": "来源：",
+    "cancel": "取消",
+    "confirm": "派生为成员 →",
+    "empty": "还没有教室，先去 Academy 创建",
+    "previewSummary": "将带入 {{total}} 项 · 其中 {{conflict}} 项同名默认保留原 squad",
+    "previewBadgeNew": "新增",
+    "previewBadgeConflict": "同名 · 保留原 squad",
+    "previewBadgeBring": "将带入",
+    "previewGroupSkills": "SKILLS",
+    "previewGroupMemory": "MEMORY",
+    "toggleOverwrite": "覆盖 {{name}}",
+    "previewError": "继承预检失败，请重试或检查教室/学生/版本"
+  },
+  "versionChat": {
+    "newSession": "新建会话",
+    "placeholder": "继续和 {{name}} {{label}} 对话…",
+    "kindTag": "academy-student",
+    "wsTitle": "工作区",
+    "startFail": "发起会话失败",
+    "empty": "还没有会话，点 ＋ 新建"
+  },
+  "readonly": {
+    "back": "返回",
+    "banner": "只读观察 · 优化/评估 subagent 进行中 transcript（跑完入口消失）",
+    "title": "subagent 只读观察"
+  },
+  "resize": {
+    "ariaLabel": "拖拽调整列宽",
+    "title": "拖拽调整列宽"
+  },
+  "common": {
+    "loading": "加载中…",
+    "loadFail": "加载失败",
+    "retry": "重试",
+    "empty": "暂无数据"
+  }
+}

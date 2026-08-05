@@ -1,0 +1,149 @@
+# si1_minimax_multi_image — SI-1 主路径：@ 多图有序 → see_image(minimax_m3) → 文字理解 → LLM 回复
+# 覆盖契约：specs/api/overall/08a-see-image-tool.md §2（ToolDefinition + isError 分支表）+ §5（AT 映射）
+# 覆盖 PRD 路径：specs/prd/version_logs/v0.0.141.see_img/change_log.md §3 SI-1
+# 断言面：Req（stub audit llm/web_fetch 帧）+ Resp（transcript tool_call 入参 + tool_result 内容）+ SSE（事件序列存在性）
+#
+# ⚠️ 设计态交付（本 case 未录制未执行，产品代码并行开发中 — 用户裁决 2026-07-14）。
+# 依赖两项前置（MANDATORY，供 orchestrator/coder 编码 + 录制前对齐，非本 case 自身可满足）：
+#
+#  D1. app_config.see_image 真实凭证必须在 env_start 阶段预先注入（本 case 绝不在 case.yaml 里明文
+#      写 key）。建议做法：仿 tests/api/env_start.sh 现有 post-boot seed（contextWindow 那段 curl PUT
+#      模式，见该文件「10. health check + post-boot seed」）新增一段，用 secrets 里已有的 MiniMax key
+#      （tests/README.md 里 vision_check 同款 VISION_AUTH_TOKEN，或新增同义 MINIMAX_API_KEY）PUT 一次：
+#      `PUT /config/app {"group":"see_image","items":[{"key":"default","data":{"type":"minimax_m3",
+#      "credentials":{"minimax_m3":{"apiKey":"<key>"}}}}]}`（幂等）。本 case setup 只 GET 校验该配置
+#      已就绪，未就绪时给出清晰 fail（不会被误判成 tool「未配置 vender」分支——那是产品行为不是环境问题）。
+#      [D1 已验证可用，2026-07-14 首跑 record 轮全绿证实]
+#
+#  D2. 二进制图片 fixture 落盘：`files` DSL 原语（tests/api/lib/files_action.py）原只支持写 JSON
+#      dict 内容（文本序列化），已仿 multipart file 字段的既有约定（interp.py `encoding: base64`
+#      on file dict）做最小扩展——file 条目 `content` 为 base64 字符串 + `encoding: base64` 时按
+#      解码后的原始字节写盘（而非 JSON 序列化文本）。写入路径用 `workspaces/{sid}/...`（DATA_DIR
+#      相对），恰好等于 session 缺省 workspaceDir（`<DATA_DIR>/workspaces/<sid>`，见
+#      specs/api/overall/04-agent-session.md §2.1 [v0.0.17] 备注）——零绝对路径硬编码、天然可移植。
+#      两张真实 PNG（红/蓝各 8x8，74 字节）已提交在 fixtures/ 供人工核对字节一致性（case.yaml 内联的
+#      base64 与 fixtures/ 下文件字节一致，用 `base64 -d` 可还原验证）。
+#      [D2 已验证可用，2026-07-14 首跑 record 轮全绿证实（files encoding:base64 扩展落地生效）]
+#
+#  D3. wait 单步 timeout 硬上限 60（框架规则），而 tool 层 defaultTimeoutMs=90000（tech spec
+#      [P1]see_image_tool.md §4，视觉理解含 base64 出站 + 模型推理，故设更高）。60s 覆盖 2 张 8x8 极小
+#      图的真实 MiniMax 调用应绰绰有余，但若真实录制时序偏慢导致 60s 内未收到 run_end，需要 executor
+#      反馈后再评估是否需要拆多个 wait 接力（陷阱清单 #11 recipe）。
+#      [D3 未触发——2026-07-14 首跑 record 轮 17s 内完成，远低于 60s 上限]
+#
+#  D4. 回放轮 secret 脱敏（框架既有设计，非 bug——2026-07-14 首跑 replay fail 后核实确认）：入站 HTTP 在
+#      record 轮同步录制时，body 经 recording-fingerprint 的 redactDeep 脱敏——`credentials`/`apiKey`
+#      类键命中 REDACT_KEYS，值整体替换为字符串 "[REDACTED]"。replay 轮 http-route-interceptor 命中后
+#      直接返回这份脱敏后的录制响应，**永远读不到真实 secret 值或其子键**。因此本 case 的凭证校验 check
+#      只断言非 secret 的 `.value.type` + `.value.credentials exists`（键存在，不论值/子键）——
+#      **任何对 secret 值或其子键存在性的断言在 replay 轮必然 fail，这是通用规则，非本 case 特例**。
+#
+#  D5. transcript check 不依赖 content block 下标（debugger 18:55 实测踩中，record 轮也会中招，非
+#      replay 特有）：早前 check 用 `.content[0].name`/`.content[0].isError`/`.content[0].content[0].text`
+#      这类下标假设 tool_call/tool_result/最终回复文本都是各自消息 content 数组的第一个 block——实测
+#      LLM 常在工具调用前先输出一句文本（content=[text, tool_call]），或最终回复前带 reasoning block，
+#      导致下标假设 flaky fail。已改用 `eval_path` 支持的 `[key=val]` 过滤 token（单路径内按字段值查找
+#      数组元素，非数组谓词、非嵌套——DSL 禁止 `[] any/all` 嵌套但 `[type=X]` 过滤 token 不受此限）：
+#      `.content[type=tool_call]` / `.content[type=tool_result]` / `.content[type=text]`，与数组内元素
+#      实际位置无关，语义等价但对真实 LLM 输出顺序鲁棒。
+case: si1_minimax_multi_image
+module: see_image
+timeout: 150
+
+setup:
+  - name: 校验 see_image vender 凭证已预置（不在此 PUT 明文 key，见文件头 D1）
+    # 回放兼容（D4）：replay 轮读到的是 record 轮录制的 HTTP 响应，body 经 redactDeep 脱敏——
+    # `credentials` 命中 REDACT_KEYS，值整体替换为字符串 "[REDACTED]"，子键 apiKey 不复存在。
+    # 因此只断言非 secret 的 `type`（证明 seed 生效）+ credentials 键本身存在（弱断言，值不论）；
+    # 绝不断言 apiKey 是否存在——凭证真实有效性由 record 轮 see_image 出站成功这一事实证明。
+    requests:
+      - GET /config/app?group=see_image&key=default
+    check:
+      - .value.type == "minimax_m3"
+      - .value.credentials exists
+
+  - name: 建会话（预绑定平台 LLM provider，供主对话决策工具调用；see_image 出站另走 D1 的 vender 自身凭证）
+    requests:
+      - 'POST /session {"title": "see-image-si1-multi", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+      - .workspaceDir exists
+
+  - name: 植入 2 张测试图片到会话 workspace（DATA_DIR 相对 == 会话缺省 workspaceDir，见文件头 D2）
+    files:
+      - path: "workspaces/{sid}/see_image_red.png"
+        content: "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mO4IyeHFTEMLQkAid1GAQVcagkAAAAASUVORK5CYII="
+        encoding: base64
+      - path: "workspaces/{sid}/see_image_blue.png"
+        content: "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mOQs7mDFTEMLQkAGQpNgeHxNVAAAAAASUVORK5CYII="
+        encoding: base64
+
+steps:
+  - name: 订阅 agent_loop 流（see_image 工具调用事件）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 发消息引导 LLM 按顺序看两张图（生产路径 /messages，显式点名工具 + 文件名，禁止追问，确定性录制引导词）
+    requests:
+      - method: POST
+        path: /session/{sid}/messages
+        body:
+          content: "请使用 see_image 工具，按顺序查看这两张本地图片：see_image_red.png 和 see_image_blue.png（imagePaths 数组必须严格按此顺序传入这两个精确文件名，不要修改文件名，不要用绝对路径），然后用一句话分别说明每张图片的主要颜色。必须调用 see_image 工具，不要提问，不要跳过，直接执行并基于返回的理解结果回复我。"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { run_id: .runId }
+    check:
+      - .runId exists
+
+  - name: 等 run 完成（see_image 工具调用 + LLM 续答；vender 出站走 web_fetch 拦截层）
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 1"
+      timeout: 60
+    check:
+      - main.count(type=run_start) == 1
+      - main.count(type=run_end) == 1
+      - main.count(type=tool_call_start,toolName=see_image) >= 1
+      - main.count(type=tool_result_end) >= 1
+      - main.absent(type=error)
+
+  - name: 验 transcript — tool_call 入参含 2 路径（有序，按传入原样落库）
+    # D5（陷阱清单新增，debugger 18:55 实测踩中）：不依赖 block 下标定位——LLM 常在工具调用前先输出
+    # 一句文本（content=[text, tool_call, ...]），`.content[0]` 假设 flaky（record 轮也会中招）。
+    # 改用 eval_path 支持的 `[key=val]` 过滤 token（非数组谓词，单路径内按字段值查找，不受下标影响）：
+    # `.content[type=tool_call]` 在 content 数组里找 type=="tool_call" 的元素，无关它在第几位。
+    requests:
+      - GET /session/{sid}/messages
+    check:
+      - .items[] any .content[type=tool_call].name == "see_image"
+      - .items[] any .content[type=tool_call].arguments.imagePaths ~= "see_image_red.png"
+      - .items[] any .content[type=tool_call].arguments.imagePaths ~= "see_image_blue.png"
+
+  - name: 验 transcript — tool_result isError:false + 纯文字理解（无 base64 特征）
+    # 同 D5：用 `.content[type=tool_result]` 定位 ToolResultBlock（不假设下标），再链式
+    # `.content[type=text]` 定位其嵌套 content 数组里的 TextBlock（ToolResultBlock.content 也可能不止
+    # 一个 block）。isError==false 隐含要求确实存在 tool_result block（filter 未命中→_ABSENT→比较 fail）。
+    requests:
+      - GET /session/{sid}/messages
+    check:
+      - .items[] any .content[type=tool_result].isError == false
+      - .items[] any .content[type=tool_result].content[type=text].text ~= "Understanding"
+      - .items[] any .content[type=tool_result].content[type=text].text !~= "data:image"
+      - .items[] any .content[type=tool_result].content[type=text].text !~= "base64"
+
+  - name: 验最终 assistant 回复非空（LLM 基于理解结果作答）
+    # 同 D5：最后一条消息也可能先有 reasoning block 再有 text block，用 `.content[type=text]`
+    # 而非 `.content[0]` 定位最终回复文本。
+    requests:
+      - GET /session/{sid}/messages
+    check:
+      - .items[-1].role == "assistant"
+      - .items[-1].content[type=text].text exists
+
+teardown:
+  - name: 删除会话
+    requests:
+      - DELETE /session/{sid}

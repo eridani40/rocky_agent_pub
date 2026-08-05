@@ -1,0 +1,93 @@
+{
+  "tab": {
+    "manage": "我的",
+    "market": "市场"
+  },
+  "source": {
+    "market": "市场",
+    "local": "本地"
+  },
+  "sourceFilter": {
+    "ariaLabel": "来源筛选",
+    "all": "全部",
+    "builtin": "内置",
+    "market": "市场",
+    "rocky": "Rocky",
+    "rockyTooltip": "来自于 Rocky 的自我迭代和进化"
+  },
+  "install": {
+    "addAria": "安装 Skill",
+    "closeAria": "关闭安装区"
+  },
+  "market": {
+    "searchPlaceholder": "搜索 Skill…",
+    "searchHint": "输入关键词搜索 Skill",
+    "loading": "加载中…",
+    "empty": "没有找到匹配的 Skill",
+    "error": "加载失败，请重试",
+    "noProvider": "市场未配置生效来源",
+    "installsLabel": "次安装",
+    "status": {
+      "installed": "已安装",
+      "updatable": "可更新",
+      "upToDate": "已是最新"
+    },
+    "btn": {
+      "install": "安装",
+      "installing": "安装中…",
+      "update": "更新",
+      "checkUpdate": "检查更新"
+    },
+    "detail": {
+      "files": "文件",
+      "loading": "加载详情…",
+      "error": "加载详情失败",
+      "viewSource": "查看源码"
+    }
+  },
+  "page": {
+    "loadFail": "加载失败",
+    "installFail": "安装失败",
+    "previewFail": "加载预览失败",
+    "deleteFail": "删除失败",
+    "headerTitle": "Skill 管理",
+    "headerDesc": "skill · 安装 / 启用 / 预览 / 删除",
+    "loading": "加载中…"
+  },
+  "item": {
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "emptyDesc": "（未提供介绍）",
+    "enableLabel": "启用",
+    "evolvableLabel": "自进化",
+    "toggleAria": "{{name}} 启用 / 禁用",
+    "evolvableAria": "{{name}} 自进化 开 / 关",
+    "previewBtn": "预览",
+    "deleteTitle": "删除",
+    "deleteAria": "删除 {{name}}",
+    "builtinNoEvolve": "内置 Skill 不可进化",
+    "builtinNoDelete": "内置技能不可删除（随 app 发版只读）"
+  },
+  "dropzone": {
+    "title": "拖拽 Skill 到此处安装",
+    "subtitle": "支持 文件夹 · .zip · .skill 包（自动解析 SKILL.md）",
+    "selectFile": "选择文件",
+    "selectFolder": "选择文件夹"
+  },
+  "list": {
+    "empty": "还没有已安装的 Skill"
+  },
+  "deleteModal": {
+    "title": "删除 Skill",
+    "body": "确定要删除 {{name}} 吗？该 Skill 将不再可用，此操作无法撤销。"
+  },
+  "previewModal": {
+    "emptyTree": "（空）",
+    "loading": "（加载中…）",
+    "binary": "（二进制文件不可预览）",
+    "emptyFile": "（空文件）",
+    "truncated": "…（内容已截断）",
+    "readFail": "（读取失败）",
+    "selectHint": "选择左侧文件查看内容"
+  }
+}

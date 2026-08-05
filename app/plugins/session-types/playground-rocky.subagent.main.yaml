@@ -1,0 +1,4 @@
+# playground-rocky:subagent:main profile
+# 派生子 agent；toolBound 等共性继承 subagent 基座（空 = 全继承）。
+id: playground-rocky:subagent:main
+extends: subagent

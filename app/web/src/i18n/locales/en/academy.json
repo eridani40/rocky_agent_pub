@@ -1,0 +1,371 @@
+{
+  "sidebar": {
+    "title": "Classrooms",
+    "create": "New classroom",
+    "createPlaceholder": "Classroom name",
+    "resources": "Training resources",
+    "datasets": "Datasets",
+    "graders": "Graders",
+    "skills": "Optimize skills",
+    "foot": "academy · where experts are trained",
+    "studentCount": "{{count}} students",
+    "taskActive": "{{count}} active"
+  },
+  "hero": {
+    "title": "Pick a classroom to start, or create one",
+    "desc": "A classroom is an isolated space for training expert agents. Each classroom has a head teacher who helps you prepare datasets and graders, then trains a blank student into a usable expert version.",
+    "card1Title": "Head teacher by your side",
+    "card1Desc": "Talk to the head teacher; it sets up the environment and data so you can start right away.",
+    "card2Title": "Two training modes",
+    "card2Desc": "Simple mode optimizes in one shot; multi-turn mode iterates with evaluation so you watch each round evolve.",
+    "card3Title": "Clear version tree",
+    "card3Desc": "Every version is an agent. Formal versions can start chats or be derived into your team.",
+    "createBtn": "+ New classroom"
+  },
+  "badge": {
+    "formal": "Formal",
+    "process": "Process",
+    "current": "Current",
+    "training": "Training",
+    "ready": "Ready",
+    "untrained": "Untrained"
+  },
+  "task": {
+    "pending": "Pending",
+    "running": "Running",
+    "paused": "Paused",
+    "pausedReason": {
+      "maxturns": "At limit · raise to resume",
+      "completed": "Done · resumable",
+      "stopped": "Manually paused · resumable",
+      "earlystop": "No progress · resumable"
+    },
+    "awaiting_confirm": "Awaiting review",
+    "done": "Done",
+    "rejected": "Rejected",
+    "aborted": "Aborted"
+  },
+  "optimize": {
+    "learn": "Learning",
+    "train": "Training"
+  },
+  "gate": {
+    "baseline": "✓ Became baseline",
+    "regressed": "✗ Regressed · not replaced",
+    "pending": "Running",
+    "kept": "Not replaced",
+    "wasBaseline": "✓ Was baseline"
+  },
+  "classroom": {
+    "settings": "Classroom settings",
+    "settingsTitle": "Classroom settings",
+    "nameLabel": "Classroom name",
+    "studentCount": "{{count}} students",
+    "createFail": "Failed to create classroom",
+    "renameFail": "Failed to save",
+    "defaultModelLabel": "Default model",
+    "defaultModelFail": "Failed to save default model",
+    "createRequireModel": "Please select a default model"
+  },
+  "tabs": {
+    "students": "Students",
+    "trainingTasks": "Training tasks",
+    "datasets": "Datasets",
+    "graders": "Graders",
+    "runningCount": "{{count}} running"
+  },
+  "students": {
+    "title": "Students ({{count}})",
+    "add": "Add student",
+    "addPlaceholder": "Student name",
+    "currentFormal": "Current formal {{label}}",
+    "initialVersion": "Initial {{label}}",
+    "statVersions": "Versions",
+    "statTasks": "Training tasks",
+    "statGain": "Recent gain",
+    "createFail": "Failed to create student"
+  },
+  "head": {
+    "teacher": "Head teacher",
+    "online": "● Online · always available",
+    "expand": "Expand chat",
+    "placeholder": "Chat with the head teacher to prepare training…"
+  },
+  "tasks": {
+    "enterObserve": "Observe →",
+    "name": "Task #{{seq}}",
+    "nameWithMode": "Task #{{seq}} · {{mode}}",
+    "nameWithVersion": "{{label}} training task · {{mode}}",
+    "progressSub": "Grader: {{grader}} · {{count}} turns done",
+    "empty": "No training tasks yet"
+  },
+  "student": {
+    "back": "Classroom",
+    "formalTag": "{{label}} formal",
+    "heroSub": "Every version is an agent · backed by a workspace directory",
+    "startChat": "💬 Start chat",
+    "derive": "⇪ Derive to team",
+    "startTraining": "+ Start training",
+    "adoptFail": "Failed to adopt",
+    "adoptNoTask": "Process version has no linked task to adopt from"
+  },
+  "versionTree": {
+    "title": "Version tree",
+    "initial": "Initial version",
+    "formalN": "Formal #{{n}}",
+    "taskN": "Task #{{n}}",
+    "procName": "v{{label}}",
+    "current": "Current",
+    "emptyFormal": "Empty · formal",
+    "adoptedFrom": "Adopted from task #{{n}}",
+    "adoptedFromLabel": "Adopted from v{{label}}",
+    "modeSimple": "Simple",
+    "modeMulti": "Multi",
+    "turn": "turn {{cur}}/{{max}}",
+    "adoptBtn": "Adopt"
+  },
+  "verHero": {
+    "title": "Formal {{label}}",
+    "processTitle": "Process {{label}}",
+    "sub": "One version = one workspace directory · prompt / memory / skills / model",
+    "edit": "✏️ Edit version",
+    "readonlyProcess": "Process version is read-only"
+  },
+  "tuple": {
+    "systemPrompt": "System Prompt",
+    "skills": "Skills",
+    "memory": "Memory",
+    "tools": "Tools",
+    "model": "Model",
+    "skillsCount": "{{count}}",
+    "skillsSub": "{{skills}} skills · {{files}} files",
+    "skillFileCount": "{{count}} files",
+    "memorySession": "session scope",
+    "memoryEmpty": "No memory entries",
+    "memoryPending": "Memory summary not implemented yet",
+    "memoryView": "View",
+    "memoryCount": "{{count}} entries",
+    "toolsDefault": "Default set",
+    "toolsCustom": "Custom",
+    "viewEdit": "View / Edit",
+    "view": "View",
+    "customize": "Customize",
+    "change": "Change",
+    "emptyAgents": "(empty)",
+    "modelUnset": "Not set (falls back to default model)"
+  },
+  "observe": {
+    "back": "Student",
+    "taskName": "{{label}} training task",
+    "modeMulti": "Multi · training",
+    "modeSimple": "Simple · learning",
+    "turnProgress": "Running · turn {{cur}}/{{max}}",
+    "pause": "⏸ Pause",
+    "pauseFail": "Failed to pause",
+    "resume": "▶ Resume",
+    "resumeFail": "Resume failed (raise maxTurns first if at limit)",
+    "increaseMaxTurns": "⬆ Raise to {{max}} turns",
+    "increaseMaxTurnsFail": "Failed to raise maxTurns",
+    "stop": "⏹ Stop",
+    "stopFail": "Failed to stop",
+    "review": "Review & adopt →"
+  },
+  "coach": {
+    "name": "Coach",
+    "working": "● Working",
+    "idle": "● Idle",
+    "tag": "academy-coach",
+    "placeholder": "Tell the coach how to guide the training…"
+  },
+  "trainView": {
+    "title": "Training view",
+    "baseSub": "base {{label}} · grader: {{grader}}",
+    "baseSubNoGrader": "base {{label}}"
+  },
+  "trainStatus": {
+    "status": "Task status",
+    "turn": "Current turn",
+    "baseline": "Temp baseline",
+    "bestScore": "Best score"
+  },
+  "iter": {
+    "title": "Iterations",
+    "vsTemp": "vs temp baseline",
+    "vsBase": "vs training base",
+    "stepFork": "fork {{from}} → {{to}}",
+    "stepOptimize": "Optimize agent rewriting prompt (training)",
+    "stepOptimizeLearn": "Optimize agent learning rewrite (learning)",
+    "stepEval": "Evaluate (per-case independent grading)",
+    "stepReflect": "Reflect + decide baseline replacement",
+    "watch": "👁 Watch →",
+    "empty": "No iterations yet"
+  },
+  "caseTable": {
+    "title": "Per-case scores ({{count}} cases, independent LLM grading)",
+    "total": "… {{count}} total",
+    "positive": "Pos",
+    "negative": "Neg",
+    "neutral": "Mid"
+  },
+  "reflect": {
+    "label": "Reflection:"
+  },
+  "result": {
+    "back": "Student",
+    "title": "{{label}} training task · done, awaiting review",
+    "gain": "+{{pct}}% gain",
+    "verdictTitle": "Training done. Temp baseline evolved; proposed as {{label}}",
+    "verdictSub": "{{turns}} turns · {{improve}} improved {{regress}} regressed · final baseline {{label}} beats base {{base}}",
+    "verdictNoGain": "Training done, but no candidate beat the baseline — nothing to adopt",
+    "verdictNoGainSub": "{{turns}} turns · {{improve}} improved {{regress}} regressed · temp baseline is still base {{base}}",
+    "baseCell": "base {{label}}",
+    "candCell": "candidate {{label}}",
+    "netGain": "Net gain",
+    "turnsCell": "Turns",
+    "footHint": "Accepting creates a brand-new formal version {{label}} marked adopted; rejecting keeps all process data.",
+    "footHintNoGain": "No improvement: there is no process version to adopt. Reject to close the task, or continue training.",
+    "reject": "✕ Reject",
+    "continue": "↺ Continue training",
+    "accept": "✓ Accept as {{label}}",
+    "acceptFail": "Failed to accept",
+    "rejectFail": "Failed to reject"
+  },
+  "diff": {
+    "baseTag": "base · {{label}}",
+    "candTag": "candidate · {{label}}",
+    "unchanged": "Unchanged",
+    "newSkill": "New skill",
+    "removedSkill": "Removed",
+    "modSkill": "Files modified",
+    "fileAdded": "Added",
+    "fileRemoved": "Deleted",
+    "fileModified": "Modified",
+    "fileBinary": "Binary changed",
+    "fileUnchanged": "Unchanged",
+    "filesTruncated": "Too many files — line-level diff not fully loaded",
+    "systemSummary": "AGENTS.md comparison",
+    "memorySummary": "Memory entries comparison",
+    "skillsSummary": "Skill files comparison",
+    "modelSummary": "Model configuration"
+  },
+  "mdEditor": {
+    "view": "👁 View",
+    "edit": "✏️ Edit",
+    "hint": "Edit directly · version label unchanged after save ({{label}} stays {{label}})",
+    "close": "Close",
+    "save": "Save",
+    "saving": "Saving…",
+    "saveFail": "Failed to save",
+    "subtitle": "{{student}} · {{label}} · {{field}}"
+  },
+  "fileEditor": {
+    "format": "Format",
+    "validate": "Validate",
+    "formatFail": "Format error, cannot format",
+    "validateOk": "✓ Valid",
+    "validateFailLine": "Line {{line}}: {{msg}}",
+    "validateFail": "{{msg}}"
+  },
+  "skillBrowser": {
+    "title": "🧩 Skills · {{student}}",
+    "sub": "{{label}} · .rocky/skills/ · {{skills}} skills · {{files}} files",
+    "emptyTree": "No skills in this version yet",
+    "selectHint": "Pick a file on the left to view",
+    "loading": "Loading…",
+    "binary": "Binary file — preview not available",
+    "unpreviewable": "Preview not supported for this file type",
+    "truncated": "(content truncated — first 256KB only)",
+    "readFail": "Failed to load",
+    "view": "👁 View",
+    "edit": "✏️ Edit",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "saveFail": "Save failed",
+    "readOnlyHint": "Process versions are read-only",
+    "close": "Close"
+  },
+  "versionMemory": {
+    "title": "Long-term memory · {{label}}",
+    "bytes": "{{size}} B"
+  },
+  "create": {
+    "title": "Start training · student \"{{name}}\"",
+    "modeLabel": "Choose training mode",
+    "simple": "Simple mode",
+    "simpleDesc": "Single-turn optimization. The optimize skill rewrites the current version directly; no dataset or grader needed.",
+    "multi": "Multi-turn mode",
+    "multiDesc": "Iterative optimization with evaluation. Generate → grade → decide each round, like skillopt.",
+    "reqOk": "✓ Always available",
+    "reqReady": "✓ Evaluation ready",
+    "reqMiss": "Needs evaluation capability",
+    "baseLabel": "📌 Base version",
+    "baseCurrent": "{{label}} (current formal)",
+    "baseSub": "Start this training from it",
+    "datasetLabel": "📚 Dataset",
+    "graderLabel": "⚖️ Grader",
+    "datasetCaseCount": "{{count}} cases",
+    "graderJudge": "LLM judge · per-case grading",
+    "graderEm": "Exact match",
+    "selectPlaceholder": "Select",
+    "directiveLabel": "🎯 Training goal",
+    "directiveSub": "Passed through to the coach and optimize agent",
+    "directivePlaceholder": "e.g. Focus on the narrative style of The Old Cat this round…",
+    "strategyLabel": "🎛️ Iteration strategy (defaults, adjustable)",
+    "maxTurns": "Max turns",
+    "earlyStop": "Early stop (no improvement streak)",
+    "acceptRule": "Accept rule",
+    "acceptRuleValue": "new score > baseline score",
+    "autoFix": "Allow the coach to auto-fix minor issues like data format during training (more tokens for reliability)",
+    "hint": "💡 This will create training task {{name}}, followed by a dedicated coach. Every process version is kept; you can observe and chat with the coach anytime, then decide whether to adopt it as a new formal version.",
+    "cancel": "Cancel",
+    "submit": "Start training →",
+    "submitting": "Creating…",
+    "submitFail": "Failed to start training"
+  },
+  "derive": {
+    "head": "🎓 Derive from classroom · pick source",
+    "step1": "① Classroom",
+    "step2": "② Student · version",
+    "studentCount": "{{count}} students",
+    "latestRecommended": "Latest formal · recommended",
+    "latest": "Latest formal",
+    "emptyInitial": "Initial only · empty content",
+    "copyNote": "Deriving copies the student version's system prompt (AGENTS.md), memory and skills as the new member's initial workspace content. The new member evolves independently and does not affect the student in the classroom.",
+    "srcChain": "Source:",
+    "cancel": "Cancel",
+    "confirm": "Derive as member →",
+    "empty": "No classrooms yet — create one in Academy first",
+    "previewSummary": "Will bring {{total}} item(s) · {{conflict}} same-name one(s) kept from squad by default",
+    "previewBadgeNew": "New",
+    "previewBadgeConflict": "Same name · kept from squad",
+    "previewBadgeBring": "Will bring",
+    "previewGroupSkills": "SKILLS",
+    "previewGroupMemory": "MEMORY",
+    "toggleOverwrite": "Overwrite {{name}}",
+    "previewError": "Inheritance preview failed — please retry or check classroom/student/version"
+  },
+  "versionChat": {
+    "newSession": "New chat",
+    "placeholder": "Continue chatting with {{name}} {{label}}…",
+    "kindTag": "academy-student",
+    "wsTitle": "Workspace",
+    "startFail": "Failed to start chat",
+    "empty": "No chats yet, click + to start"
+  },
+  "readonly": {
+    "back": "Back",
+    "banner": "Read-only · live transcript of the optimize/eval subagent (entry disappears when done)",
+    "title": "Subagent read-only view"
+  },
+  "resize": {
+    "ariaLabel": "Drag to resize column",
+    "title": "Drag to resize column"
+  },
+  "common": {
+    "loading": "Loading…",
+    "loadFail": "Failed to load",
+    "retry": "Retry",
+    "empty": "No data"
+  }
+}

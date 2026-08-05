@@ -1,0 +1,35 @@
+# chat_send_reply — 发消息→纯文本回复
+# 覆盖框架能力：run 原语（真实调 minimax）
+# 对应 PRD 路径1：发消息→纯文本回复
+case: chat_send_reply
+module: chat
+timeout: 60
+
+setup:
+  - name: 建会话
+    requests:
+      - 'POST /session {"title": "v2-reply-test", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 发消息同步等纯文本回复
+    run: { content: "用一句话回答：你好，回复 HELLO-V2" }
+    check:
+      - .state == "idle"
+      - .stopReason == "no_tool_call"
+      - .messages exists
+
+  - name: 确认消息已落库
+    requests:
+      - GET /session/{sid}/messages
+    check:
+      - .items exists
+      - .hasMore == false
+
+teardown:
+  - name: 删除会话
+    requests:
+      - DELETE /session/{sid}

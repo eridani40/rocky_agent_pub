@@ -1,0 +1,554 @@
+
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EASY OPC — Skill 管理 v10</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #D97757; --accent-hover: #C25E3F; --accent-light: #F4E5DE; --accent-surface: #FBF1ED;
+  --sage: #5B7A6B; --sage-light: #E3F0E8; --gold: #B89160; --gold-light: #F5E8D5; --indigo: #3730A3;
+  --bg: #FAF6F0; --bg-warm: #F0EEE6; --surface: #FAF9F6; --surface-2: #FFFDF8;
+  --fg: #1A1A1A; --fg-2: #3D3929; --fg-3: #5C5A52; --muted: #87867F; --muted-2: #6B6A63;
+  --border: #E3E1DA; --border-2: #D9D6CE; --border-strong: #C7C4BB;
+  --danger: #DC2626; --danger-light: #FEE2E2;
+}
+[data-theme="dark"] {
+  --accent: #E0916F; --accent-hover: #D97757; --accent-light: #3D2E26; --accent-surface: #2A1F1A;
+  --sage: #7A9B8C; --sage-light: #1E2D27; --gold: #D4AB78; --gold-light: #2E2519; --indigo: #818CF8;
+  --bg: #1A1816; --bg-warm: #232120; --surface: #1E1C1A; --surface-2: #252321;
+  --fg: #F0EDE8; --fg-2: #D8D4CE; --fg-3: #B5B0A8; --muted: #807C75; --muted-2: #9A9590;
+  --border: #353231; --border-2: #423E3C; --border-strong: #555150;
+  --danger: #EF4444; --danger-light: #3D2222;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--fg); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.5; height: 100vh; overflow: hidden; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.app-root { display: flex; height: 100vh; }
+
+.icon-nav { width: 56px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 14px 0; }
+.brand { width: 34px; height: 34px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-family: 'Playfair Display', serif; font-weight: 700; font-size: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(217,119,87,0.3); text-decoration: none; }
+.nav-spacer { flex: 1; }
+.nav-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; position: relative; color: var(--muted); margin-bottom: 4px; }
+.nav-icon:hover { background: var(--accent-surface); color: var(--accent); }
+.nav-icon.active { background: var(--accent-surface); color: var(--accent); }
+.nav-icon.active::before { content: ''; position: absolute; left: -8px; top: 50%; transform: translateY(-50%); width: 3px; height: 20px; background: var(--accent); border-radius: 0 3px 3px 0; }
+.nav-tooltip { position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); background: var(--fg); color: var(--surface); font-size: 11px; padding: 4px 10px; border-radius: 6px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 100; font-family: 'JetBrains Mono', monospace; }
+.nav-icon:hover .nav-tooltip { opacity: 1; }
+.theme-toggle { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; color: var(--muted); }
+.theme-toggle:hover { background: var(--bg-warm); color: var(--fg); }
+
+.config-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.config-header { padding: 24px 32px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.config-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); }
+.config-desc { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 3px; }
+.config-body { padding: 20px 32px 40px; flex: 1; max-width: 880px; }
+
+.toggle { width: 36px; height: 20px; background: var(--border-strong); border-radius: 100px; position: relative; cursor: pointer; transition: background 0.2s; flex-shrink: 0; display: inline-block; }
+.toggle.on { background: var(--accent); }
+.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+.toggle.on::after { transform: translateX(16px); }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; border: none; outline: none; font-family: 'Inter', sans-serif; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { background: var(--surface-2); border: 1px solid var(--border-2); color: var(--fg-3); }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+.btn-danger { background: var(--danger); color: white; }
+.btn-danger:hover { filter: brightness(1.1); }
+
+.badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; }
+.badge-enabled { background: var(--sage-light); color: var(--sage); }
+.badge-disabled { background: var(--bg-warm); color: var(--muted); }
+
+.del-btn { width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--border-2); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; color: var(--muted-2); flex-shrink: 0; }
+.del-btn:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-light); }
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(30, 25, 20, 0.4); backdrop-filter: blur(4px); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.modal { background: var(--surface); border: 1px solid var(--border-2); border-radius: 14px; box-shadow: 0 16px 48px rgba(40,30,20,0.2); width: 420px; max-width: 90vw; }
+.modal-header { padding: 20px 24px 12px; display: flex; align-items: center; justify-content: space-between; }
+.modal-title { font-size: 16px; font-weight: 700; color: var(--fg); }
+.modal-body { padding: 0 24px 20px; font-size: 13px; color: var(--muted-2); }
+.modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.modal-close { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted); transition: all 0.15s; }
+.modal-close:hover { background: var(--bg-warm); color: var(--fg); }
+
+/* ── skill tabs ── */
+.skill-tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+.skill-tab { font-size: 13px; font-weight: 600; color: var(--muted-2); padding: 8px 14px; border-bottom: 2px solid transparent; cursor: pointer; margin-bottom: -1px; }
+.skill-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── drop zone ── */
+.drop-zone { border: 1.5px dashed var(--border-strong); border-radius: 14px; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; transition: all 0.15s; background: var(--surface-2); margin-bottom: 22px; text-align: center; }
+.drop-zone:hover { border-color: var(--accent); background: var(--accent-surface); }
+.drop-zone.over { border-color: var(--accent); background: var(--accent-surface); box-shadow: 0 0 0 4px var(--accent-light); }
+.drop-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--bg-warm); display: flex; align-items: center; justify-content: center; color: var(--muted-2); transition: all 0.15s; }
+.drop-zone:hover .drop-icon, .drop-zone.over .drop-icon { background: var(--accent-light); color: var(--accent); }
+.drop-title { font-size: 14px; font-weight: 600; color: var(--fg); }
+.drop-sub { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+.drop-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ── skill list ── */
+.skill-list { display: flex; flex-direction: column; gap: 8px; }
+.skill-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; transition: border-color 0.15s; }
+.skill-card:hover { border-color: var(--border-strong); }
+.skill-logo { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), #C25E3F); color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 6px rgba(217,119,87,0.22); }
+.skill-info { flex: 1; min-width: 0; }
+.skill-name { font-size: 13.5px; font-weight: 600; color: var(--fg); display: flex; align-items: center; gap: 8px; }
+.skill-desc { font-size: 12px; color: var(--muted-2); margin-top: 3px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.skill-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.skill-empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 10px; font-family: 'JetBrains Mono', monospace; }
+
+/* ── preview modal ── */
+.pv-overlay { position: fixed; inset: 0; background: rgba(30,25,20,0.45); backdrop-filter: blur(4px); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.pv-modal { background: var(--surface); border: 1px solid var(--border-2); border-radius: 14px; box-shadow: 0 20px 56px rgba(40,30,20,0.24); width: 820px; max-width: 94vw; height: 560px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+.pv-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.pv-title { font-size: 15px; font-weight: 700; color: var(--fg); display: flex; align-items: center; gap: 8px; }
+.pv-body { flex: 1; display: flex; min-height: 0; }
+.pv-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; padding: 8px 6px; background: var(--surface-2); }
+.pv-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pv-filepath { font-size: 11px; color: var(--muted); padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-pre { flex: 1; overflow: auto; margin: 0; padding: 14px 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; color: var(--fg-2); white-space: pre-wrap; word-break: break-word; background: var(--surface); }
+.pv-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; font-family: 'JetBrains Mono', monospace; }
+.pv-item { display: flex; align-items: center; gap: 5px; height: 26px; padding-right: 8px; border-radius: 6px; cursor: pointer; }
+.pv-item:hover { background: var(--bg-warm); }
+.pv-item.file.active { background: var(--accent-surface); }
+.pv-item.file.active .pv-name { color: var(--accent); }
+.pv-twisty { width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; color: var(--muted); flex-shrink: 0; }
+.pv-twisty svg { transition: transform 0.12s; }
+.pv-twisty.open svg { transform: rotate(90deg); }
+.pv-ico { display: inline-flex; flex-shrink: 0; }
+.pv-ico.dir { color: var(--gold); }
+.pv-ico.file { color: var(--muted); }
+.pv-name { font-size: 12.5px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+.fade-in { animation: fadeIn 0.2s ease-out; }
+@keyframes fadeIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+</style>
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('eopc-theme')||'light');</script>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const NAV_LINKS = [
+  { id:'chat', label:'会话', icon:'chat', href:'mqnbr367-easy-opc-chat-v9a.html' },
+  { id:'app', label:'用户设置', icon:'user', href:'easy-opc-app-config-v10.html' },
+  { id:'plugin', label:'插件设置', icon:'plugin', href:'easy-opc-plugin-config-v10.html' },
+  { id:'dev', label:'系统设置', icon:'dev', href:'easy-opc-dev-config-v10.html' },
+  { id:'skill', label:'Skill', icon:'skill', href:'easy-opc-skill-v10.html' },
+];
+
+function Icon({ name, size = 16 }) {
+  const icons = {
+    chat:<g><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></g>,
+    user:<g><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0116 0v1"/></g>,
+    plugin:<g><path d="M14 2v6h6"/><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></g>,
+    dev:<g><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12l8.73-5.04"/><path d="M12 22V12"/></g>,
+    skill:<g><path d="M12 2L14 10 22 12 14 14 12 22 10 14 2 12 10 10Z"/></g>,
+    sun:<g><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></g>,
+    moon:<g><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></g>,
+    close:<g><path d="M18 6L6 18M6 6l12 12"/></g>,
+    trash:<g><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></g>,
+    file:<g><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></g>,
+    folder:<g><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></g>,
+    folderOpen:<g><path d="M3 7a2 2 0 012-2h4l2 3h8a2 2 0 012 2v1H3z"/><path d="M3 11h19l-2 7a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></g>,
+    chevronRight:<g><path d="M9 18l6-6-6-6"/></g>,
+    eye:<g><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></g>,
+    upload:<g><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></g>,
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{icons[name]}</svg>;
+}
+
+function AppShell({ current, children }) {
+  const [theme, setTheme] = useState(() => localStorage.getItem('eopc-theme') || 'light');
+  useEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
+  const toggleTheme = () => setTheme(t => { const n = t === 'light' ? 'dark' : 'light'; localStorage.setItem('eopc-theme', n); return n; });
+  return (
+    <div className="app-root">
+      <nav className="icon-nav">
+        <a className="brand" href="easy-opc-framework-v10.html" title="EASY OPC · 首页">E</a>
+        {NAV_LINKS.map(item => (
+          <div key={item.id} className={"nav-icon " + (current === item.id ? 'active' : '')} onClick={() => { location.href = item.href; }}>
+            <Icon name={item.icon} size={20} />
+            <span className="nav-tooltip">{item.label}</span>
+          </div>
+        ))}
+        <div className="nav-spacer" />
+        <div className="theme-toggle" onClick={toggleTheme} title="切换主题">
+          <Icon name={theme === 'light' ? 'moon' : 'sun'} size={18} />
+        </div>
+      </nav>
+      {children}
+    </div>
+  );
+}
+
+// 解析 SKILL.md 顶部的 YAML frontmatter（name / description）
+function parseFrontmatter(text) {
+  const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!m) return {};
+  const out = {};
+  m[1].split('\n').forEach(line => {
+    const idx = line.indexOf(':');
+    if (idx > -1) {
+      const k = line.slice(0, idx).trim();
+      const v = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
+      if (k) out[k] = v;
+    }
+  });
+  return out;
+}
+
+// 读取文件为文本（Promise）
+function readAsText(file) {
+  return new Promise(res => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result || ''));
+    r.onerror = () => res('');
+    r.readAsText(file);
+  });
+}
+// 从扁平路径构建树；每个文件节点带 _getContent() 懒读取
+function buildTreeFromPaths(rootName, paths) {
+  const root = { type: 'dir', name: rootName, children: [] };
+  paths.forEach(p => {
+    const parts = String(p.path).split('/').filter(Boolean);
+    let cur = root.children;
+    parts.forEach((part, i) => {
+      const isFile = i === parts.length - 1;
+      let node = cur.find(n => n.name === part && (isFile ? n.type === 'file' : n.type === 'dir'));
+      if (!node) {
+        node = isFile ? { type: 'file', name: part, _getContent: p.getContent } : { type: 'dir', name: part, children: [] };
+        cur.push(node);
+      }
+      if (!isFile) cur = node.children;
+    });
+  });
+  return root;
+}
+// 判断扁平路径是否有公共顶层文件夹（决定 root 名 / 是否剥离首段）
+function deriveRoot(paths) {
+  if (!paths.length) return { rootName: 'skill', strip: 0 };
+  const firsts = paths.map(p => String(p).split('/')[0]);
+  const top = firsts[0];
+  const same = firsts.every(x => x === top) && paths.some(p => p.includes('/'));
+  return same ? { rootName: top, strip: 1 } : { rootName: 'skill', strip: 0 };
+}
+function findNode(node, pred) {
+  if (pred(node)) return node;
+  for (const c of (node.children || [])) { const f = findNode(c, pred); if (f) return f; }
+  return null;
+}
+// 从构建好的树里找 SKILL.md → 解析 frontmatter → 入库
+async function finalizeSkill(root, fallbackName, addSkill) {
+  let name = fallbackName, description = '（未提供介绍）';
+  const sm = findNode(root, n => n.type === 'file' && /^skill\.md$/i.test(n.name));
+  if (sm) {
+    try {
+      const text = sm.content != null ? sm.content : (sm._getContent ? await sm._getContent() : '');
+      const fm = parseFrontmatter(text);
+      if (fm.name) name = fm.name;
+      if (fm.description) description = fm.description;
+    } catch (e) {}
+  }
+  addSkill(name, description, root);
+}
+// .zip / .skill —— 当作压缩包解压
+async function installFromArchive(file, addSkill) {
+  if (!window.JSZip) { addSkill(file.name.replace(/\.[^.]+$/, ''), '（JSZip 未加载，无法解压 ' + file.name + '）', { type: 'file', name: file.name, content: '' }); return; }
+  try {
+    const zip = await JSZip.loadAsync(file);
+    const entries = [];
+    zip.forEach((rel, obj) => { if (!obj.dir) entries.push({ rel, obj }); });
+    if (!entries.length) return;
+    const info = deriveRoot(entries.map(e => e.rel));
+    const paths = entries.map(e => ({ path: e.rel.split('/').slice(info.strip).join('/'), getContent: () => e.obj.async('string').catch(() => '') })).filter(p => p.path);
+    const root = buildTreeFromPaths(info.rootName, paths);
+    finalizeSkill(root, file.name.replace(/\.(zip|skill)$/i, ''), addSkill);
+  } catch (e) {
+    addSkill(file.name.replace(/\.[^.]+$/, ''), '（无法解析 ' + file.name + '）', { type: 'file', name: file.name, content: '' });
+  }
+}
+// 文件夹（webkitdirectory）
+function installFromFolder(fileList, addSkill) {
+  if (!fileList || !fileList.length) return;
+  const first = fileList[0].webkitRelativePath || fileList[0].name;
+  const top = first.split('/')[0];
+  const paths = [];
+  Array.from(fileList).forEach(f => {
+    const rel = (f.webkitRelativePath || f.name).split('/').slice(1).join('/');
+    if (rel) paths.push({ path: rel, getContent: () => readAsText(f) });
+  });
+  if (!paths.length) return;
+  const root = buildTreeFromPaths(top, paths);
+  finalizeSkill(root, top, addSkill);
+}
+// 单个文件：.md 走 frontmatter；.zip/.skill 走解压；其它直接入列
+function installFiles(files, addSkill) {
+  Array.from(files).forEach(f => {
+    const lower = f.name.toLowerCase();
+    if (/\.(zip|skill)$/.test(lower)) {
+      installFromArchive(f, addSkill);
+    } else if (lower.endsWith('.md') || f.type === 'text/markdown') {
+      readAsText(f).then(text => {
+        const fm = parseFrontmatter(text);
+        addSkill(fm.name || f.name.replace(/\.md$/i, ''), fm.description || '（未提供介绍）', { type: 'file', name: f.name, content: text });
+      });
+    } else {
+      addSkill(f.name.replace(/\.[^.]+$/, ''), '已导入文件 · ' + f.name, { type: 'file', name: f.name, content: '' });
+    }
+  });
+}
+// 拖拽：拖文件夹才走目录遍历；拖文件（.zip/.skill/.md…）走 installFiles 正确路由
+async function installFromDataTransfer(dataTransfer, addSkill) {
+  const items = dataTransfer.items;
+  if (items && items.length && items[0].webkitGetAsEntry) {
+    const entries = [];
+    for (let i = 0; i < items.length; i++) { const e = items[i].webkitGetAsEntry(); if (e) entries.push(e); }
+    const hasDir = entries.some(e => e.isDirectory);
+    if (hasDir) {
+      const acc = [];
+      for (const e of entries) await walkEntry(e, '', acc);
+      if (acc.length) {
+        const info = deriveRoot(acc.map(a => a.path));
+        const paths = acc.map(a => ({ path: a.path.split('/').slice(info.strip).join('/'), getContent: a.getContent })).filter(p => p.path);
+        const root = buildTreeFromPaths(info.rootName, paths);
+        finalizeSkill(root, info.rootName, addSkill);
+        return;
+      }
+    }
+  }
+  installFiles(dataTransfer.files, addSkill);
+}
+function readAllEntries(dirReader) {
+  return new Promise(resolve => {
+    const out = [];
+    const read = () => dirReader.readEntries(batch => { if (!batch.length) resolve(out); else { out.push(...batch); read(); } }, () => resolve(out));
+    read();
+  });
+}
+function walkEntry(entry, prefix, acc) {
+  const path = prefix ? prefix + '/' + entry.name : entry.name;
+  if (entry.isFile) {
+    acc.push({ path, getContent: () => new Promise(res => entry.file(f => readAsText(f).then(res), () => res(''))) });
+    return Promise.resolve();
+  }
+  if (entry.isDirectory) {
+    return readAllEntries(entry.createReader()).then(entries => Promise.all(entries.map(e => walkEntry(e, path, acc))));
+  }
+  return Promise.resolve();
+}
+
+const MOCK_SKILLS = [
+  { id: 'sk1', name: 'web-prototype', description: '用种子模板与布局库生成自包含 HTML 原型，覆盖落地页 / 文档 / SaaS。', enabled: true, root: { type:'dir', name:'web-prototype', children:[
+    { type:'file', name:'SKILL.md', content:'---\nname: web-prototype\ndescription: 用种子模板与布局库生成自包含 HTML 原型。\n---\n\n# Web Prototype\n\n复制 assets/template.html 作为种子，从 references/layouts.md 粘贴区块，最后跑 references/checklist.md 自检。\n\n## 资源\n- assets/template.html — 种子\n- references/layouts.md — 区块骨架\n- references/checklist.md — P0/P1/P2 自检' },
+    { type:'dir', name:'assets', children:[
+      { type:'file', name:'template.html', content:'<!doctype html>\n<html lang="zh-CN">\n<head>\n  <meta charset="UTF-8">\n  <title>Seed Template</title>\n</head>\n<body>\n  <main id="content"><!-- 粘贴布局 --></main>\n</body>\n</html>' },
+    ]},
+    { type:'dir', name:'references', children:[
+      { type:'file', name:'layouts.md', content:'# Layouts\n\n- hero\n- features (3 列)\n- stats\n- cta\n\n每个区块都带 [REPLACE] 占位，填真实文案。' },
+      { type:'file', name:'checklist.md', content:'# Self-check\n\nP0: 单一 accent / 显示衬线 / 占位非外链 / data-od-id\nP1: 移动端 reflow\nP2: 减少装饰' },
+    ]},
+  ]}},
+  { id: 'sk2', name: 'baoyu-markdown-to-html', description: '将 Markdown 转为带主题、代码高亮、底部引用的微信公众号 HTML。', enabled: true, root: { type:'dir', name:'baoyu-markdown-to-html', children:[
+    { type:'file', name:'SKILL.md', content:'---\nname: baoyu-markdown-to-html\ndescription: Markdown 转带主题 HTML，支持代码高亮 / 数学 / 底部引用。\n---\n\n# Markdown → HTML\n\n支持主题、PlantUML、脚注、外链转底部引用。' },
+    { type:'file', name:'themes.css', content:':root {\n  --primary: #3f51b5;\n  --code-bg: #f6f8fa;\n}\n.theme-dark { color-scheme: dark; }' },
+  ]}},
+  { id: 'sk3', name: 'deep-research', description: '多源搜索 + 对抗式核验，输出带引用的研究报告。', enabled: false, root: { type:'dir', name:'deep-research', children:[
+    { type:'file', name:'SKILL.md', content:'---\nname: deep-research\ndescription: 多源搜索与对抗式核验，产出带引用的研究报告。\n---\n\n# Deep Research\n\n扇出搜索 → 抓取源 → 对抗式核验 → 综合成引用报告。' },
+  ]}},
+];
+
+function findFirstFile(node, prefix) {
+  const path = (prefix ? prefix + '/' : '') + node.name;
+  if (node.type === 'file') return { path, node };
+  for (const c of (node.children || [])) {
+    const f = findFirstFile(c, path);
+    if (f) return f;
+  }
+  return null;
+}
+function collectDirs(node, prefix, out) {
+  const path = (prefix ? prefix + '/' : '') + node.name;
+  if (node.type === 'dir') {
+    out[path] = true;
+    (node.children || []).forEach(c => collectDirs(c, path, out));
+  }
+  return out;
+}
+
+function SkillPage() {
+  const [skills, setSkills] = useState(MOCK_SKILLS);
+  const [preview, setPreview] = useState(null);
+  const [delTarget, setDelTarget] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInput = useRef(null);
+  const folderInput = useRef(null);
+
+  const uid = () => 'sk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const addSkill = (name, description, root) => setSkills(prev => [{ id: uid(), name, description: description || '（未提供介绍）', enabled: true, root }, ...prev]);
+  const toggleSkill = (id) => setSkills(prev => prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s));
+  const deleteSkill = (id) => { setSkills(prev => prev.filter(s => s.id !== id)); setDelTarget(null); };
+
+  const onPickFiles = (e) => { installFiles(e.target.files, addSkill); e.target.value = ''; };
+  const onPickFolder = (e) => { installFromFolder(e.target.files, addSkill); e.target.value = ''; };
+  const onDrop = (e) => { e.preventDefault(); setDragOver(false); installFromDataTransfer(e.dataTransfer, addSkill); };
+
+  return (
+    <main className="config-area fade-in">
+      <div className="config-header">
+        <div>
+          <div className="config-title">Skill 管理</div>
+          <div className="config-desc">skill · 安装 / 启用 / 预览 / 删除</div>
+        </div>
+      </div>
+      <div className="config-body">
+        <div className="skill-tabs">
+          <div className="skill-tab active">Skill 管理</div>
+        </div>
+
+        <div className={"drop-zone " + (dragOver ? 'over' : '')}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}>
+          <div className="drop-icon"><Icon name="upload" size={20} /></div>
+          <div className="drop-title">拖拽 Skill 到此处安装</div>
+          <div className="drop-sub">支持 文件夹 · .zip · .skill 包（自动解析 SKILL.md）</div>
+          <div className="drop-actions">
+            <button className="btn btn-secondary" onClick={e => { e.stopPropagation(); fileInput.current && fileInput.current.click(); }}><Icon name="file" size={12} /> 选择文件</button>
+            <button className="btn btn-secondary" onClick={e => { e.stopPropagation(); folderInput.current && folderInput.current.click(); }}><Icon name="folder" size={12} /> 选择文件夹</button>
+          </div>
+          <input ref={fileInput} type="file" accept=".zip,.skill,.md,.json,.txt" multiple style={{ display: 'none' }} onChange={onPickFiles} />
+          <input ref={folderInput} type="file" multiple style={{ display: 'none' }} onChange={onPickFolder} {...{ webkitdirectory: '', directory: '' }} />
+        </div>
+
+        <div className="skill-list">
+          {skills.length === 0 && <div className="skill-empty">还没有已安装的 Skill</div>}
+          {skills.map(s => (
+            <div key={s.id} className="skill-card">
+              <div className="skill-logo"><Icon name="skill" size={18} /></div>
+              <div className="skill-info">
+                <div className="skill-name">{s.name} {s.enabled ? <span className="badge badge-enabled">已启用</span> : <span className="badge badge-disabled">已禁用</span>}</div>
+                <div className="skill-desc">{s.description}</div>
+              </div>
+              <div className="skill-controls">
+                <div className={"toggle " + (s.enabled ? 'on' : '')} onClick={() => toggleSkill(s.id)} title="启用 / 禁用" />
+                <button className="btn btn-secondary" onClick={() => setPreview(s)}><Icon name="eye" size={12} /> 预览</button>
+                <button className="del-btn" onClick={() => setDelTarget(s)} title="删除"><Icon name="trash" size={14} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {preview && <SkillPreview skill={preview} onClose={() => setPreview(null)} />}
+      {delTarget && (
+        <div className="modal-overlay" onClick={() => setDelTarget(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">删除 Skill</div>
+              <div className="modal-close" onClick={() => setDelTarget(null)}><Icon name="close" size={16} /></div>
+            </div>
+            <div className="modal-body">确定要删除 <strong style={{ color: 'var(--fg)' }}>{delTarget.name}</strong> 吗？该 Skill 将不再可用，此操作无法撤销。</div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDelTarget(null)}>取消</button>
+              <button className="btn btn-danger" onClick={() => deleteSkill(delTarget.id)}>确认删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function SkillPreview({ skill, onClose }) {
+  const [expanded, setExpanded] = useState(() => collectDirs(skill.root, '', {}));
+  const [sel, setSel] = useState(() => findFirstFile(skill.root, ''));
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!sel) { setContent(''); return; }
+    const node = sel.node;
+    if (node.content != null) { setContent(node.content); return; }
+    if (node._getContent) {
+      setLoading(true); setContent('');
+      node._getContent().then(t => { if (!cancelled) { setContent(t || ''); setLoading(false); } });
+      return () => { cancelled = true; };
+    }
+    setContent('');
+  }, [sel]);
+
+  return (
+    <div className="pv-overlay" onClick={onClose}>
+      <div className="pv-modal" onClick={e => e.stopPropagation()}>
+        <div className="pv-header">
+          <div className="pv-title"><Icon name="skill" size={15} /> {skill.name}</div>
+          <div className="modal-close" onClick={onClose}><Icon name="close" size={16} /></div>
+        </div>
+        <div className="pv-body">
+          <div className="pv-tree">
+            <FileTreeNode node={skill.root} depth={0} prefix="" expanded={expanded} setExpanded={setExpanded} activePath={sel && sel.path} onSelect={(path, node) => setSel({ path, node })} />
+          </div>
+          <div className="pv-content">
+            {sel ? (
+              <React.Fragment>
+                <div className="pv-filepath mono">{sel.path}</div>
+                <pre className="pv-pre">{loading ? '（加载中…）' : (content || '（空文件 / 二进制）')}</pre>
+              </React.Fragment>
+            ) : <div className="pv-empty">选择左侧文件查看内容</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FileTreeNode({ node, depth, prefix, expanded, setExpanded, activePath, onSelect }) {
+  const path = (prefix ? prefix + '/' : '') + node.name;
+  if (node.type === 'dir') {
+    const open = !!expanded[path];
+    return (
+      <div>
+        <div className="pv-item" style={{ paddingLeft: 6 + depth * 14 }} onClick={() => setExpanded(p => ({ ...p, [path]: !p[path] }))}>
+          <span className={"pv-twisty " + (open ? 'open' : '')}><Icon name="chevronRight" size={10} /></span>
+          <span className="pv-ico dir"><Icon name={open ? 'folderOpen' : 'folder'} size={13} /></span>
+          <span className="pv-name">{node.name}</span>
+        </div>
+        {open && (node.children || []).map((c, i) => (
+          <FileTreeNode key={i} node={c} depth={depth + 1} prefix={path} expanded={expanded} setExpanded={setExpanded} activePath={activePath} onSelect={onSelect} />
+        ))}
+      </div>
+    );
+  }
+  const isActive = activePath === path;
+  return (
+    <div className={"pv-item file " + (isActive ? 'active' : '')} style={{ paddingLeft: 6 + depth * 14 + 14 }} onClick={() => onSelect(path, node)}>
+      <span className="pv-ico file"><Icon name="file" size={13} /></span>
+      <span className="pv-name">{node.name}</span>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <AppShell current="skill"><SkillPage /></AppShell>
+);
+</script>
+</body>
+</html>

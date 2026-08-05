@@ -1,0 +1,194 @@
+/**
+ * 设计 token 物理源（CSS 变量 + Tailwind v4 @theme）
+ * 参考: specs/ui/regulation/01-tokens.md（v0.0.165 银灰体系，唯一 hex 权威表）
+ *       reqs/[working] v0.0.165.ui_upgrade/design/tokens.css（设计稿参考实现）
+ *
+ * v0.0.165 换肤：暖橙 terracotta → 银灰中性 + 8 色彩虹身份点缀（light-only）。
+ *   双轨命名（INV-9）：
+ *     1. 新 regulation token 以无前缀名（--bg / --surface / --fg / --btn-* / --hue-* ...）
+ *        作正式契约，新代码走无前缀。
+ *     2. 现有 --color-* 前缀 alias 保留（tailwind class `bg-accent`/`text-fg` 全站上百处引用），
+ *        灌新中性值 → tailwind class 视觉切换即换色（避免全站 Tailwind class 大爆炸）；
+ *        v0.0.166+ 再逐步清 alias。
+ *
+ * 严肃基调裁决（v0.0.165，用户 2026-07-17）：
+ *   - 删所有 @keyframes（drawerUp/fadeIn/fabIn/floaty/idlePulse/wave）——INV-3
+ *   - 删衬线字体（brand 用 --brand-grad 渐变块，不用衬线字）——INV-4
+ *   - 深色模式下线，无 [data-theme=dark] 变量集——light-only
+ */
+@import 'tailwindcss';
+
+/* ============================================================
+ * 1. Tailwind v4 @theme —— tailwind class 消费的 --color-* alias（灌新中性值）
+ * ============================================================ */
+@theme {
+  /* —— 背景层（regulation 01 §1.1 银灰）—— */
+  --color-bg: #fafafa;
+  --color-bg-warm: #f4f4f5;
+  --color-surface: #ffffff;
+  --color-surface-2: #f4f4f5;
+
+  /* —— 文字（regulation 01 §1.2）—— */
+  --color-fg: #0a0a0a;
+  --color-fg-2: #3f3f46;
+  --color-fg-3: #52525b;
+  --color-muted: #71717a;
+  --color-muted-2: #a1a1aa;
+
+  /* —— 边框（regulation 01 §1.3）—— */
+  --color-border: #e4e4e7;
+  --color-border-2: #d4d4d8;
+  --color-border-strong: #a1a1aa;
+
+  /* —— accent alias 灌黑主 CTA（v0.0.165 语义污染接受，v0.0.166+ 清理；本版 INV-9） —— */
+  --color-accent: #18181b;
+  --color-accent-hover: #000000;
+  --color-accent-light: #f4f4f5;
+  --color-accent-surface: #f4f4f5;
+
+  /* —— 旧辅助色 alias 灌新中性 / hue palette（sage / gold / plum / indigo）——
+   * 旧值：sage=#5b7a6b / gold=#b89160 / plum=#7c5b6b / indigo=#3730a3
+   * 新灌：sage → hue-green（success 系）/ gold → hue-amber（warning 系）/ indigo → hue-blue（info 系）
+   */
+  --color-sage: #16a34a;
+  --color-gold: #f59e0b;
+  --color-plum: #8b5cf6;
+  --color-sage-bg: #dcfce7;
+  --color-gold-bg: #fef3c7;
+  --color-sage-light: #dcfce7;
+  --color-gold-light: #fef3c7;
+  --color-danger: #dc2626;
+  --color-danger-light: #fee2e2;
+  --color-indigo: #3b82f6;
+
+  /* —— 代码块 —— */
+  --color-code-bg: #18181b;
+  --color-code-fg: #e4e4e7;
+
+  /* —— 字体（衬线字全站下线，只留 sans + mono） —— */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* —— 圆角（regulation 01 §3） —— */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  --text-base-size: 14px;
+
+  /* —— focus 光晕（regulation 01 §3 灰环）—— */
+  --shadow-focus: 0 0 0 3px rgba(24, 24, 27, 0.15);
+}
+
+/* ============================================================
+ * 2. :root —— regulation 01 无前缀正式契约 + 新增语义 token（新代码走这层）
+ * ============================================================ */
+:root {
+  /* —— 背景 & 表面（regulation 01 §1.1） —— */
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #e4e4e7;
+  --chrome: #f7f7f8;
+
+  /* —— 文字（§1.2） —— */
+  --fg: #0a0a0a;
+  --fg-2: #3f3f46;
+  --fg-3: #52525b;
+  --muted: #71717a;
+  --muted-2: #a1a1aa;
+
+  /* —— 边框（§1.3） —— */
+  --border: #e4e4e7;
+  --border-2: #d4d4d8;
+  --border-strong: #a1a1aa;
+
+  /* —— CTA 黑白灰（§1.4） —— */
+  --btn-primary-bg: #18181b;
+  --btn-primary-hover: #000000;
+  --btn-primary-fg: #ffffff;
+  --btn-secondary-bg: #ffffff;
+  --btn-secondary-hover: #f4f4f5;
+  --btn-secondary-border: #d4d4d8;
+  --btn-secondary-fg: #18181b;
+  --btn-ghost-fg: #52525b;
+  --btn-ghost-hover-bg: #f4f4f5;
+  --btn-danger-bg: #dc2626;
+  --btn-danger-fg: #ffffff;
+
+  /* —— 状态语义（§1.5） —— */
+  --success: #16a34a;
+  --success-bg: #dcfce7;
+  --warning: #f59e0b;
+  --warning-bg: #fef3c7;
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+  --info: #3b82f6;
+  --info-bg: #dbeafe;
+
+  /* —— presence 坐席状态点四态（§1.6） —— */
+  --presence-online: #22c55e;
+  --presence-busy: #f97316;
+  --presence-idle: #eab308;
+  --presence-offline: #a1a1aa;
+
+  /* —— 彩虹 palette（§1.7，仅身份识别）—— */
+  --hue-rose: #f43f5e;
+  --hue-rose-bg: #ffe4e6;
+  --hue-orange: #f97316;
+  --hue-orange-bg: #ffedd5;
+  --hue-amber: #f59e0b;
+  --hue-amber-bg: #fef3c7;
+  --hue-green: #22c55e;
+  --hue-green-bg: #dcfce7;
+  --hue-teal: #14b8a6;
+  --hue-teal-bg: #ccfbf1;
+  --hue-blue: #3b82f6;
+  --hue-blue-bg: #dbeafe;
+  --hue-violet: #8b5cf6;
+  --hue-violet-bg: #ede9fe;
+  --hue-pink: #ec4899;
+  --hue-pink-bg: #fce7f3;
+
+  /* —— brand（§1.8，全站仅 R logo / idle hero orb 两处）—— */
+  --brand-grad: linear-gradient(135deg, #8b5cf6 0%, #ec4899 50%, #f97316 100%);
+
+  /* —— 阴影（§3，极弱工业感） —— */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.06), 0 4px 8px rgba(0, 0, 0, 0.04);
+
+  /* —— z-index 标尺（沿用 _layering.md，主题无关常量）—— */
+  --z-base: 0;
+  --z-floating: 10;
+  --z-popover: 50;
+  --z-modal: 1000;
+}
+
+/* ============================================================
+ * 3. 全局 base：背景 + 默认字体
+ * html font-size 固定 16px（Tailwind rem 刻度对齐设计稿 px）；正文字号由 body --text-base-size(14px) 决定。
+ * ============================================================ */
+html {
+  font-size: 16px;
+}
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-base-size);
+  line-height: 1.5;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* v0.0.165 起：@keyframes 全下线（严肃基调，无 drawerUp/fadeIn/fabIn/floaty/idlePulse/wave 等入场/浮动动效）
+   ≤150ms hover/按压 transition 保留（tailwind utility 层） */

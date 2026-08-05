@@ -1,0 +1,307 @@
+{
+  "sidebar": {
+    "title": "小队",
+    "newSquadAria": "新建 squad",
+    "empty": "暂无 squad，点右上「+」新建。",
+    "copySessionId": "复制 Session ID"
+  },
+  "squadPanel": {
+    "subtitle": "squad · 管理面板"
+  },
+  "tokenStatsRoute": {
+    "subtitle": "Token 统计"
+  },
+  "tab": {
+    "admin": "管理",
+    "members": "成员",
+    "autowork": "自动工作"
+  },
+  "empty": {
+    "title": "还没有 squad",
+    "hint": "建一个 squad，自动生成 leader 与群聊，开始组建你的 AI 团队。",
+    "newBtn": "新建 squad"
+  },
+  "toast": {
+    "squadCreated": "已创建 {{name}}",
+    "memberHired": "已 hire {{name}} · 自动 deployed",
+    "memberBenched": "已下岗 {{name}}{{reason}}",
+    "benchFail": "下岗失败",
+    "memberDeployed": "已上岗",
+    "metaSaved": "已保存元信息",
+    "roleSaved": "已保存角色",
+    "heartbeatSaved": "已保存心跳",
+    "heartbeatCleared": "已清空心跳",
+    "noLeaderAvailable": "当前 squad 暂无 leader，无法跳转对话",
+    "squadDeleted": "已解散团队 {{name}}",
+    "squadDeleteFail": "解散团队失败",
+    "memberHireFail": "创建成员失败"
+  },
+  "chat": {
+    "emptyHint": "在下方输入消息开始对话",
+    "inheritLabel": "继承小队默认",
+    "inheritTeamDefault": "继承团队默认"
+  },
+  "squadTree": {
+    "groupChat": "群聊",
+    "tagGroup": "{{name}} · 群聊",
+    "tagLeader": "{{name}} · leader",
+    "tagSingle": "{{name}} · 单聊"
+  },
+  "newSquadModal": {
+    "title": "新建 squad",
+    "creating": "创建中…",
+    "create": "创建",
+    "nameLabel": "squad 名称（必填）",
+    "namePlaceholder": "如：Gamma 小队",
+    "descLabel": "squad 介绍",
+    "modelLabel": "默认模型 modelDefault（必填，从已配置 provider/model 选）",
+    "leaderNameLabel": "leader 名称（必填）"
+  },
+  "benchModal": {
+    "title": "下岗 {{name}}",
+    "confirm": "确认下岗",
+    "reasonLabel": "下岗原因（必填）",
+    "reasonPlaceholder": "为什么下岗？"
+  },
+  "memberCreate": {
+    "title": "新建成员",
+    "submitting": "创建中…",
+    "submit": "创建",
+    "modeFresh": "Fresh · 新建",
+    "modeDerive": "Derive · 派生",
+    "modeDeriveAcademy": "From Classroom · 教室派生",
+    "deriveAcademyTitle": "从教室派生",
+    "deriveAcademyHint": "成员名取学生名；下方 intro / workStyle 可选手填（留空则空）。",
+    "nameLabel": "name（squad 内唯一，必填）",
+    "deriveFromLabel": "deriveFrom（选父角色）",
+    "deriveFromEmpty": "暂无可派生的 mate（仅 leader），请先用 Fresh 新建。",
+    "overridesTitle": "覆盖（可选）",
+    "overridesHint": "下方 overrides（留空则继承父）",
+    "overridePlaceholder": "留空继承"
+  },
+  "memberPanel": {
+    "profileTitle": "姓名 / 介绍",
+    "introLabel": "intro 一句话介绍（花名册用）",
+    "introPlaceholder": "一句话说明该成员的职责，如：负责前端页面与交互",
+    "workStyleLabel": "工作方式（仅注入个人会话）",
+    "workStylePlaceholder": "描述该成员的工作方式、偏好、原则…（可空）",
+    "memoryTitle": "记忆管理",
+    "skillsTitle": "技能与模型",
+    "heartbeatTitle": "心跳配置",
+    "skillsModeLabel": "custom skills",
+    "skillsModeCustom": "自定义（叠加全局）",
+    "skillsModeInherit": "继承全局"
+  },
+  "heartbeat": {
+    "errFormat": "时间格式应为 HH:mm",
+    "errOrder": "开始时间必须早于结束时间",
+    "errMin": "间隔必须 ≥ 1 分钟",
+    "benchedWarning": "该成员未上岗，配置保存但不入调度。",
+    "killswitchOff": "自主性总开关已关，配置保存但暂不生效。",
+    "emptyHint": "尚未配置心跳，填写下方活动窗口与间隔后点保存即生效。",
+    "activeWindowLabel": "活动窗口 activeWindow（跟 squad.timezone {{timezone}}）",
+    "intervalLabel": "心跳间隔（分钟）",
+    "rhythmHint": "{{name}} 的心跳节奏 · 配置后按窗口内每 interval 唤醒一轮自主工作。",
+    "save": "保存心跳配置",
+    "reset": "重置默认",
+    "clear": "清空（纯 reactive）",
+    "intervalHint": "每 {{interval}} 分钟触发一次心跳（仅在工作时间段内）",
+    "windowsLabel": "工作时间段（跟 squad.timezone {{timezone}}）",
+    "windowsEmptyHint": "未设时段 = 全天可调度",
+    "windowAdd": "添加工作时间段",
+    "windowRemove": "删除",
+    "scopeLabel": "触发范围",
+    "scopeAll": "全员（所有 deployed 成员）",
+    "scopeWhitelist": "白名单（仅勾选成员）",
+    "scopeWhitelistHint": "仅唤醒勾选成员，后续新增成员不自动纳入",
+    "scopeNoMembers": "暂无 deployed 成员"
+  },
+  "memberCard": {
+    "benchReasonPrefix": "下岗原因："
+  },
+  "membersTab": {
+    "hireBtn": "新增成员"
+  },
+  "manageTab": {
+    "nameLabel": "squad 名称",
+    "descLabel": "squad 介绍",
+    "modelLabel": "默认模型 modelDefault",
+    "save": "保存元信息"
+  },
+  "deleteSquad": {
+    "sectionLabel": "危险操作",
+    "hint": "解散团队将永久删除该团队的所有成员会话、历史对话与调度，操作不可撤销。",
+    "btn": "解散团队",
+    "modalTitle": "解散团队 {{name}}",
+    "warning": "此操作不可逆：团队数据、成员会话、历史消息与所有调度都会被物理删除，无法恢复。",
+    "confirmLabel": "请输入队名「{{name}}」确认",
+    "confirm": "确认解散",
+    "confirming": "解散中…"
+  },
+  "memory": {
+    "empty": "暂无摘要，触发整理后此处显示角色长期记忆。",
+    "compact": "整理记忆",
+    "compacting": "整理中…",
+    "compactTriggered": "已触发整理，稍后刷新查看新摘要",
+    "compactFail": "整理失败",
+    "compactInProgress": "正在整理中，请稍后"
+  },
+  "autonomy": {
+    "label": "enableHeartBeat（自主性总开关）",
+    "on": "自主工作已开启，成员将按心跳节奏主动运转",
+    "off": "已暂停自主工作，成员仅响应对话",
+    "toggleFail": "切换失败",
+    "errorPrefix": "切换失败："
+  },
+  "budget": {
+    "label": "budget（团队 token 预算 · daily）",
+    "loadFail": "加载预算失败",
+    "errorPrefix": "预算加载失败：",
+    "consumedPrefix": "已耗",
+    "limitPrefix": "上限",
+    "remainingPrefix": "剩余",
+    "unlimited": "无预算限制",
+    "windowEndLabel": "回血时刻",
+    "overLimitHint": "已超限，proactive 将被跳过（reactive 仍响应）",
+    "switchOn": "限量（设置上限）",
+    "switchOff": "不限量",
+    "limitInputLabel": "上限 (tokens)",
+    "save": "保存预算"
+  },
+  "autoWork": {
+    "title": "自动工作历史",
+    "loadFail": "加载历史失败",
+    "errorTitle": "历史加载失败",
+    "emptyTitle": "暂无自动工作记录",
+    "emptyHint": "配置心跳后，记录将在此呈现。"
+  },
+  "role": {
+    "leader": "leader",
+    "mate": "mate"
+  },
+  "memberState": {
+    "deployed": "deployed",
+    "benched": "benched"
+  },
+  "autoWorkReason": {
+    "heartbeat": "心跳"
+  },
+  "autoWorkResult": {
+    "fired": "已触发",
+    "skippedBusy": "忙",
+    "skippedBudget": "预算尽",
+    "skippedWindow": "非工作时段",
+    "skippedKillswitch": "总开关关"
+  },
+  "seats": {
+    "tab": {
+      "seats": "首页",
+      "panel": "管理",
+      "autowork": "自动工作"
+    },
+    "onlineBadge": "{{count}} 在线",
+    "emptyMembers": "该 squad 暂无成员，点右上「+ 新增成员」招募。",
+    "sectionSeats": "坐席 · {{count}}",
+    "sectionMembers": "成员 · {{count}}",
+    "sectionLeader": "队长",
+    "sectionPanorama": "项目全景",
+    "status": {
+      "online": "在线待命",
+      "busy": "推理中…",
+      "offline": "已下岗"
+    },
+    "stats": {
+      "onlineLabel": "成员在线",
+      "inProgressLabel": "进行中任务",
+      "todayMsgLabel": "今日消息",
+      "tokenUsedLabel": "已用 token",
+      "empty": "—"
+    },
+    "team": {
+      "groupChatTitle": "群聊",
+      "panoramaTitle": "业务全景",
+      "tokenStatsTitle": "Token 统计"
+    },
+    "card": {
+      "enter": "进入对话",
+      "more": "更多",
+      "leaderBadge": "LEADER"
+    },
+    "menu": {
+      "edit": "编辑",
+      "bench": "下岗（bench）",
+      "deploy": "复岗（deploy）"
+    },
+    "addCard": {
+      "title": "新增成员"
+    },
+    "viewSwitch": {
+      "active": "在岗",
+      "all": "全部"
+    }
+  },
+  "tokenWidget": {
+    "title": "Token 用量",
+    "viewDetail": "查看详情",
+    "todayLabel": "今日",
+    "trend7d": "7 日趋势",
+    "consumedLabel": "近 60 天合计",
+    "kindInput": "输入",
+    "kindOutput": "输出",
+    "kindCache": "缓存"
+  },
+  "task": {
+    "statusLabels": {
+      "todo": "未开始",
+      "waiting": "等待中",
+      "in_progress": "进行中",
+      "done": "已结束"
+    }
+  },
+  "timeAgo": {
+    "justNow": "刚才",
+    "minutesAgo": "{{n}} 分钟前",
+    "hoursAgo": "{{n}} 小时前",
+    "daysAgo": "{{n}} 天前"
+  },
+  "panorama": {
+    "title": "业务全景",
+    "subtitle": "squad · 业务全景",
+    "tabs": {
+      "goals": "目标",
+      "requirements": "需求",
+      "tasks": "任务",
+      "more": "更多"
+    },
+    "idle": {
+      "title": "业务全景",
+      "subtitle": "由团队 leader 搭建",
+      "desc": "直接告诉 leader 想看什么：「帮我搭建一个看板，展示……」，leader 会为你生成。",
+      "atLeaderBtn": "找 leader 搭看板"
+    },
+    "toolbar": {
+      "create": "新建{{label}}"
+    },
+    "archive": {
+      "active": "活跃",
+      "withArchived": "含归档",
+      "buttonTitle": "归档"
+    },
+    "events": {
+      "title": "事件流"
+    },
+    "modal": {
+      "createTitle": "新建 {{label}}",
+      "editTitle": "编辑 {{label}}",
+      "required": "{{field}} 为必填项",
+      "statusField": "状态",
+      "statusReadonly": "状态只读：请通过看板拖拽或跃迁变更"
+    },
+    "toast": {
+      "transitionOk": "{{id}} 已跃迁到 {{to}}",
+      "saveOk": "已保存",
+      "archived": "{{id}} 已归档"
+    },
+    "barTotal": "{{label}} 共 {{count}} 条"
+  }
+}

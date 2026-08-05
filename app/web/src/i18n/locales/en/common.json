@@ -1,0 +1,61 @@
+{
+  "action": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "reset": "Reset",
+    "close": "Close",
+    "retry": "Retry",
+    "search": "Search",
+    "refresh": "Refresh",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "back": "Back",
+    "apply": "Apply"
+  },
+  "status": {
+    "loading": "Loading…",
+    "empty": "No data",
+    "error": "Error",
+    "success": "Success",
+    "saving": "Saving…",
+    "saved": "Saved"
+  },
+  "validation": {
+    "required": "Required",
+    "invalid": "Invalid format"
+  },
+  "modal": {
+    "close": "Close",
+    "deleteTitle": "Confirm Delete"
+  },
+  "error": {
+    "loadFail": "Failed to load",
+    "saveFail": "Failed to save"
+  },
+  "timeAgo": {
+    "justNow": "just now",
+    "minutesAgo": "{{count}} min ago",
+    "hoursAgo": "{{count}} h ago",
+    "daysAgo": "{{count}} d ago"
+  },
+  "composer": {
+    "placeholder": "Type a message, press Enter to send…"
+  },
+  "saveBar": {
+    "saving": "Saving…",
+    "dirty": "Unsaved changes",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "sessionState": {
+    "idle": "Idle",
+    "running": "Running",
+    "interrupting": "Interrupting",
+    "interrupted": "Interrupted",
+    "error": "Error"
+  }
+}

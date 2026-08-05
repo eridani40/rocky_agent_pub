@@ -1,0 +1,10 @@
+{
+  "API_PORT": "3720",
+  "DATA_DIR": "~/.rocky_agent_prod",
+  "APP_NAME": "rocky_agent",
+  "APP_ENV": "prod",
+  "LOG_LEVEL": "warn",
+  "HEALTH_ENDPOINT": "/health",
+  "EVENT_LOOP_MONITOR": "1",
+  "MAIN_EVENT_LOOP_MONITOR": "1"
+}

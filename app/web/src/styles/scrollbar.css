@@ -1,0 +1,29 @@
+/**
+ * .scrollbar-thin —— 细滚动条工具类（替换系统粗滚动条）
+ * 参考: specs/ui/components/chat-page/component-pending-question-card.md §2/§7
+ *
+ * 给带内滚的容器（overflow-y-auto / overflow-x-auto）加 class `scrollbar-thin` 即用：
+ * thumb 细（6px）+ 4px 圆角 + 透明 track + hover 加深，跨 WebKit（Chromium/Safari）与 Firefox。
+ * 色值取全局 token（--color-border-strong / --color-muted），随主题 light/dark 自动适配。
+ */
+.scrollbar-thin {
+  /* Firefox：细滚动条 + thumb/track 配色 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+/* WebKit（Chromium / Safari）：细轨 + 圆角 thumb */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-strong);
+  border-radius: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-muted);
+}

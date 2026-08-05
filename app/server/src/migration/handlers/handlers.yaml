@@ -1,0 +1,58 @@
+# MigrationManager handler 注册表
+# 参考: specs/tech/version_logs/v0.0.150/change_plan.md §A
+#
+# Schema:
+#   handlers:
+#     - id: <唯一 id>
+#       versionRange: '<X.Y.Z'  # 仅支持 < 前缀（version-range.ts）
+#       module: './handlers/<file>'  # 相对路径，由 handlers/index.ts 静态 import map 解析
+#
+# v0.0.150 步骤2 收编：v0.0.149 的两 ad-hoc memory 迁移转为 MigrationManager handler。
+#   - dummy-update：链路验证空操作
+#   - memory-source-updated：v0.0.149 存量 entry 补 source/updatedAt（原 bootstrap 直接调用）
+#   - memory-intro：v0.0.114 description → intro 字段重命名（原手动 CLI）
+handlers:
+  - id: dummy-update
+    versionRange: '<0.0.151'
+    module: './handlers/dummy-update'
+  - id: memory-source-updated
+    versionRange: '<0.0.151'
+    module: './handlers/memory-source-updated'
+  - id: memory-intro
+    versionRange: '<0.0.151'
+    module: './handlers/memory-intro'
+  # v0.0.158 存量清理：删除「独立 summary 模型层」概念遗留字段
+  #   - clean-default-models-summary：app_config default_models/default record 删 summary key
+  #   - clean-squad-summary-model-default：squad record 删 summaryModelDefault + summaryModelDefaultProviderId
+  - id: clean-default-models-summary
+    versionRange: '<0.0.158'
+    module: './handlers/clean-default-models-summary'
+  - id: clean-squad-summary-model-default
+    versionRange: '<0.0.158'
+    module: './handlers/clean-squad-summary-model-default'
+  # v0.0.204 derivation main→parent 改名（schema_defs/session.ts enumValues 同步改名）。
+  #   存量 session record 里 derivation:'main' 在 put 时 schema 校验「值越界」崩——
+  #   packaged electron 启动后第一个 session 操作即炸，dev 全绿测不到（load-bearing）。
+  #   versionRange 上界取 '<0.0.205' = 在 0.0.204 release 上跑（对齐 v0.0.203 '<0.0.204' 先例逻辑：
+  #   取 '<0.0.204' 会在 0.0.204 release 上判 na 永不执行）。
+  - id: session-derivation-main-to-parent
+    versionRange: '<0.0.205'
+    module: './handlers/session-derivation-main-to-parent'
+  # v0.0.205 存储模型统一（.rocky 收口 + memory per-entry）：
+  #   - session-memory-per-entry：旧 sessions/<sid>/session_memory.md 拆 per-entry 到 <ws>/.rocky/memory/
+  #   - squad-rocky-dir：squads/<sid>/.rocky_squad/{memory.md,state,skills} 平移到 .rocky/
+  # versionRange 上界取 '<0.0.206' = 在 0.0.205 release 上跑（对齐 v0.0.203/v0.0.204 先例：
+  #   range 语义 = 当前 app 版本 < 上界才跑，取 '<0.0.205' 会在 0.0.205 release 上判 na 永不执行）。
+  - id: session-memory-per-entry
+    versionRange: '<0.0.206'
+    module: './handlers/session-memory-per-entry'
+  - id: squad-rocky-dir
+    versionRange: '<0.0.206'
+    module: './handlers/squad-rocky-dir'
+  # v0.0.206 channel 无状态化重构：channel_bindings 落盘记录 instanceId → configId 字段改名
+  #   （store schema 同步改名；不迁则 bootstrap 反向索引 configId=undefined，binding 全链断——load-bearing）。
+  #   versionRange 上界取 '<0.0.207' = 在 0.0.206 release 上跑（对齐 v0.0.203/v0.0.204/v0.0.205 先例：
+  #   range 语义 = 当前 app 版本 < 上界才跑，取 '<0.0.206' 会在 0.0.206 release 上判 na 永不执行）。
+  - id: channel-binding-config-id
+    versionRange: '<0.0.207'
+    module: './handlers/channel-binding-config-id'

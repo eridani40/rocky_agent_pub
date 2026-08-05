@@ -1,0 +1,115 @@
+# agent_spawn_async_reply — async spawn subagent 完成任务 → parent 必收到一条来自 child 的回报消息
+# 覆盖契约：specs/api/overall/10-multi-agent.md §4.1（a2a 回报消息落 parent transcript：
+#           sender.source='agent' + sender.agent.ref=child ref）+ specs/tech/multi_agent/
+#           [P1]a2a_protocol.md §4.2（async 首任务 needReply 默认 true → child 完成应回报）
+#           + [P1]subagent_derivation.md §4（async=立即返 handle，结果回传靠回报消息）。
+# 版本契约（v0.0.255）：回报「必达」——child LLM 自觉 send_message OR 系统兜底代发
+#           （A2aReplyTracker 判据 A + settleAgentReplyFallback，needReply=false 防回话风暴），
+#           二者其一即契约成立。本 case 不区分两条路径，只断言 parent transcript 最终出现
+#           一条 sender.source='agent' 且 sender.agent.ref.type='subagent' 的消息。
+# 任务设计：child 任务 = 算 17×23 给出数字结果即完成——明确「完成即可」，不诱导必须
+#           send_message（自觉/兜底两条路都允许走到，断言对两路同构）。
+# 同步策略：run_end 计数只断 >=1（eager-drain 可能把 child 回报吸入 parent run 1，
+#           不保证有 run 2，故不断 ==2）；回报必达的主同步 = poll parent transcript
+#           until agent-source 消息出现（与 run 边界解耦，零竞态）。
+# 真调 minimax；429/529/503 → skipped 不阻塞。
+case: agent_spawn_async_reply
+module: multi_agent
+timeout: 240
+
+setup:
+  - name: 建 parent session（playground，带 provider/model）
+    requests:
+      - method: POST
+        path: /session
+        body:
+          title: "spawn-async-reply"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 订阅 parent agent_loop 流（先订阅后触发）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 发消息驱动 async spawn（生产路径 /messages；child 任务完成即可，正文不提 send_message）
+    requests:
+      - method: POST
+        path: /session/{sid}/messages
+        body:
+          content: "请使用 agent 工具派生一个子 agent：action=spawn，mode=async（异步模式，派生后不等待），inline 派生不指定 templateRef，systemPrompt 写「你是一个计算助手，直接回答」。给子 agent 的任务内容是：「计算 17 乘以 23 等于多少？把计算结果作为你的最终回答，任务即完成。」派生成功后你直接回复我「已派生」，不要等待也不要查询子 agent 的结果。必须调用 agent 工具，不要提问任何问题，直接执行。"
+          providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+          modelId: "MiniMax-M3"
+    save: { run_id: .runId }
+    check:
+      - .runId exists
+
+  - name: 等 parent run 1 完成（async spawn 立即返回 handle，parent 不等 child 结果）
+    wait:
+      stream: main
+      until: "main.count(type=run_end) >= 1"
+      timeout: 60
+    check:
+      - main.count(type=run_start) >= 1
+      - main.count(type=run_end) >= 1
+      - main.absent(type=error)
+
+  - name: GET children — 等 child 落 terminated 组（child run 结束；自觉回报已投递或兜底随 onRunEnd 触发）
+    poll:
+      request: GET /session/{sid}/children
+      until: ".terminated[0].sessionId exists"
+      every: 1
+      timeout: 60
+    save:
+      child_sid: ".terminated[0].sessionId"
+    check:
+      - .terminated[0].sessionId exists
+
+  - name: GET child session — 验 derivation=subagent + parentSessionId 落库
+    requests:
+      - GET /session/{child_sid}
+    check:
+      - .derivation == "subagent"
+      # check rhs 不做 {var} 插值（框架仅对 path/body/sse-group/files 插值，check 引擎纯字面量），
+      # `.parentSessionId == "{sid}"` 会拿 ULID 和 5 字符字面量 "{sid}" 比永远 fail。
+      # 同框架惯例（agent_spawn_sync / spawn_inline_tools_inherit）：用 exists 验字段落库。
+      - .parentSessionId exists
+
+  - name: GET child transcript — 验 async 首任务消息 sender.agent.needReply == true（a2a §4.2 契约行）
+    requests:
+      - GET /session/{child_sid}/messages
+    check:
+      - .items[] any .sender.source == "agent"
+      - .items[] any .sender.agent.needReply == true
+
+  - name: 核心断言 — poll parent transcript 直到出现 child 回报消息（自觉 send_message 或系统兜底代发，二者其一）
+    poll:
+      request: GET /session/{sid}/messages
+      until: '.items[] any .sender.source == "agent"'
+      every: 1
+      timeout: 60
+    check:
+      # parent 是本 case 新建的 playground 主会话，全 case 仅派生这一个 child；subagent 拓扑硬约束
+      # 只能 send_message 给 parent（a2a §3）→ parent transcript 里任何 agent-source 消息必然来自
+      # 该 child。check rhs 不可插值，ref.sessionId 精确等值 DSL 表达不了，由唯一性论证 + 下行
+      # ref.type=='subagent' 双保险等价覆盖（详见 test_case.md 风险节）。
+      - .items[] any .sender.source == "agent"
+      - .items[] any .sender.agent.ref.type == "subagent"
+
+  - name: GET parent usage — 验 sub usage 递归上报（child 真跑过 LLM）+ 全流无 error 收尾
+    requests:
+      - GET /session/{sid}/usage
+    check:
+      - .sub exists
+      - .sub.llmCallCount >= 1
+      - main.absent(type=error)
+
+teardown:
+  - name: DELETE parent session（child 随父联级清理）
+    requests:
+      - DELETE /session/{sid}

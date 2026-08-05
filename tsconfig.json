@@ -1,0 +1,11 @@
+{
+  "//": "仓库根 tsconfig：用 project references 串联 5 个 workspace。typecheck 走 tsc -b。",
+  "files": [],
+  "references": [
+    { "path": "./app/protocols" },
+    { "path": "./app/shared" },
+    { "path": "./app/server" },
+    { "path": "./app/web" },
+    { "path": "./app/electron" }
+  ]
+}

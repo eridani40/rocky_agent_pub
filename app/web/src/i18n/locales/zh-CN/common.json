@@ -1,0 +1,61 @@
+{
+  "action": {
+    "confirm": "确认",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "add": "添加",
+    "reset": "重置",
+    "close": "关闭",
+    "retry": "重试",
+    "search": "搜索",
+    "refresh": "刷新",
+    "expand": "展开",
+    "collapse": "收起",
+    "back": "返回",
+    "apply": "应用"
+  },
+  "status": {
+    "loading": "加载中…",
+    "empty": "暂无数据",
+    "error": "出错了",
+    "success": "成功",
+    "saving": "保存中…",
+    "saved": "已保存"
+  },
+  "validation": {
+    "required": "此项必填",
+    "invalid": "格式不正确"
+  },
+  "modal": {
+    "close": "关闭",
+    "deleteTitle": "确认删除"
+  },
+  "error": {
+    "loadFail": "加载失败",
+    "saveFail": "保存失败"
+  },
+  "timeAgo": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}} 分钟前",
+    "hoursAgo": "{{count}} 小时前",
+    "daysAgo": "{{count}} 天前"
+  },
+  "composer": {
+    "placeholder": "输入消息，按 Enter 发送…"
+  },
+  "saveBar": {
+    "saving": "保存中…",
+    "dirty": "有未保存的改动",
+    "save": "保存",
+    "cancel": "取消"
+  },
+  "sessionState": {
+    "idle": "空闲",
+    "running": "运行中",
+    "interrupting": "中断中",
+    "interrupted": "已中断",
+    "error": "出错"
+  }
+}

@@ -1,0 +1,5 @@
+# v0.0.204 scope — studio-mate:parent:summary（summary runKind；空=继承 summary 基座）
+extends: summary
+scopeId: studio-mate:parent:summary
+name: studio-mate:parent:summary
+description: summary run scope（手动/自动同 profile；空=继承 summary 基座）

@@ -1,0 +1,43 @@
+# sse_message_stream — SSE 消息流订阅与断言
+# 覆盖框架能力：sse.sub(topic+group) + wait until + 事件 count/order
+# 对应 PRD 路径1 的 SSE 面（agent_loop 流实时推送）
+case: sse_message_stream
+module: sse_channel
+timeout: 60
+
+setup:
+  - name: 建会话
+    requests:
+      - 'POST /session {"title": "v2-sse-stream-test", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 订阅 agent_loop 流（发消息前先开流）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 发消息同步等终态
+    run: { content: "用一句话回答：你好，回复 SSE-STREAM-V2" }
+    check:
+      - .state == "idle"
+      - .stopReason == "no_tool_call"
+
+  - name: 等待流收到 run_end 事件
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 1"
+      timeout: 10
+    check:
+      - main.count(type=run_start) == 1
+      - main.count(type=run_end) == 1
+      - main.order(run_start < run_end)
+      - main.absent(type=error)
+
+teardown:
+  - name: 删除会话
+    requests:
+      - DELETE /session/{sid}

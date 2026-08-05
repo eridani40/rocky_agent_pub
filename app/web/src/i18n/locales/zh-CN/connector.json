@@ -1,0 +1,48 @@
+{
+  "header": {
+    "title": "连接器",
+    "desc": "connector · 管理 agent 对外部资源的连接"
+  },
+  "tab": {
+    "browser": "浏览器",
+    "computer": "电脑"
+  },
+  "computer": {
+    "name": "电脑",
+    "desc": "让 agent 看屏幕截图并操作你的 Mac（需辅助功能 + 屏幕录制权限）",
+    "unavailable": "仅桌面 App 可用 — 请在 Rocky 桌面应用中打开此页",
+    "refresh": "重新检测",
+    "accessibility": "辅助功能",
+    "screenRecording": "屏幕录制",
+    "granted": "已授权",
+    "denied": "未授权",
+    "requestAccessibility": "授权辅助功能",
+    "openScreenRecording": "打开屏幕录制设置",
+    "testScreenshot": "测试截图",
+    "testScreenshotHint": "验证 Rocky 能否真截到屏幕",
+    "screenshotOk": "截图成功",
+    "screenshotFail": "截图失败"
+  },
+  "browser": {
+    "name": "浏览器",
+    "desc": "attach 到你已开的 Chrome，复用真实登录态",
+    "switchLabel": "浏览器连接器 启用 / 禁用",
+    "switchOff": "未启用",
+    "connectingInline": "连接中",
+    "errorDefault": "连接失败，请检查 chrome 是否已开启 remote debugging",
+    "retry": "重试",
+    "guideSubtitle": "打开开关启用后，agent 首次使用 browser 时会连接",
+    "guide": {
+      "step1": "打开 chrome://inspect/#remote-debugging",
+      "step2": "勾选 Enable remote debugging",
+      "step3": "确保 chrome 版本 ≥ 144",
+      "step4": "attach 时批准 chrome 弹出的连接 prompt"
+    },
+    "connection": {
+      "disconnected": "已启用（未连接）",
+      "connecting": "连接中…",
+      "connected": "已连接",
+      "error": "连接失败"
+    }
+  }
+}

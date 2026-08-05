@@ -1,0 +1,139 @@
+# dissolve-preserve — 解散团队保留工作产出（N1 修正验证，PRD 路径 A）
+#
+# 覆盖契约：
+#   - specs/api/overall/11a-squad-endpoints.md §1.5 DELETE /squad/:id（v0.0.111 引入硬删；
+#     v0.0.192.delete_cleanup 修订第④步：不再 rmSync 整个 squadRootDir，改删管理性子路径，
+#     保留 workspaces/outputs/reports/board 工作产出）
+#   - specs/tech/squad/[P1]squad_workspace.md §5（member/leader session 的 workspaceDir
+#     = data_dir/squads/{squadId}/workspaces/{memberId}/，解散后该目录须存活）
+#   - specs/prd/version_logs/v0.0.192.delete_cleanup.md §3.1（行为契约：保留 vs 删除分类）
+#
+# 断言面（双轨：管理性数据删 / 工作产出存活）：
+#   【删】squad record / mate session / squadChat session → 解散后 GET 各返 404（黑盒可观测）
+#   【存活】mate workspace 目录 + marker 文件 → 用 files 植 marker → DELETE squad →
+#          读解散前保存的 mate workspaceDir 绝对路径 → POST 新 session 指向该目录（POST 201 证明
+#          目录仍存在；旧 bug rmSync 整个 squadRoot 会致该目录消失 → POST 400）→ GET workspace/tree
+#          含 marker（内容存活，非空壳）
+#
+# AT vs UT 边界（设计权衡，非 bug）：
+#   - AT 受 files 原语只写不读 + 插值无 dirname 限制，只能验证「能拿到绝对路径的 workspace 目录」存活。
+#     outputs/reports/board 存活由 UT 覆盖（squad-dissolve.test.ts existsSync 四目录 + 删管理性子项双断言）。
+#   - workspace 是 agent 写的代码/文件（最具价值的工作产出），AT 验其存活即覆盖 N1 头条契约。
+#
+# 不调 LLM：纯 HTTP 事务（POST /squad + hire member + DELETE + GET）+ files 原语，全确定性，
+#           无 429/flaky 风险（符合「删除场景不强制调 LLM」）。
+# provider/model：POST /squad 的 modelDefault=MiniMax-M3（test pool 已启用模型，过建队写入校验；
+#                  本 case 从不 run session，不走 provider 解析）。
+case: dissolve-preserve
+module: squad
+timeout: 60
+
+setup:
+  - name: 建 squad（事务：record + leader member/session + squadChat session + 办公室目录骨架）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "dissolve-preserve-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "dp-leader"
+    save:
+      squad_id: .id
+      squadchat_sid: .squadChatSessionId
+    check:
+      - .id exists
+      - .leaderId exists
+      - .squadChatSessionId exists
+
+  - name: hire mate（建 mate session + workspace 目录，hire 响应直连拿 sessionId）
+    requests:
+      - method: POST
+        path: /squad/{squad_id}/member
+        body:
+          mode: "fresh"
+          name: "dp-mate"
+          intro: "dissolve-preserve 验证用 mate"
+    save:
+      mate_sid: .sessionId
+      mate_mid: .member.id
+    check:
+      - .sessionId exists
+      - .member.id exists
+
+  - name: 读 mate session workspaceDir（解散后须存活的目录绝对路径，server 单一权威返回）
+    requests:
+      - GET /session/{mate_sid}
+    save:
+      mate_ws: .workspaceDir
+    check:
+      - .workspaceDir exists
+
+  - name: 植 marker 到 mate workspace（DATA_DIR 相对路径，解散后验其存活）
+    files:
+      - path: "squads/{squad_id}/workspaces/{mate_mid}/KEEP.md"
+        content: { kept: "dissolve-preserve-marker" }
+
+steps:
+  - name: 解散 squad（DELETE → 200 {deleted:true}）
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+    check:
+      - .deleted == true
+
+  - name: squad record 已删（GET → 404）
+    requests:
+      - method: GET
+        path: /squad/{squad_id}
+        status: [404]
+    check:
+      - .error exists
+
+  - name: mate session 已删（GET → 404，解散 step② listSessionsBySquad 级联删各 session）
+    requests:
+      - method: GET
+        path: /session/{mate_sid}
+        status: [404]
+    check:
+      - .error exists
+
+  - name: squadChat session 已删（GET → 404）
+    requests:
+      - method: GET
+        path: /session/{squadchat_sid}
+        status: [404]
+    check:
+      - .error exists
+
+  - name: 工作产出存活 — 建 verify session 指向存活 workspaceDir（旧 bug 整目录删会致 400）
+    requests:
+      - method: POST
+        path: /session
+        body:
+          title: "dp-verify-survive"
+          workspaceDir: "{mate_ws}"
+    save:
+      verify_sid: .id
+    check:
+      - .id exists
+
+  - name: workspace 内容存活 — GET tree 含 marker（内容存活非空壳）
+    requests:
+      - GET /session/{verify_sid}/workspace/tree
+    check:
+      - .tree exists
+      - .tree[] any .name == "KEEP.md"
+
+teardown:
+  - name: 兜底清 squad（steps 已删则 404 幂等；steps 失败残留则 200 清掉）
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+        status: [200, 404]
+
+  - name: 清 verify session（独立于 squad，workspaceDir 指向存活目录；DELETE 不 rm workspace）
+    requests:
+      - method: DELETE
+        path: /session/{verify_sid}
+        status: [204, 404]

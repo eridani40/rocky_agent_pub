@@ -1,0 +1,26 @@
+{
+  "//": "server：纯 Node 业务大脑，lib ES2022，输出 CommonJS（Electron 主进程 Node loader 可直接 require；bun run src/*.ts 走源码 ESM 也兼容）。不列 electron types — package_structure §3.3 编译期强制。本 task 起 server 改用 node:http，故 types=node（不再依赖 bun）。v0.0.191：跨边界 import llm_anthropic plugin impl 的测试由 vitest 跑（不进 tsc typecheck，避免 rootDir 跨 project references 边界）",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["node"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "src/agent/__tests__/stream-consumer-tool-e2e.test.ts",
+    "src/llm/__tests__/client.test.ts",
+    "src/llm/__tests__/client-http-error.test.ts",
+    "src/llm/__tests__/client-onwire.test.ts",
+    "src/llm/__tests__/client-stream-cost.test.ts",
+    "src/llm/__tests__/client-stream-error.test.ts",
+    "src/__tests__/mock-llm.test.ts",
+    "src/__tests__/mock-llm-compact-nonstream.test.ts"
+  ],
+  "references": [{ "path": "../protocols" }, { "path": "../shared" }]
+}

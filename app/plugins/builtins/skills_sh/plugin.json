@@ -1,0 +1,13 @@
+{
+  "id": "skills_sh",
+  "label": "__MSG_plugin.builtin.skills_sh.label__",
+  "description": "__MSG_plugin.builtin.skills_sh.description__",
+  "extImpls": [
+    {
+      "implId": "skills_sh",
+      "point": "skill_market_provider",
+      "impl": "./skills-sh-provider.ts",
+      "description": "__MSG_plugin.builtin.skills_sh.impl.skills_sh.description__"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@app/computer-native",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "install": "echo '[computer-native] skip install-phase node-gyp (needs Electron ABI); build via: bun run build (scripts/build-native.sh)'",
+    "build": "bash scripts/build-native.sh"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.2.0"
+  }
+}

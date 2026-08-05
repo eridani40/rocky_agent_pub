@@ -1,0 +1,307 @@
+{
+  "sidebar": {
+    "title": "Squads",
+    "newSquadAria": "New squad",
+    "empty": "No squads yet. Click + above to create one.",
+    "copySessionId": "Copy Session ID"
+  },
+  "squadPanel": {
+    "subtitle": "squad · admin panel"
+  },
+  "tokenStatsRoute": {
+    "subtitle": "Token Stats"
+  },
+  "tab": {
+    "admin": "Manage",
+    "members": "Members",
+    "autowork": "Auto work"
+  },
+  "empty": {
+    "title": "No squad yet",
+    "hint": "Create a squad — a leader and group chat are auto-created, kick-starting your AI team.",
+    "newBtn": "New squad"
+  },
+  "toast": {
+    "squadCreated": "Created {{name}}",
+    "memberHired": "Hired {{name}} · auto deployed",
+    "memberBenched": "Benched {{name}}{{reason}}",
+    "benchFail": "Failed to bench",
+    "memberDeployed": "Deployed",
+    "metaSaved": "Meta saved",
+    "roleSaved": "Role saved",
+    "heartbeatSaved": "Heartbeat saved",
+    "heartbeatCleared": "Heartbeat cleared",
+    "noLeaderAvailable": "No leader in this squad; cannot open chat",
+    "squadDeleted": "Dissolved team {{name}}",
+    "squadDeleteFail": "Failed to dissolve team",
+    "memberHireFail": "Failed to create member"
+  },
+  "chat": {
+    "emptyHint": "Type a message below to start the conversation",
+    "inheritLabel": "Inherit squad default",
+    "inheritTeamDefault": "Inherit team default"
+  },
+  "squadTree": {
+    "groupChat": "Group chat",
+    "tagGroup": "{{name}} · group",
+    "tagLeader": "{{name}} · leader",
+    "tagSingle": "{{name}} · direct"
+  },
+  "newSquadModal": {
+    "title": "New squad",
+    "creating": "Creating…",
+    "create": "Create",
+    "nameLabel": "Squad name (required)",
+    "namePlaceholder": "e.g. Gamma squad",
+    "descLabel": "Squad description",
+    "modelLabel": "Default model modelDefault (required, pick from configured provider/model)",
+    "leaderNameLabel": "Leader name (required)"
+  },
+  "benchModal": {
+    "title": "Bench {{name}}",
+    "confirm": "Confirm bench",
+    "reasonLabel": "Bench reason (required)",
+    "reasonPlaceholder": "Why bench?"
+  },
+  "memberCreate": {
+    "title": "New member",
+    "submitting": "Creating…",
+    "submit": "Create",
+    "modeFresh": "Fresh · new",
+    "modeDerive": "Derive · fork",
+    "modeDeriveAcademy": "From Classroom · academy",
+    "deriveAcademyTitle": "Derive from classroom",
+    "deriveAcademyHint": "Member name = student name; intro / workStyle optional below (blank = empty).",
+    "nameLabel": "name (unique within squad, required)",
+    "deriveFromLabel": "deriveFrom (pick parent role)",
+    "deriveFromEmpty": "No derivable mate (only leader exists). Use Fresh first.",
+    "overridesTitle": "Overrides (optional)",
+    "overridesHint": "Overrides below (leave blank to inherit from parent)",
+    "overridePlaceholder": "Leave blank to inherit"
+  },
+  "memberPanel": {
+    "profileTitle": "Name / Bio",
+    "introLabel": "intro one-line description (for roster)",
+    "introPlaceholder": "One line on this member's role, e.g. owns frontend pages & interactions",
+    "workStyleLabel": "work style (injected into own session only)",
+    "workStylePlaceholder": "Describe this member's work style, preferences, principles... (optional)",
+    "memoryTitle": "Memory",
+    "skillsTitle": "Skills & model",
+    "heartbeatTitle": "Heartbeat config",
+    "skillsModeLabel": "custom skills",
+    "skillsModeCustom": "Custom (overrides global)",
+    "skillsModeInherit": "Inherit global"
+  },
+  "heartbeat": {
+    "errFormat": "Time format must be HH:mm",
+    "errOrder": "Start time must be earlier than end time",
+    "errMin": "Interval must be ≥ 1 minute",
+    "benchedWarning": "This member is not deployed. Config is saved but not scheduled.",
+    "killswitchOff": "Master autonomy switch is off. Config is saved but inactive for now.",
+    "emptyHint": "Heartbeat not configured yet. Fill in the activity window and interval below, then click save to activate.",
+    "activeWindowLabel": "Activity window activeWindow (follows squad.timezone {{timezone}})",
+    "intervalLabel": "Heartbeat interval (minutes)",
+    "rhythmHint": "{{name}} heartbeat cadence · once configured, wakes one autonomous round every interval within the window.",
+    "save": "Save heartbeat config",
+    "reset": "Reset to defaults",
+    "clear": "Clear (pure reactive)",
+    "intervalHint": "Trigger heartbeat every {{interval}} minutes (within active windows only)",
+    "windowsLabel": "Active windows (follows squad.timezone {{timezone}})",
+    "windowsEmptyHint": "No windows set = all-day scheduling",
+    "windowAdd": "Add time window",
+    "windowRemove": "Remove",
+    "scopeLabel": "Trigger scope",
+    "scopeAll": "All deployed members",
+    "scopeWhitelist": "Whitelist (selected members only)",
+    "scopeWhitelistHint": "Only wake selected members. New members added later are not included automatically.",
+    "scopeNoMembers": "No deployed members"
+  },
+  "memberCard": {
+    "benchReasonPrefix": "Bench reason: "
+  },
+  "membersTab": {
+    "hireBtn": "Add member"
+  },
+  "manageTab": {
+    "nameLabel": "Squad name",
+    "descLabel": "Squad description",
+    "modelLabel": "Default model modelDefault",
+    "save": "Save meta"
+  },
+  "deleteSquad": {
+    "sectionLabel": "Danger Zone",
+    "hint": "Dissolving this team permanently deletes all member sessions, chat history, and schedules. This cannot be undone.",
+    "btn": "Dissolve Team",
+    "modalTitle": "Dissolve Team {{name}}",
+    "warning": "This is irreversible: team data, member sessions, chat history, and all schedules are physically deleted and cannot be recovered.",
+    "confirmLabel": "Type the team name \"{{name}}\" to confirm",
+    "confirm": "Confirm Dissolve",
+    "confirming": "Dissolving…"
+  },
+  "memory": {
+    "empty": "No summary yet. Trigger a compact and the role's long-term memory will appear here.",
+    "compact": "Compact memory",
+    "compacting": "Compacting…",
+    "compactTriggered": "Compact triggered. Refresh shortly for the new summary.",
+    "compactFail": "Compact failed",
+    "compactInProgress": "Compacting is in progress, please wait"
+  },
+  "autonomy": {
+    "label": "enableHeartBeat (master autonomy switch)",
+    "on": "Autonomous work is on — members will act on their heartbeat cadence",
+    "off": "Autonomous work is paused — members only respond to chats",
+    "toggleFail": "Failed to toggle",
+    "errorPrefix": "Failed to toggle: "
+  },
+  "budget": {
+    "label": "budget (team token budget · daily)",
+    "loadFail": "Failed to load budget",
+    "errorPrefix": "Budget load failed: ",
+    "consumedPrefix": "Consumed",
+    "limitPrefix": "Limit",
+    "remainingPrefix": "Remaining",
+    "unlimited": "Unlimited",
+    "windowEndLabel": "Resets at",
+    "overLimitHint": "Over limit — proactive runs will be skipped (reactive still responds)",
+    "switchOn": "Limited (set cap)",
+    "switchOff": "Unlimited",
+    "limitInputLabel": "Cap (tokens)",
+    "save": "Save budget"
+  },
+  "autoWork": {
+    "title": "Auto work history",
+    "loadFail": "Failed to load history",
+    "errorTitle": "History load failed",
+    "emptyTitle": "No auto work records yet",
+    "emptyHint": "Once a heartbeat fires, records will appear here."
+  },
+  "role": {
+    "leader": "leader",
+    "mate": "mate"
+  },
+  "memberState": {
+    "deployed": "deployed",
+    "benched": "benched"
+  },
+  "autoWorkReason": {
+    "heartbeat": "Heartbeat"
+  },
+  "autoWorkResult": {
+    "fired": "Fired",
+    "skippedBusy": "Busy",
+    "skippedBudget": "Budget exhausted",
+    "skippedWindow": "Off hours",
+    "skippedKillswitch": "Master switch off"
+  },
+  "seats": {
+    "tab": {
+      "seats": "Home",
+      "panel": "Admin",
+      "autowork": "Auto-work"
+    },
+    "onlineBadge": "{{count}} online",
+    "emptyMembers": "No members yet. Click \"+ Add member\" at the top-right to recruit.",
+    "sectionSeats": "Seats · {{count}}",
+    "sectionMembers": "Members · {{count}}",
+    "sectionLeader": "Leader",
+    "sectionPanorama": "Panorama",
+    "status": {
+      "online": "Standing by",
+      "busy": "Working…",
+      "offline": "Off duty"
+    },
+    "stats": {
+      "onlineLabel": "Members online",
+      "inProgressLabel": "In-progress tasks",
+      "todayMsgLabel": "Msgs today",
+      "tokenUsedLabel": "Tokens used",
+      "empty": "—"
+    },
+    "team": {
+      "groupChatTitle": "Group chat",
+      "panoramaTitle": "Panorama",
+      "tokenStatsTitle": "Token Stats"
+    },
+    "card": {
+      "enter": "Open chat",
+      "more": "More",
+      "leaderBadge": "LEADER"
+    },
+    "menu": {
+      "edit": "Edit",
+      "bench": "Bench",
+      "deploy": "Deploy"
+    },
+    "addCard": {
+      "title": "Add member"
+    },
+    "viewSwitch": {
+      "active": "Active",
+      "all": "All"
+    }
+  },
+  "tokenWidget": {
+    "title": "Token usage",
+    "viewDetail": "View details",
+    "todayLabel": "Today",
+    "trend7d": "7-day trend",
+    "consumedLabel": "60-day total",
+    "kindInput": "Input",
+    "kindOutput": "Output",
+    "kindCache": "Cache"
+  },
+  "task": {
+    "statusLabels": {
+      "todo": "Not started",
+      "waiting": "Waiting",
+      "in_progress": "In progress",
+      "done": "Done"
+    }
+  },
+  "timeAgo": {
+    "justNow": "just now",
+    "minutesAgo": "{{n}} min ago",
+    "hoursAgo": "{{n}} h ago",
+    "daysAgo": "{{n}} d ago"
+  },
+  "panorama": {
+    "title": "Panorama",
+    "subtitle": "squad · panorama",
+    "tabs": {
+      "goals": "Goals",
+      "requirements": "Requirements",
+      "tasks": "Tasks",
+      "more": "More"
+    },
+    "idle": {
+      "title": "Panorama",
+      "subtitle": "Built by the team leader",
+      "desc": "Tell the leader what to show: \"build a board showing ...\", and it will be generated for you.",
+      "atLeaderBtn": "Ask leader to build a board"
+    },
+    "toolbar": {
+      "create": "New {{label}}"
+    },
+    "archive": {
+      "active": "Active",
+      "withArchived": "With archived",
+      "buttonTitle": "Archive"
+    },
+    "events": {
+      "title": "Events"
+    },
+    "modal": {
+      "createTitle": "New {{label}}",
+      "editTitle": "Edit {{label}}",
+      "required": "{{field}} is required",
+      "statusField": "status",
+      "statusReadonly": "Status is read-only: change it via board drag or transition"
+    },
+    "toast": {
+      "transitionOk": "{{id}} moved to {{to}}",
+      "saveOk": "Saved",
+      "archived": "{{id}} archived"
+    },
+    "barTotal": "{{label}}: {{count}} total"
+  }
+}

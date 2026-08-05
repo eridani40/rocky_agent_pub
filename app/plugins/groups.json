@@ -1,0 +1,64 @@
+{
+  "groups": [
+    {
+      "id": "context-ingest",
+      "label": "__MSG_group.context_ingest.label__",
+      "description": "__MSG_group.context_ingest.description__",
+      "extPoints": ["context_ingest_handler", "system_reminder"]
+    },
+    {
+      "id": "context-assemble",
+      "label": "__MSG_group.context_assemble.label__",
+      "description": "__MSG_group.context_assemble.description__",
+      "extPoints": ["context_assemble_mapper", "context_assemble_reducer", "context_clean_view_reducer"]
+    },
+    {
+      "id": "context-compact",
+      "label": "__MSG_group.context_compact.label__",
+      "description": "__MSG_group.context_compact.description__",
+      "extPoints": ["context_should_compact", "context_do_compact", "context_post_compact"]
+    },
+    {
+      "id": "context-engine",
+      "label": "__MSG_group.context_engine.label__",
+      "description": "__MSG_group.context_engine.description__",
+      "extPoints": ["session_store"]
+    },
+    {
+      "id": "system-prompt",
+      "label": "__MSG_group.system_prompt.label__",
+      "description": "__MSG_group.system_prompt.description__",
+      "extPoints": ["system_prompt_mapper", "system_prompt_reducer"]
+    },
+    {
+      "id": "provider",
+      "label": "__MSG_group.provider.label__",
+      "description": "__MSG_group.provider.description__",
+      "extPoints": ["llm_provider", "llm_protocol"]
+    },
+    {
+      "id": "channel",
+      "label": "__MSG_group.channel.label__",
+      "description": "__MSG_group.channel.description__",
+      "extPoints": ["channel"]
+    },
+    {
+      "id": "web",
+      "label": "__MSG_group.web.label__",
+      "description": "__MSG_group.web.description__",
+      "extPoints": ["web_search_provider"]
+    },
+    {
+      "id": "vision",
+      "label": "__MSG_group.vision.label__",
+      "description": "__MSG_group.vision.description__",
+      "extPoints": ["see_image_provider"]
+    },
+    {
+      "id": "skill-market",
+      "label": "__MSG_group.skill_market.label__",
+      "description": "__MSG_group.skill_market.description__",
+      "extPoints": ["skill_market_provider"]
+    }
+  ]
+}

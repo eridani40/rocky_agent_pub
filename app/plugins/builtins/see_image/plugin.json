@@ -1,0 +1,19 @@
+{
+  "id": "see_image",
+  "label": "__MSG_plugin.builtin.see_image.label__",
+  "description": "__MSG_plugin.builtin.see_image.description__",
+  "extImpls": [
+    {
+      "implId": "minimax_m3",
+      "point": "see_image_provider",
+      "impl": "./minimax-provider.ts",
+      "description": "__MSG_plugin.builtin.see_image.impl.minimax_m3.description__"
+    },
+    {
+      "implId": "zhipu_image",
+      "point": "see_image_provider",
+      "impl": "./zhipu-image-provider.ts",
+      "description": "__MSG_plugin.builtin.see_image.impl.zhipu_image.description__"
+    }
+  ]
+}

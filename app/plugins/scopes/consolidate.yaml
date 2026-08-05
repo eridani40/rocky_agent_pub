@@ -1,0 +1,40 @@
+# v0.0.204 scope — consolidate 基座（forked 拆分：consolidate runKind 共性）
+# 与 summary.yaml 同结构（side_run_builder / in_memory / 关 compact 防递归 / 关 reminder+search）。
+# toolBound 差异（consolidate=[skill_manage,memory_manage]）由 profile yaml 表达，scope 无差异。
+extends: default
+scopeId: consolidate
+name: Consolidate
+description: consolidate run 共用 scope（fork-2 整理 agent：side_run_builder + in_memory + 关 compact + skill/memory 工具链；toolBound 由 profile 表达）
+
+groups:
+  - id: context-ingest
+    points:
+      - pointId: context_ingest_handler
+        impls:
+          - query_truncate
+          - tool_result_truncate
+          - store_sink
+
+  - id: context-assemble
+    points:
+      - pointId: context_assemble_reducer
+        impls:
+          - side_run_builder
+
+  - id: context-compact
+    points:
+      - pointId: context_should_compact
+        impls:
+          - reject_should_compact
+      - pointId: context_do_compact
+        impls:
+          - noop_do_compact
+      - pointId: context_post_compact
+        impls:
+          - noop_post_compact
+
+  - id: context-engine
+    points:
+      - pointId: session_store
+        impls:
+          - in_memory_session_store

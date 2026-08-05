@@ -1,0 +1,6 @@
+# v0.0.210 academy-coach:parent:consolidate profile（consolidate runKind）
+# 参考: specs/tech/academy/[P0]session_kind_extension.md §3.4（summary/consolidate 矩阵完整性）
+# 空文件 extends consolidate 基座即等价（手动/自动 consolidate 同 profile）。
+# 启动期 validator validateMainMatrix 要求每个 <prefix>:main 必须有对应 <prefix>:consolidate。
+id: academy-coach:parent:consolidate
+extends: consolidate

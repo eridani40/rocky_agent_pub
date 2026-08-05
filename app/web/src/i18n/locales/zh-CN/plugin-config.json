@@ -1,0 +1,231 @@
+{
+  "page": {
+    "loadFail": "加载失败：{{error}}",
+    "loading": "加载中…",
+    "readonlyBanner": "配置已代码化（app/plugins/scopes/*.json），界面只读。",
+    "epInactiveHint": "未激活（继承 default）"
+  },
+  "tab": {
+    "plugin": "插件",
+    "extpoint": "扩展点"
+  },
+  "group": {
+    "context_ingest": { "label": "上下文摄入" },
+    "context_assemble": { "label": "上下文组装" },
+    "context_compact": { "label": "上下文压缩" },
+    "context_engine": { "label": "上下文引擎" },
+    "system_prompt": { "label": "系统提示" },
+    "provider": { "label": "供应商" },
+    "channel": { "label": "IM 渠道" },
+    "web": { "label": "Web" },
+    "vision": { "label": "视觉" },
+    "skill_market": { "label": "Skill 市场", "description": "可替换的 skill 市场源（exclusive，同一时刻一个源生效，承载 search/detail/install）" }
+  },
+  "plugin": {
+    "enabledBadge": "已启用",
+    "toggleAria": "切换插件 {{name}} 启用",
+    "builtin": {
+      "llm_anthropic": {
+        "label": "Anthropic LLM",
+        "description": "Anthropic LLM 内置插件（provider 鉴权 + messages 协议翻译）",
+        "impl": {
+          "anthropic_compatible": { "description": "Anthropic 兼容 API 鉴权与模型元数据（API Key / 基础 URL / 模型列表）" },
+          "anthropic_messages": { "description": "Anthropic Messages API 请求/响应协议翻译（请求体 shaping + path/contentType）" }
+        }
+      },
+      "zhipu_web_search": {
+        "label": "Zhipu Web Search",
+        "description": "web_search 内置 Zhipu 智谱 provider（web_search_provider EP，apiKey 走 ext impl config）",
+        "impl": {
+          "zhipu_coding_plan": {
+            "description": "智谱 · Coding Plan（订阅额度）· web_search_prime MCP 端点",
+            "config": {
+              "apiKey": { "description": "Zhipu web_search API key（secret，落盘 redact）" }
+            }
+          },
+          "zhipu_api": {
+            "description": "智谱 · API（按量计费）· /api/paas/v4/web_search REST 端点",
+            "config": {
+              "apiKey": { "description": "Zhipu web_search API key（secret，落盘 redact）" }
+            }
+          }
+        }
+      },
+      "see_image": {
+        "label": "看图理解",
+        "description": "see_image 内置双 vender 插件（see_image_provider EP，apiKey 走 app_config.see_image 凭证路由）",
+        "impl": {
+          "minimax_m3": {
+            "description": "MiniMax · M3（多图视觉理解，anthropic 兼容端点）"
+          },
+          "zhipu_image": {
+            "description": "智谱 · GLM 视觉（单图）"
+          }
+        }
+      },
+      "skills_sh": {
+        "label": "skills.sh 市场",
+        "description": "skills.sh 内置 skill 市场源（skill_market_provider exclusive EP，全端点匿名可用，token 可选）",
+        "impl": {
+          "skills_sh": {
+            "description": "skills.sh · 公开 skill 市场（/api/search 搜索 + /api/download 取单 skill 文件，官方 CLI skills add 同源）"
+          }
+        }
+      },
+      "feishu": {
+        "label": "飞书",
+        "description": "飞书 IM 渠道接入（channel EP，WS 长连接收发消息 + 斜杠指令）",
+        "impl": {
+          "feishu": {
+            "description": "飞书渠道 impl（im.message.receive_v1 入站 + im.message.create 出站 + /listp /bindp 等斜杠指令）",
+            "config": {
+              "appId": { "description": "飞书应用 App ID（cli_ 开头）" },
+              "appSecret": { "description": "飞书应用 App Secret（secret，落盘 redact）" }
+            }
+          }
+        }
+      },
+      "rocky_context": {
+        "label": "Rocky Context",
+        "description": "context 子系统内置 impl（ingest/assemble_mapper+reducer/system_prompt/system_reminder/compact，41 impl）",
+        "impl": {
+          "query_truncate": {
+            "description": "ingest 阶段截断 user query（超 queryTruncateChars 阈值则裁剪）",
+            "config": { "queryTruncateChars": { "description": "user query 截断阈值（char）" } }
+          },
+          "tool_result_truncate": {
+            "description": "ingest 阶段截断 tool_result（超 toolResultTruncateChars 阈值则裁剪）",
+            "config": { "toolResultTruncateChars": { "description": "tool_result 截断阈值（char）" } }
+          },
+          "system_reminder_injector": { "description": "ingest 阶段注入 system_reminder（聚合 reminder provider 链结果到消息流）" },
+          "buffer_sink": { "description": "[v0.0.40 D1=B] forked scope 专属汇：append 到 ctx.buffer 替代 store.appendMessages（default scope disable）" },
+          "store_sink": { "description": "[v0.0.49 D15] default scope 专属汇：append 到 store transcript（登记序末=chain 尾；forked scope disable，尾退回 buffer_sink）" },
+          "identity": { "description": "system prompt 身份片段（agent 名字/角色/能力边界，最高优先 tier）" },
+          "rules": { "description": "system prompt 行为规则片段（交互约束/安全策略）" },
+          "tool_guidance": { "description": "system prompt 工具使用指引（何时/如何调用工具）" },
+          "skills": { "description": "system prompt 已启用技能清单（供 LLM 选择调用）" },
+          "agent_profile": { "description": "「定义你的 agent」section（AGENTS.md/memory/skills 路径说明）" },
+          "context_files": { "description": "system prompt 上下文文件片段（注入已读文件内容引用）" },
+          "memory_user": { "description": "[v0.0.51] system prompt 用户级长期记忆片段（user_memory.md whole-file 注入，stable tier，priority 450）" },
+          "memory_session": { "description": "[v0.0.51] system prompt session 级记忆片段（session_memory.md whole-file 注入，context tier，priority 350）" },
+          "memory_group": { "description": "[v0.0.205] system prompt group 级共享记忆片段（squad 共享 ws 下 .rocky/memory/ L0 注入，stable tier，priority 400）" },
+          "squad_role": { "description": "[v0.0.33.3] squad 角色规范片段（leader/mate/squad_chat.md 固定 fragment；subagent/standalone 返空；priority 950 stable；替代 member.systemPrompt 作身份正文）" },
+          "team_roster": { "description": "[v0.0.33.2] squad 花名册片段（subagent 不可见，stable tier；memberIds → name+role+sessionId）" },
+          "parent_task": { "description": "[v0.0.33.2] parent task 片段（subagent only，stable tier；spawn 入参 task）" },
+          "tier_sort": { "description": "system prompt reducer 按 tier 排序片段（identity > rules > 其余）" },
+          "dedup": { "description": "system prompt reducer 去重片段（同 key 后写覆盖）" },
+          "budget_truncate": {
+            "description": "system prompt reducer 按 token 预算截断（budgetFraction/floor/ceiling）",
+            "config": {
+              "budgetFraction": { "description": "动态段预算占比（contextWindow 的比例）" },
+              "floor": { "description": "预算下限 token（char×ratio 估算）" },
+              "ceiling": { "description": "预算上限 token（char×ratio 估算）" }
+            }
+          },
+          "transcript_reader": {
+            "description": "assemble 读最近 N 条 transcript message（limit 控制条数）",
+            "config": { "limit": { "description": "读最近 N 条 message（N=limit）" } }
+          },
+          "summary_reader": {
+            "description": "assemble 读历史压缩摘要（超出 transcript 窗口的部分）",
+            "config": { "candidateLimit": { "description": "head/tail 候选各取条数上限（锚定会话真第一条 / summaryUpTo）" } }
+          },
+          "prev_snapshot": { "description": "assemble 读上一轮 context 快照（增量组装用）" },
+          "system_prompt": { "description": "assemble 读 system prompt（mapper+reducer 产出的 PromptFragment 拼接结果）" },
+          "buffer_reader": { "description": "[v0.0.40 D1=B] forked scope 专属源：读 ctx.buffer 替代 transcript_reader 读 store（default scope disable）" },
+          "base_builder": {
+            "description": "assemble reducer 基础切分（head/tail 锚定摘录 + token 上限）",
+            "config": {
+              "tokenCap": { "description": "head/tail 各自的 token 上限（char×ratio 估算；超过即停止累加，至少保底 1 条）" }
+            }
+          },
+          "side_run_builder": { "description": "旁路 run 专属 assemble reducer：复用固定 parentSnapshot + in_memory 增量（parent 全量 + summaryUpTo 后新增 upsert）" },
+          "orphan_tool_call": { "description": "assemble reducer 清理孤儿 tool_call（无配对 tool_result 的调用）" },
+          "bubble_text_before_tool_call": { "description": "clean_view reducer：assistant 的 text 块冒泡到 tool_call 之前（tool_use 后须紧跟 tool_result，text 夹中间 provider 400）" },
+          "think_remove": { "description": "assemble reducer 删除所有 message 的 reasoning(think) content block" },
+          "fill_empty_text": { "description": "assemble reducer 把 user/tool(success) 的空 text content block 兜底为 \"empty\"，防 LLM 400" },
+          "empty_message": { "description": "assemble reducer 清理空消息（无内容的 message）" },
+          "role_merge": { "description": "assemble reducer 合并相邻同 role 消息（连续 user/assistant 合并）" },
+          "snip_handler": { "description": "assemble reducer 处理 snip 标记（压缩边界处的占位处理）" },
+          "append_passthrough": { "description": "[v0.0.40 D1=B] forked scope 专属 reducer：原样返回 buffer 不 rebuild/head-tail/summary（default scope disable）" },
+          "env": { "description": "system reminder 环境信息（OS/shell/cwd 等运行时环境上下文）" },
+          "time": { "description": "system reminder 当前时间（当前日期，供 LLM 时间感知）" },
+          "workspace": { "description": "system reminder 工作区状态（当前 workspace/grep 上下文）" },
+          "tool_error": { "description": "system reminder 工具错误提示（工具调用失败时的引导）" },
+          "todo": { "description": "system reminder 待办清单（todo 进度跟踪提示）" },
+          "reachable_agents": { "description": "[v0.0.33.2] reachable_agents reminder（按 sessionType 派生 a2a 对端，user 永不在；volatile，保 system prompt cache）" },
+          "squad_workspace": { "description": "[v0.0.111] squad 团队盘 reminder（leader + mate；注入团队盘根 <dataDir>/squads/<squadId>；与个人 workspace 并存）" },
+          "squad_team_status": { "description": "[v0.0.116] squad 团队当前状态 reminder（leader only；只列 session 正在 running 的成员及其 presence 标记 currentWork；每轮直出）" },
+          "squad_task": { "description": "[v0.0.240] squad 待办任务 reminder（leader 看全队活跃 / mate 看 owner∪依赖我的；task = panorama builtin entity，归档不进；每轮直出交 dedup）" },
+          "threshold_should_compact": {
+            "description": "[v0.0.40] compact 谓词：(totalTokens+maxOutputTokens)/tokenLimit > compactRatio(默认0.6) → true；提前压非撞墙压",
+            "config": { "compactRatio": { "description": "用量/tokenLimit 占比超此阈值触发 compact（提前压，非撞墙压）" } }
+          },
+          "reject_should_compact": { "description": "[v0.0.40] compact 谓词 dummy：恒返 false（永不压）。forked scope 显式 setExclusive 选中以表达「该 scope 永不 compact」防递归，替代 disable 唯一实现制造 zero-active" },
+          "summary_do_compact": {
+            "description": "[v0.0.40] compact 动作：forkedRun(summary,NO_TOOLS,maxIter=1)→extractTag→setSummary（薄壳委托 context-compact-runner）；[v0.0.186] 压缩时烘焙完整 summary block（preamble+head+tail）落库，组装期零计算直读",
+            "config": {
+              "tokenCap": { "description": "烘焙时 head/tail 各自的 token 上限（char×ratio 估算；超过即停止累加，至少保底 1 条；与 base_builder tokenCap 同默认）" },
+              "candidateLimit": { "description": "烘焙时 head/tail 候选各取条数上限（锚定：head=会话真第一条起 / tail=summaryUpTo 结尾；与 summary_reader candidateLimit 同默认）" }
+            }
+          },
+          "noop_do_compact": { "description": "[v0.0.40] compact 动作 noop：空操作（不压）。forked scope 显式 setExclusive 选中作 defense-in-depth（reject_should_compact 已拦截，结构上不可达），保 exclusive EP 在 forked 不留 zero-active" },
+          "memory_skill_consolidation": { "description": "[v0.0.51] post-compact handler：compact 完成后启动 fork-2 整理 agent（allowed tools=[skill_manage,memory_manage]，fire-and-forget，直接调工具落盘 memory/skill）" },
+          "noop_post_compact": { "description": "[v0.0.51] post-compact handler noop：空操作。forked scope disable memory_skill_consolidation 后本 impl 作为 ordered EP 唯一激活 handler（defense-in-depth，防递归整理）" }
+        }
+      }
+    }
+  },
+  "extpoint": {
+    "llm_provider": { "description": "LLM 鉴权与模型元数据提供方（无状态代码，承载 API Key/基础 URL/模型列表）" },
+    "llm_protocol": { "description": "LLM 请求/响应协议翻译方（请求体 shaping + path/contentType，无状态代码）" },
+    "context_ingest_handler": { "description": "ingest 落库前的 ordered transform 链（Message[] → Message[]，截断/注入 reminder）" },
+    "context_assemble_mapper": { "description": "assemble 读数据源的 ordered 链（map → deepMerge，transcript/summary/snapshot/prompt）" },
+    "context_assemble_reducer": { "description": "assemble 增量组装的 ordered 链（reduce → Message[]，head/tail 预算切分）" },
+    "context_clean_view_reducer": { "description": "喂 LLM 前的「清理视图」ordered 链（reduce → Message[]，深克隆后跑，原 snapshot 不被触碰）" },
+    "system_prompt_mapper": { "description": "system prompt 贡献的 ordered 链（map → concat PromptFragment[]，identity/rules/skills/memory 等）" },
+    "system_prompt_reducer": { "description": "system prompt 链式处理的 ordered 链（reduce → PromptFragment[]，tier 排序/dedup/budget 截断）" },
+    "system_reminder": { "description": "system reminder provider 的 ordered 链（provide → concat SystemReminder[]，env/time/workspace/todo 等）" },
+    "context_should_compact": { "description": "compact 触发谓词（exclusive≤1，用量/tokenLimit>阈值→true；forked scope 显式选 reject_should_compact 恒 false 防 compact 递归）" },
+    "context_do_compact": { "description": "compact 执行动作（exclusive≤1，forkedRun(summary)→setSummary；shouldCompact 返 true 时由 tryCompact 调用）" },
+    "context_post_compact": { "description": "compact 成功完成后 ordered handler 链（如 memory_skill_consolidation 启动 fork-2 整理 agent；forked scope 跳过防递归）" },
+    "web_search_provider": { "description": "web_search 搜索后端提供方（query→结构化结果，凭证/计费隔离，list 多 impl 共存·按 app_config.web_search.type 单点路由）" },
+    "see_image_provider": { "description": "see_image 视觉理解后端提供方（文字+本地图片路径→文字理解，凭证/vender 能力隔离，list cardinality，按 app_config.see_image.type 精确路由）" },
+    "session_store": { "description": "上下文引擎会话存储（exclusive≤1，session 级 message 落库 sink；default→持久 transcript / forked→内存）" },
+    "channel": { "description": "IM 渠道接入层（list cardinality，飞书/未来微信/钉钉；与 web client 并列的消息路径）" },
+    "skill_market_provider": { "description": "skill 市场源提供方（exclusive≤1，search/getDetail/fetchSkillFiles 打市场源 API；scope selected 选源，整源可替换）" }
+  },
+  "impl": {
+    "toggleAria": "切换 {{implId}} 启用"
+  },
+  "implConfig": {
+    "ariaLabel": "配置",
+    "title": "配置"
+  },
+  "scope": {
+    "defaultBadge": "基线",
+    "deleteAria": "删除 scope {{name}}",
+    "idPlaceholder": "id (snake_case)",
+    "namePlaceholder": "名称",
+    "descPlaceholder": "描述（可选）",
+    "createSubmit": "创建",
+    "createBtn": "+ 新建 scope",
+    "deleteTitle": "删除 Scope",
+    "deleteBody": "确定要删除 {{name}} 吗？该 scope 下的 EP 激活记录与 impl 配置将一并清除（回退 default），此操作无法撤销。"
+  },
+  "ep": {
+    "inheritedHint": "继承 default",
+    "activateBtn": "激活此 EP",
+    "deactivateBtn": "取消激活",
+    "deactivateTitle": "取消激活扩展点",
+    "deactivateBody": "确定要取消激活 {{pointId}} 吗？该 scope 下此 EP 的独立配置将被清除（回退继承 default），此操作无法撤销。",
+    "deactivateConfirm": "确认取消激活"
+  },
+  "schemaConfig": {
+    "title": "配置 · {{implId}}"
+  },
+  "empty": {
+    "extPoint": "该 group 下暂无扩展点。",
+    "plugins": "暂无已注册的插件。"
+  }
+}

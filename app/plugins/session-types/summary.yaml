@@ -1,0 +1,20 @@
+# v0.0.204 session type profile — summary 基座（summary runKind 共性）
+# 参考: specs/tech/agent/session/[P0]session_type_profile.md §4
+#
+# summary run = compaction 单次快路径；零工具 / in_memory store / 不碰状态机 / onUsage 分区 summary。
+# 各类型 *.summary.yaml 空文件 extends 此基座即等价（手动/自动 summary 同 profile）。
+
+id: summary
+extends: default
+toolBound: []
+toolDefinitionsSource: host-snapshot
+runShape:
+  drainMode: none
+  backgroundPath: true
+  maxIterDefault: 1
+  touchesStateMachine: false
+  persistsRun: false
+  usagePartition: summary
+lifecycleHooks:
+  abortFinalize: none
+  cascadeChildren: false

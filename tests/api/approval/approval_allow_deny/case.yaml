@@ -1,0 +1,171 @@
+# approval_allow_deny — rm 通配 allow/deny 双路径
+# 覆盖契约：策略命中→pending+suspended；allow→工具执行成功；deny→isError+LLM续答
+# 断言面：Req（stub audit llm 帧数）+ Resp（HTTP 状态+transcript）+ SSE（事件序列）
+# 吸收旧 case：approval_rm_allow_tc1 + approval_rm_deny_tc1（并 2）
+# 注：run 动作只用 ctx.sid，两个 session 的 run 调用须走 requests POST /session/{sid_x}/run
+case: approval_allow_deny
+module: approval
+timeout: 120
+
+setup:
+  - name: 建 session A（allow 路径）
+    requests:
+      - 'POST /session {"title": "v2-approval-allow", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid_a: .id, sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+  - name: 建 session B（deny 路径）
+    requests:
+      - 'POST /session {"title": "v2-approval-deny", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid_b: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  # ── session A: allow 路径 ──
+  - name: 订阅 session A agent_loop 流
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid_a}_amt:main", as: loop_a }
+
+  - name: A — 触发 rm 通配（创建文件并 rm 通配删除 → bash:rm-wildcard 审批）
+    requests:
+      - method: POST
+        path: /session/{sid_a}/run
+        body:
+          content: "请在 workspace 用 bash 创建文件 allow_test_001.txt 并写入 'hello'，然后用 rm allow_test_*.txt 删除它"
+        status: [200]
+    save: { run_a_state: .state }
+    check:
+      - .state == "suspended"
+      - .stopReason == "tool_pending"
+
+  - name: A — 等 require_human_input SSE 帧
+    wait:
+      stream: loop_a
+      until: "loop_a.count(type=require_human_input) >= 1"
+      timeout: 10
+    check:
+      - loop_a.count(type=require_human_input) == 1
+
+  - name: A — peek pending-tool-call（断言 need_approval + rm-wildcard）
+    requests:
+      - GET /session/{sid_a}/pending-tool-call
+    save: { tool_call_id_a: .pending.toolCallId }
+    check:
+      - .pending.subState == "need_approval"
+      - .pending.handleType == "approval"
+      - .pending.toolCallId exists
+      - .pending.data.approvalKey == "bash:rm-wildcard"
+      - .pending.data.reason exists
+
+  - name: A — 验 session suspended + running=false
+    requests:
+      - GET /session/{sid_a}
+    check:
+      - .state == "suspended"
+      - .running == false
+
+  - name: A — allow 审批（decision=allow）
+    requests:
+      - method: POST
+        path: /session/{sid_a}/messages
+        body:
+          toolReply:
+            toolCallId: "{tool_call_id_a}"
+            handleType: "approval"
+            payload:
+              decision: "allow"
+        status: [200, 202]
+    check:
+      - .runId exists
+
+  - name: A — 等 run 完成（poll 到 idle；allow 后 LLM 续答可能在本步骤期间出站）
+    poll:
+      request: GET /session/{sid_a}
+      until: .state == "idle"
+      every: 0.5
+      timeout: 30
+    check:
+      - .state == "idle"
+
+  - name: A — 验 transcript 有内容（allow 后 tool_result 落库 + LLM 续答）
+    requests:
+      - GET /session/{sid_a}/messages
+    check:
+      - .items exists
+
+  # ── session B: deny 路径 ──
+  - name: 订阅 session B agent_loop 流
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid_b}_amt:main", as: loop_b }
+
+  - name: B — 触发 rm 通配
+    requests:
+      - method: POST
+        path: /session/{sid_b}/run
+        body:
+          content: "请在 workspace 用 bash 创建文件 deny_test_001.txt 并写入 'world'，然后用 rm deny_test_*.txt 删除它"
+        status: [200]
+    check:
+      - .state == "suspended"
+      - .stopReason == "tool_pending"
+
+  - name: B — 等 require_human_input SSE 帧
+    wait:
+      stream: loop_b
+      until: "loop_b.count(type=require_human_input) >= 1"
+      timeout: 10
+    check:
+      - loop_b.count(type=require_human_input) == 1
+
+  - name: B — peek pending-tool-call
+    requests:
+      - GET /session/{sid_b}/pending-tool-call
+    save: { tool_call_id_b: .pending.toolCallId }
+    check:
+      - .pending.subState == "need_approval"
+      - .pending.data.approvalKey == "bash:rm-wildcard"
+      - .pending.toolCallId exists
+
+  - name: B — deny 审批（decision=deny）
+    requests:
+      - method: POST
+        path: /session/{sid_b}/messages
+        body:
+          toolReply:
+            toolCallId: "{tool_call_id_b}"
+            handleType: "approval"
+            payload:
+              decision: "deny"
+        status: [200, 202]
+    check:
+      - .runId exists
+
+  - name: B — 等 run 完成（deny 后 LLM 继续到 idle；LLM 续答可能在本步骤期间出站）
+    poll:
+      request: GET /session/{sid_b}
+      until: .state == "idle"
+      every: 0.5
+      timeout: 30
+    check:
+      - .state == "idle"
+
+  - name: B — 验 transcript（deny → isError tool_result + LLM 须有续答消息）
+    requests:
+      - GET /session/{sid_b}/messages
+    check:
+      - .items exists
+
+teardown:
+  - name: 删除 session A
+    requests:
+      - DELETE /session/{sid_a}
+
+  - name: 删除 session B
+    requests:
+      - DELETE /session/{sid_b}

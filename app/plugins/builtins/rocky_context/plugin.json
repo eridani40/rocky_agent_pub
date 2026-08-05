@@ -1,0 +1,419 @@
+{
+  "id": "rocky_context",
+  "label": "__MSG_plugin.builtin.rocky_context.label__",
+  "description": "__MSG_plugin.builtin.rocky_context.description__",
+  "extImpls": [
+    {
+      "implId": "query_truncate",
+      "point": "context_ingest_handler",
+      "impl": "./ingest/query_truncate.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.query_truncate.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "queryTruncateChars": { "type": "integer", "default": 8000, "minimum": 100, "description": "__MSG_plugin.builtin.rocky_context.impl.query_truncate.config.queryTruncateChars.description__" }
+        }
+      }
+    },
+    {
+      "implId": "tool_result_truncate",
+      "point": "context_ingest_handler",
+      "impl": "./ingest/tool_result_truncate.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.tool_result_truncate.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "toolResultTruncateChars": { "type": "integer", "default": 25000, "minimum": 100, "description": "__MSG_plugin.builtin.rocky_context.impl.tool_result_truncate.config.toolResultTruncateChars.description__" }
+        }
+      }
+    },
+    {
+      "implId": "system_reminder_injector",
+      "point": "context_ingest_handler",
+      "impl": "./ingest/system_reminder_injector.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.system_reminder_injector.description__"
+    },
+    {
+      "implId": "store_sink",
+      "point": "context_ingest_handler",
+      "impl": "./ingest/store_sink.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.store_sink.description__"
+    },
+    {
+      "implId": "search_indexing",
+      "point": "context_ingest_handler",
+      "impl": "./ingest/search_indexing.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.search_indexing.description__"
+    },
+
+    {
+      "implId": "identity",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/identity.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.identity.description__"
+    },
+    {
+      "implId": "rules",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/rules.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.rules.description__"
+    },
+    {
+      "implId": "tool_guidance",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/tool_guidance.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.tool_guidance.description__"
+    },
+    {
+      "implId": "skills",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/skills.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.skills.description__"
+    },
+    {
+      "implId": "agent_profile",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/agent_profile.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.agent_profile.description__"
+    },
+    {
+      "implId": "context_files",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/context_files.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.context_files.description__"
+    },
+    {
+      "implId": "memory_user",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/memory-user.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.memory_user.description__"
+    },
+    {
+      "implId": "memory_session",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/memory-session.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.memory_session.description__"
+    },
+    {
+      "implId": "memory_group",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/memory-group.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.memory_group.description__"
+    },
+    {
+      "implId": "squad_role",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/squad_role.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.squad_role.description__"
+    },
+    {
+      "implId": "team_roster",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/team_roster.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.team_roster.description__"
+    },
+    {
+      "implId": "parent_task",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/parent_task.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.parent_task.description__"
+    },
+    {
+      "implId": "academy_classroom_role",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-classroom-role.ts",
+      "description": "academy 教室身份正文（你是 X 教室的班主任/教练/学生）"
+    },
+    {
+      "implId": "academy_coach_role",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-coach-role.ts",
+      "description": "coach 稳定教练职责（绝对主权 + advisory + adopt 旁路）+ 训练工作流方法论 + manage-task action 说明"
+    },
+    {
+      "implId": "academy_head_role",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-head-role.ts",
+      "description": "head 班主任行为指引（教室层管理 + task 内部 send_message coach + update_task 用途）"
+    },
+    {
+      "implId": "academy_training_directive",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-training-directive.ts",
+      "description": "训练任务 directive 透传进 coach prompt"
+    },
+    {
+      "implId": "academy_iteration_state",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-iteration-state.ts",
+      "description": "训练任务当前轮次 + 历史摘要进 coach prompt"
+    },
+    {
+      "implId": "academy_classroom_assets",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-classroom-assets.ts",
+      "description": "教室数据集/评估器/skill 概览进 head prompt"
+    },
+    {
+      "implId": "academy_classroom_students",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-classroom-students.ts",
+      "description": "学生名单（名字/当前正式版/版本数/在跑任务）进 head prompt"
+    },
+    {
+      "implId": "academy_task_status",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/academy-task-status.ts",
+      "description": "教室任务状态看板进 head prompt"
+    },
+
+    {
+      "implId": "tier_sort",
+      "point": "system_prompt_reducer",
+      "impl": "./prompt/tier_sort.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.tier_sort.description__"
+    },
+    {
+      "implId": "dedup",
+      "point": "system_prompt_reducer",
+      "impl": "./prompt/dedup.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.dedup.description__"
+    },
+    {
+      "implId": "budget_truncate",
+      "point": "system_prompt_reducer",
+      "impl": "./prompt/budget_truncate.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.budget_truncate.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "budgetFraction": { "type": "number", "default": 0.06, "exclusiveMinimum": 0, "maximum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.budget_truncate.config.budgetFraction.description__" },
+          "floor": { "type": "integer", "default": 100000, "minimum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.budget_truncate.config.floor.description__" },
+          "ceiling": { "type": "integer", "default": 500000, "minimum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.budget_truncate.config.ceiling.description__" }
+        }
+      }
+    },
+
+    {
+      "implId": "transcript_reader",
+      "point": "context_assemble_mapper",
+      "impl": "./assemble/transcript_reader.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.transcript_reader.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "type": "integer", "default": 500, "minimum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.transcript_reader.config.limit.description__" }
+        },
+        "required": ["limit"]
+      }
+    },
+    {
+      "implId": "summary_reader",
+      "point": "context_assemble_mapper",
+      "impl": "./assemble/summary_reader.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.summary_reader.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidateLimit": { "type": "integer", "default": 500, "minimum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.summary_reader.config.candidateLimit.description__" }
+        },
+        "required": ["candidateLimit"]
+      }
+    },
+
+    {
+      "implId": "base_builder",
+      "point": "context_assemble_reducer",
+      "impl": "./assemble/base_builder.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.base_builder.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tokenCap": { "type": "integer", "default": 10000, "minimum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.base_builder.config.tokenCap.description__" }
+        },
+        "required": ["tokenCap"]
+      }
+    },
+    {
+      "implId": "side_run_builder",
+      "point": "context_assemble_reducer",
+      "impl": "./assemble/side_run_builder.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.side_run_builder.description__"
+    },
+
+    {
+      "implId": "dedup_tool_result",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/dedup_tool_result.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.dedup_tool_result.description__"
+    },
+    {
+      "implId": "orphan_tool_call",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/orphan_tool_call.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.orphan_tool_call.description__"
+    },
+    {
+      "implId": "bubble_text_before_tool_call",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/bubble_text_before_tool_call.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.bubble_text_before_tool_call.description__"
+    },
+    {
+      "implId": "empty_message",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/empty_message.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.empty_message.description__"
+    },
+    {
+      "implId": "think_remove",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/think_remove.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.think_remove.description__"
+    },
+    {
+      "implId": "fill_empty_text",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/fill_empty_text.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.fill_empty_text.description__"
+    },
+    {
+      "implId": "role_merge",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/role_merge.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.role_merge.description__"
+    },
+    {
+      "implId": "snip_handler",
+      "point": "context_clean_view_reducer",
+      "impl": "./assemble/snip_handler.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.snip_handler.description__"
+    },
+
+    {
+      "implId": "env",
+      "point": "system_reminder",
+      "impl": "./reminder/env.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.env.description__"
+    },
+    {
+      "implId": "time",
+      "point": "system_reminder",
+      "impl": "./reminder/time.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.time.description__"
+    },
+    {
+      "implId": "workspace",
+      "point": "system_reminder",
+      "impl": "./reminder/workspace.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.workspace.description__"
+    },
+    {
+      "implId": "tool_error",
+      "point": "system_reminder",
+      "impl": "./reminder/tool_error.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.tool_error.description__"
+    },
+    {
+      "implId": "todo",
+      "point": "system_reminder",
+      "impl": "./reminder/todo.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.todo.description__"
+    },
+    {
+      "implId": "reachable_agents",
+      "point": "system_reminder",
+      "impl": "./prompt/reachable_agents.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.reachable_agents.description__"
+    },
+    {
+      "implId": "squad_workspace",
+      "point": "system_reminder",
+      "impl": "./reminder/squad_workspace.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.squad_workspace.description__"
+    },
+    {
+      "implId": "squad_team_status",
+      "point": "system_reminder",
+      "impl": "./reminder/squad_team_status.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.squad_team_status.description__"
+    },
+    {
+      "implId": "squad_task",
+      "point": "system_reminder",
+      "impl": "./reminder/squad_task.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.squad_task.description__"
+    },
+
+    {
+      "implId": "threshold_should_compact",
+      "point": "context_should_compact",
+      "impl": "./compact/threshold_should_compact.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.threshold_should_compact.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "compactRatio": { "type": "number", "default": 0.6, "exclusiveMinimum": 0, "maximum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.threshold_should_compact.config.compactRatio.description__" }
+        }
+      }
+    },
+    {
+      "implId": "reject_should_compact",
+      "point": "context_should_compact",
+      "impl": "./compact/reject_should_compact.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.reject_should_compact.description__"
+    },
+    {
+      "implId": "summary_do_compact",
+      "point": "context_do_compact",
+      "impl": "./compact/summary_do_compact.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.summary_do_compact.description__",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tokenCap": { "type": "integer", "default": 10000, "minimum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.summary_do_compact.config.tokenCap.description__" },
+          "candidateLimit": { "type": "integer", "default": 500, "minimum": 1, "description": "__MSG_plugin.builtin.rocky_context.impl.summary_do_compact.config.candidateLimit.description__" }
+        }
+      }
+    },
+    {
+      "implId": "noop_do_compact",
+      "point": "context_do_compact",
+      "impl": "./compact/noop_do_compact.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.noop_do_compact.description__"
+    },
+    {
+      "implId": "memory_skill_consolidation",
+      "point": "context_post_compact",
+      "impl": "./compact/post-compact-consolidation.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.memory_skill_consolidation.description__"
+    },
+    {
+      "implId": "noop_post_compact",
+      "point": "context_post_compact",
+      "impl": "./compact/noop-post-compact.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.noop_post_compact.description__"
+    },
+
+    {
+      "implId": "persistent_session_store",
+      "point": "session_store",
+      "impl": "./store/persistent_session_store.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.persistent_session_store.description__"
+    },
+    {
+      "implId": "in_memory_session_store",
+      "point": "session_store",
+      "impl": "./store/in_memory_session_store.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.in_memory_session_store.description__"
+    }
+  ]
+}

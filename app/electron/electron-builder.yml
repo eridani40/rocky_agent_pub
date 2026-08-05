@@ -1,0 +1,94 @@
+# electron-builder 主配置
+# 参考: specs/tech/app/package/[P0]packaging_toolchain.md §2.1（字段归属）/§2.2（字段约束）
+#       specs/tech/app/envs/[P0]environments.md §3.4（prod 专有键）/§3.5（注入）
+#
+# 不变量（packaging_toolchain §3.5）：版本号 / 签名凭证由 prod.env 注入到环境，
+# yml 不写死。${APP_NAME} / ${BUILD_OUT_DIR} 由 build-dmg.sh source prod.env 后注入。
+# files 覆盖（packaging_toolchain §3.2）：主进程 dist + web 静态产物 + workspace
+# 依赖（@app/server / @app/protocols 经 node_modules 符号链接默认跟随，显式声明防漏）。
+
+appId: com.rockyagent.app
+productName: ${APP_NAME}
+
+directories:
+  # 产物输出目录（dmg/exe/mac/…），缺省 release/
+  output: ${BUILD_OUT_DIR}
+  buildResources: buildResources
+
+# 打包内容（相对 app/electron/）：
+#   dist/**              — tsc -b 编译的 main.js/preload.js
+#   web-dist/**          — vite build 产物（约定 outDir = app/electron/web-dist）
+#   runtime-config.json  — build 期由 build-dmg.sh 从 prod.env 抽白名单非密钥键生成，
+#                          packaged 运行时 main.ts 读入回填 process.env（修后端起不来 bug）
+#   node_modules         — 含 workspace 符号链接 @app/server / @app/protocols
+#   ../plugins/dist      — build-plugins.ts 编译的内置插件 .cjs bundle + 资源，映射进
+#                          asar node_modules/@app/plugins（server→plugins 偏移 ../../ dev/packaged
+#                          一致 → bootstrap/skills-resolver 路径零改动，packaged_plugin_loading §3.4）
+files:
+  - dist/**/*
+  - web-dist/**/*
+  - runtime-config.json
+  - node_modules/@app/server/**/*
+  - node_modules/@app/server/app-version.json
+  - node_modules/@app/protocols/**/*
+  # computer-native 原生模块（Swift dylib + N-API .node）：由 build-dmg.sh 在打包前
+  # 调 build-native.sh 预编译（swift build → node-gyp Electron ABI → 并置 build/Release/）。
+  # 打进 asar node_modules/@app/computer-native，主进程 require('@app/computer-native') 解析。
+  - node_modules/@app/computer-native/index.js
+  - node_modules/@app/computer-native/index.d.ts
+  - node_modules/@app/computer-native/package.json
+  - node_modules/@app/computer-native/build/Release/rocky_computer.node
+  - node_modules/@app/computer-native/build/Release/libRockyComputerCore.dylib
+  # better-sqlite3（v0.0.194 CrudStore sqlite engine 扶正）：packaged 后端 token_usage_stat
+  # 聚合查询用。build-dmg.sh ②c 对 Electron ABI 预编译（prebuild-install 下载的是 Node ABI，
+  # packaged 需 Electron ABI）；asarUnpack '**/*.node' 通配已覆盖解包（无需改 asarUnpack）。
+  - node_modules/better-sqlite3/**/*
+  - from: ../plugins/dist
+    to: node_modules/@app/plugins
+  - package.json
+
+asar: true
+# 原生模块（.node / Swift dylib）不能压进 asar（dlopen 需真实文件路径），解包到
+# app.asar.unpacked/。rpath @loader_path 保证 .node 在解包目录内解析并置的 dylib。
+asarUnpack:
+  - '**/*.node'
+  - '**/*.dylib'
+
+# computer-native 的 .node 已由 build-native.sh 对 Electron ABI 预编译。禁止 electron-builder
+# 重跑 @electron/rebuild：其 node-gyp 只做 C++ 链接（缺 swift/.build dylib → 'library
+# RockyComputerCore not found'），且会清掉并置好的 dylib。构建职责归 build-dmg.sh。
+npmRebuild: false
+
+mac:
+  target: dmg
+  category: public.app-category.productivity
+  # v0.0.11 Rocky 品牌图标（specs/ui/components/chat-page/brand-rocky.md §3）
+  # 资产生成见 buildResources/ 下；.icns 经 iconutil 从多尺寸 png 合成。
+  icon: buildResources/icon.icns
+  # 签名/公证字段由 prod.env 注入（CSC_LINK / APPLE_TEAM_ID / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD）
+  # v0.0.1 允许未签名（PRD §7.2），缺失时 electron-builder 跳过签名不致命。
+  #
+  # v0.0.160 computer_use gap#10 Spotlight recent apps：AppDiscovery 走 NSMetadataQuery / MDQuery
+  #   查用户目录 metadata 找最近使用过的 app。macOS 系统能力，无需 TCC 授权弹窗；packaged app
+  #   规范要求 Info.plist 声明 usage description（否则某些 macOS 版本会静默拒绝索引访问）。
+  # 参考: specs/tech/version_logs/v0.0.160/change_plan.md 模块 H（H-5）
+  #       前置决策 P2 方案 A（orchestrator 授权，memory orchestrator-can-edit-devconfig-plugin-ext）
+  extendInfo:
+    NSMetadataQueryUsageDescription: 'Rocky Agent needs Spotlight metadata access to list recently used apps for the computer_use tool (查询最近使用过的应用，供 AI Agent 操控 macOS 应用).'
+
+win:
+  target: nsis
+  # v0.0.11 TODO(.ico)：本仓库暂无 png→ico 生成工具链（无 imagemagick/icoutils），
+  # 当前用 256×256 png 占位（electron-builder 在 mac 主机不实际构建 win 包，
+  # 真正跨平台发版前需补 .ico — 详见 buildResources/README.md）。
+  icon: buildResources/icon-256.png
+
+dmg:
+  contents:
+    - { x: 130, y: 220 }
+    - { x: 410, y: 220, type: link, path: /Applications }
+
+# 版本号（packaging_toolchain §3.5）：唯一权威源 = 根 package.json 的 version。
+# builder 在 app/electron 子目录跑，默认读子包 package.json version（0.0.0 占位），
+# 故 build-dmg.sh 读根 package.json version 经 --config.extraMetadata.version 注入；
+# 这里不写死 version，避免每次发版改 yml。

@@ -1,0 +1,48 @@
+{
+  "section": {
+    "title": "Model Providers",
+    "subtitle": "model_config · {{providerCount}} providers · {{modelCount}} models",
+    "addProvider": "+ Add Provider"
+  },
+  "field": {
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Claude",
+    "apiKeyHint": "credentials.key (masked ***, overwrite on retype)",
+    "protocolHint": "protocol_id (request translation contract)",
+    "urlLabel": "Actual Request URL",
+    "urlHint": "baseUrl + protocol.path (read-only)",
+    "urlEmpty": "Fill Base URL and select a protocol first",
+    "enableTitle": "Enable this provider",
+    "enableHint": "When disabled, hidden from model picker"
+  },
+  "list": {
+    "modelCount": "{{count}} models",
+    "enabled": "Enabled",
+    "disabled": "Disabled"
+  },
+  "detail": {
+    "newTitle": "New Provider",
+    "connectionTitle": "Connection",
+    "dirty": "● Unsaved changes",
+    "saved": "✓ Saved",
+    "modelsTitle": "Models · {{count}}",
+    "addModel": "+ Add Model",
+    "emptyModels": "No models yet. Click \"Add Model\" to add one."
+  },
+  "model": {
+    "add": "Add Model",
+    "edit": "Edit Model",
+    "fieldEditHint": "model · field edit",
+    "labelName": "Display Name",
+    "labelPlaceholder": "e.g. Claude Sonnet",
+    "labelId": "Model ID",
+    "labelCtx": "Context Window",
+    "labelMaxOutput": "Max Output",
+    "enableTitle": "Enable this model",
+    "enableHint": "When off, hidden from model picker"
+  },
+  "modelList": {
+    "disabled": "Disabled",
+    "deleteAria": "Delete model"
+  }
+}

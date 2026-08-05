@@ -1,0 +1,5 @@
+# v0.0.210 scope — academy-coach:parent:summary（summary runKind；空=继承 summary 基座）
+extends: summary
+scopeId: academy-coach:parent:summary
+name: academy-coach:parent:summary
+description: summary run scope（手动/自动同 profile；空=继承 summary 基座）

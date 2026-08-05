@@ -1,0 +1,6 @@
+# run artifacts (runner outputs) — never committed
+last_run.json
+response-*.json
+sse*.txt
+sse_events.json
+*.log

@@ -1,0 +1,73 @@
+# agent_auto_naming — 首条 query 触发 AI 自动起名
+# 覆盖契约：titled false→true（spec 04 §3.2 auto_naming fire-and-forget backgroundPath）
+# 断言面：Req（stub audit llm 帧数：主 run + auto_naming 背景 invoke）+ Resp（titled=true）+ SSE（run + meta 事件序列）
+# 吸收旧 case：auto_naming_basic（迁）
+# 注：auto_naming hook 挂在 POST /session/{sid}/messages（生产路径），不在 POST /session/{sid}/run（test wrapper）
+#     因此首 query 必须走 /messages 生产路径，naming 与主 run 并发触发；
+#     stub 声明 [llm] 覆盖 2 帧（主 run + naming 各 1 次 LLM 调用）；
+#     等 session_meta_update SSE 替代 poll，规避 poll.timeout <= 10s 对 naming LLM 的限制
+case: auto_naming
+module: agent
+timeout: 90
+
+setup:
+  - name: 建会话（不传 title，triggered=false 起步）
+    requests:
+      - 'POST /session {"providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .titled == false
+      - .state == "idle"
+
+steps:
+  - name: 订阅 agent_loop 流（主 run 事件）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 订阅 session_meta 流（auto_naming 完成广播，group=_all）
+    sse:
+      sub:
+        - { topic: session_meta, group: "_all", as: meta }
+
+  - name: 首条 query（走生产路径 POST /messages，触发主 run + auto_naming 并发）
+    requests:
+      - 'POST /session/{sid}/messages {"content": "请简单介绍一下 Python 快速排序算法"}'
+    check:
+      - .runId exists
+      - .enqueueId exists
+
+  - name: 等主 run 事件链完整（主 run LLM + naming LLM 均在等待期间完成）
+    wait:
+      stream: main
+      until: "main.count(type=run_end) == 1"
+      timeout: 30
+    check:
+      - main.count(type=run_start) == 1
+      - main.count(type=run_end) == 1
+      - main.absent(type=error)
+
+  - name: 等 auto_naming 完成广播（session_meta_update 事件，naming LLM 约 2-5s）
+    wait:
+      stream: meta
+      until: "meta.count(type=session_meta_update) >= 1"
+      timeout: 30
+    check:
+      - meta.count(type=session_meta_update) >= 1
+
+  - name: 验 titled=true 且 title 非空（naming 完成落库，poll 兜底等 persist）
+    poll:
+      request: GET /session/{sid}
+      until: .titled == true
+      every: 0.5
+      timeout: 10
+    check:
+      - .titled == true
+      - .title exists
+      - .id exists
+
+teardown:
+  - name: 删除会话
+    requests:
+      - DELETE /session/{sid}

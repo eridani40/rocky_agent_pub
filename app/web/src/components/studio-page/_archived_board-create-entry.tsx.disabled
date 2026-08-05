@@ -1,0 +1,49 @@
+/**
+ * component-board-create-entry —— 看板 +新建 入口按钮（按 tab 切换 kind/label/testid）
+ * 参考: specs/ui/components/studio-page/squad-board.md（v0.0.76 入口位置统一：zone 切换器正下方）
+ *
+ * 职责：渲染单一 +新建 按钮（label/testid 按 tab 派生）；点击上抛 onCreate(kind)。
+ *   3 个 view（goals/requirements/tasks）的入口统一挂在 BoardZoneBar 正下方，
+ *   避免各 view 内部按钮位置不齐；KR 入口例外（per-goal 在 GoalCard 内）。
+ *
+ * 边界：纯展示 + 回调；zone='archive' 或 onCreate 缺省时不渲染（返 null）。
+ */
+import type { BoardEntityKind } from './board-types';
+
+/** 看板 sub-tab id（与 component-squad-board.tsx BoardTab 同步；本地声明避免循环依赖） */
+type BoardTab = 'goals' | 'requirements' | 'tasks';
+
+/** 各 tab 的 +新建 元数据：kind（API/testid token）+ label（按钮文案） */
+const CREATE_META: Record<BoardTab, { kind: BoardEntityKind; label: string }> = {
+  goals: { kind: 'goal', label: 'Goal' },
+  requirements: { kind: 'req', label: 'Requirement' },
+  tasks: { kind: 'task', label: 'Task' },
+};
+
+interface CreateEntryProps {
+  /** 当前 sub-tab */
+  tab: BoardTab;
+  /** zone：archive 不渲染（归档区不新建） */
+  zone: 'active' | 'archive';
+  /** +新建 入口回调（缺省 → 不渲染按钮，向后兼容） */
+  onCreate?: (kind: BoardEntityKind, parentGoalId?: string) => void;
+}
+
+/** +新建 入口按钮（zone 切换器正下方；按 tab 切换 kind/label/testid） */
+export function BoardCreateEntry({ tab, zone, onCreate }: CreateEntryProps) {
+  if (zone !== 'active' || !onCreate) return null;
+  const meta = CREATE_META[tab];
+  if (!meta) return null;
+  return (
+    <button
+      type="button"
+      data-testid={`squad-board-${meta.kind}-create`}
+      onClick={() => onCreate(meta.kind)}
+      className="self-end inline-flex items-center gap-1 rounded-md border border-accent bg-accent/12 px-3 py-1.5 text-[12px] font-semibold text-accent hover:bg-accent/20"
+    >
+      <span className="font-mono">+</span> 新建 {meta.label}
+    </button>
+  );
+}
+
+export default BoardCreateEntry;

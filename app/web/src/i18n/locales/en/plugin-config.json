@@ -1,0 +1,231 @@
+{
+  "page": {
+    "loadFail": "Load failed: {{error}}",
+    "loading": "Loading…",
+    "readonlyBanner": "Configuration is code-declared (app/plugins/scopes/*.json); UI is read-only.",
+    "epInactiveHint": "Inactive (inherits default)"
+  },
+  "tab": {
+    "plugin": "Plugins",
+    "extpoint": "Extension Points"
+  },
+  "group": {
+    "context_ingest": { "label": "Context Ingest" },
+    "context_assemble": { "label": "Context Assemble" },
+    "context_compact": { "label": "Context Compact" },
+    "context_engine": { "label": "Context Engine" },
+    "system_prompt": { "label": "System Prompt" },
+    "provider": { "label": "Providers" },
+    "channel": { "label": "IM Channel" },
+    "web": { "label": "Web" },
+    "vision": { "label": "Vision" },
+    "skill_market": { "label": "Skill Market", "description": "Swappable skill market source (exclusive; one source active at a time; hosts search/detail/install)" }
+  },
+  "plugin": {
+    "enabledBadge": "Enabled",
+    "toggleAria": "Toggle plugin {{name}}",
+    "builtin": {
+      "llm_anthropic": {
+        "label": "Anthropic LLM",
+        "description": "Anthropic LLM built-in plugin (provider auth + messages protocol translation)",
+        "impl": {
+          "anthropic_compatible": { "description": "Anthropic-compatible API auth and model metadata (API Key / base URL / model list)" },
+          "anthropic_messages": { "description": "Anthropic Messages API request/response protocol translation (body shaping + path/contentType)" }
+        }
+      },
+      "zhipu_web_search": {
+        "label": "Zhipu Web Search",
+        "description": "Built-in Zhipu web_search provider (web_search_provider EP; apiKey via ext impl config)",
+        "impl": {
+          "zhipu_coding_plan": {
+            "description": "Zhipu · Coding Plan (subscription) · web_search_prime MCP endpoint",
+            "config": {
+              "apiKey": { "description": "Zhipu web_search API key (secret; redacted at rest)" }
+            }
+          },
+          "zhipu_api": {
+            "description": "Zhipu · API (pay-as-you-go) · /api/paas/v4/web_search REST endpoint",
+            "config": {
+              "apiKey": { "description": "Zhipu web_search API key (secret; redacted at rest)" }
+            }
+          }
+        }
+      },
+      "see_image": {
+        "label": "See Image",
+        "description": "see_image built-in dual-vender plugin (see_image_provider EP; apiKey routed via app_config.see_image credentials)",
+        "impl": {
+          "minimax_m3": {
+            "description": "MiniMax · M3 (multi-image understanding, anthropic-compatible endpoint)"
+          },
+          "zhipu_image": {
+            "description": "Zhipu · GLM Vision (single image)"
+          }
+        }
+      },
+      "skills_sh": {
+        "label": "skills.sh Market",
+        "description": "Built-in skills.sh skill market source (skill_market_provider exclusive EP; all endpoints anonymous, token optional)",
+        "impl": {
+          "skills_sh": {
+            "description": "skills.sh · public skill market (/api/search + /api/download for single-skill files; same source as official CLI `skills add`)"
+          }
+        }
+      },
+      "feishu": {
+        "label": "Feishu",
+        "description": "Feishu IM channel access (channel EP; WS long-connection messaging + slash commands)",
+        "impl": {
+          "feishu": {
+            "description": "Feishu channel impl (im.message.receive_v1 inbound + im.message.create outbound + /listp /bindp slash commands)",
+            "config": {
+              "appId": { "description": "Feishu app App ID (cli_ prefix)" },
+              "appSecret": { "description": "Feishu app App Secret (secret; redacted at rest)" }
+            }
+          }
+        }
+      },
+      "rocky_context": {
+        "label": "Rocky Context",
+        "description": "Context subsystem built-in impls (ingest / assemble mapper+reducer / system_prompt / system_reminder / compact; 41 impls)",
+        "impl": {
+          "query_truncate": {
+            "description": "Ingest stage: truncate user query (clipped when exceeding queryTruncateChars threshold)",
+            "config": { "queryTruncateChars": { "description": "User query truncation threshold (chars)" } }
+          },
+          "tool_result_truncate": {
+            "description": "Ingest stage: truncate tool_result (clipped when exceeding toolResultTruncateChars threshold)",
+            "config": { "toolResultTruncateChars": { "description": "tool_result truncation threshold (chars)" } }
+          },
+          "system_reminder_injector": { "description": "Ingest stage: inject system_reminder (aggregate reminder provider chain output into message stream)" },
+          "buffer_sink": { "description": "[v0.0.40 D1=B] Forked-scope-only sink: append to ctx.buffer instead of store.appendMessages (disabled in default scope)" },
+          "store_sink": { "description": "[v0.0.49 D15] Default-scope-only sink: append to store transcript (registered as chain tail; disabled in forked scope, falls back to buffer_sink)" },
+          "identity": { "description": "System prompt identity fragment (agent name / role / capability boundary; highest-priority tier)" },
+          "rules": { "description": "System prompt behavioral rules fragment (interaction constraints / safety policy)" },
+          "tool_guidance": { "description": "System prompt tool usage guidance (when / how to call tools)" },
+          "skills": { "description": "System prompt enabled skills list (for LLM to choose and invoke)" },
+          "agent_profile": { "description": "Agent self-definition section (AGENTS.md/memory/skills paths)" },
+          "context_files": { "description": "System prompt context-files fragment (injects references to read files)" },
+          "memory_user": { "description": "[v0.0.51] System prompt user-level long-term memory fragment (user_memory.md whole-file injection; stable tier; priority 450)" },
+          "memory_session": { "description": "[v0.0.51] System prompt session-level memory fragment (session_memory.md whole-file injection; context tier; priority 350)" },
+          "memory_group": { "description": "[v0.0.205] System prompt group-level shared memory fragment (.rocky/memory/ under the squad shared workspace, L0 injection; stable tier; priority 400)" },
+          "squad_role": { "description": "[v0.0.33.3] Squad role spec fragment (leader/mate/squad_chat.md fixed fragment; empty for subagent/standalone; priority 950 stable; replaces member.systemPrompt as identity body)" },
+          "team_roster": { "description": "[v0.0.33.2] Squad team roster fragment (invisible to subagents; stable tier; memberIds → name + role + sessionId)" },
+          "parent_task": { "description": "[v0.0.33.2] Parent task fragment (subagent only; stable tier; spawn input task)" },
+          "tier_sort": { "description": "System prompt reducer: sort fragments by tier (identity > rules > others)" },
+          "dedup": { "description": "System prompt reducer: dedupe fragments (last write wins per key)" },
+          "budget_truncate": {
+            "description": "System prompt reducer: truncate by token budget (budgetFraction / floor / ceiling)",
+            "config": {
+              "budgetFraction": { "description": "Dynamic-segment budget fraction (of contextWindow)" },
+              "floor": { "description": "Budget floor in tokens (char × ratio estimate)" },
+              "ceiling": { "description": "Budget ceiling in tokens (char × ratio estimate)" }
+            }
+          },
+          "transcript_reader": {
+            "description": "Assemble: read most recent N transcript messages (limit controls count)",
+            "config": { "limit": { "description": "Read most recent N messages (N = limit)" } }
+          },
+          "summary_reader": {
+            "description": "Assemble: read historical compaction summaries (portion beyond transcript window)",
+            "config": { "candidateLimit": { "description": "Head/tail candidate fetch limit each (anchored at session start / summaryUpTo)" } }
+          },
+          "prev_snapshot": { "description": "Assemble: read previous round's context snapshot (for incremental assembly)" },
+          "system_prompt": { "description": "Assemble: read system prompt (concatenation of mapper + reducer PromptFragments)" },
+          "buffer_reader": { "description": "[v0.0.40 D1=B] Forked-scope-only source: read ctx.buffer instead of transcript_reader from store (disabled in default scope)" },
+          "base_builder": {
+            "description": "Assemble reducer: base slicing (head/tail anchored excerpts within token cap)",
+            "config": {
+              "tokenCap": { "description": "Head/tail token cap each (char×ratio estimate; stop adding when exceeded, min 1 message kept)" }
+            }
+          },
+          "side_run_builder": { "description": "Side-run-only assemble reducer: reuse fixed parentSnapshot + in_memory delta (parent full + upsert of new messages past summaryUpTo)" },
+          "orphan_tool_call": { "description": "Assemble reducer: clean up orphan tool_call (calls without matching tool_result)" },
+          "bubble_text_before_tool_call": { "description": "Clean view reducer: bubble assistant text blocks before tool_call blocks (tool_use must be immediately followed by tool_result; text in between causes provider 400)" },
+          "think_remove": { "description": "Assemble reducer: drop reasoning (think) content blocks from all messages" },
+          "fill_empty_text": { "description": "Assemble reducer: fill empty text content blocks of user/tool(success) with \"empty\" to prevent LLM 400" },
+          "empty_message": { "description": "Assemble reducer: clean up empty messages (messages with no content)" },
+          "role_merge": { "description": "Assemble reducer: merge adjacent same-role messages (consecutive user/assistant merged)" },
+          "snip_handler": { "description": "Assemble reducer: handle snip markers (placeholder at compaction boundary)" },
+          "append_passthrough": { "description": "[v0.0.40 D1=B] Forked-scope-only reducer: pass buffer through as-is without rebuild/head-tail/summary (disabled in default scope)" },
+          "env": { "description": "System reminder: environment info (OS / shell / cwd and other runtime context)" },
+          "time": { "description": "System reminder: current time (current date for LLM time awareness)" },
+          "workspace": { "description": "System reminder: workspace state (current workspace / grep context)" },
+          "tool_error": { "description": "System reminder: tool error hint (guidance when tool invocation fails)" },
+          "todo": { "description": "System reminder: todo list (todo progress tracking hint)" },
+          "reachable_agents": { "description": "[v0.0.33.2] reachable_agents reminder (derives a2a peers by sessionType; user never included; volatile; preserves system prompt cache)" },
+          "squad_workspace": { "description": "[v0.0.111] Squad team workspace reminder (leader + mate; injects team drive root <dataDir>/squads/<squadId>; coexists with personal workspace)" },
+          "squad_team_status": { "description": "[v0.0.116] Squad team status reminder (leader only; lists only members whose sessions are running, with their presence/currentWork; emitted every round)" },
+          "squad_task": { "description": "[v0.0.240] Squad task reminder (leader sees all active tasks / mate sees owner=me ∪ blocking-me; task = panorama builtin entity; archived excluded; emitted every round, dedup-reduced)" },
+          "threshold_should_compact": {
+            "description": "[v0.0.40] Compact predicate: (totalTokens + maxOutputTokens) / tokenLimit > compactRatio (default 0.6) → true; proactive compaction, not wall-bump",
+            "config": { "compactRatio": { "description": "Usage / tokenLimit ratio above which compaction triggers (proactive, not wall-bump)" } }
+          },
+          "reject_should_compact": { "description": "[v0.0.40] Compact predicate dummy: always returns false (never compact). Forked scope explicitly selects via setExclusive to express 'this scope never compacts' for recursion safety, replacing the disable-only impl to avoid zero-active" },
+          "summary_do_compact": {
+            "description": "[v0.0.40] Compact action: forkedRun(summary, NO_TOOLS, maxIter=1) → extractTag → setSummary (thin shell delegating to context-compact-runner); [v0.0.186] bakes the full summary block (preamble+head+tail) at compact time, assembled messages read it directly with zero computation",
+            "config": {
+              "tokenCap": { "description": "Baked head/tail token cap each (char×ratio estimate; stop adding when exceeded, min 1 message kept; same default as base_builder tokenCap)" },
+              "candidateLimit": { "description": "Baked head/tail candidate count cap each (anchored: head from session first message / tail ending at summaryUpTo; same default as summary_reader candidateLimit)" }
+            }
+          },
+          "noop_do_compact": { "description": "[v0.0.40] Compact action noop: no-op (no compaction). Forked scope explicitly selects via setExclusive as defense-in-depth (reject_should_compact already gates; structurally unreachable), keeping exclusive EP non-zero-active in forked" },
+          "memory_skill_consolidation": { "description": "[v0.0.51] Post-compact handler: after compaction, spawn fork-2 consolidation agent (allowed tools=[skill_manage, memory_manage]; fire-and-forget; directly invokes tools to persist memory/skill)" },
+          "noop_post_compact": { "description": "[v0.0.51] Post-compact handler noop: no-op. After forked scope disables memory_skill_consolidation, this impl is the only active handler for the ordered EP (defense-in-depth against recursive consolidation)" }
+        }
+      }
+    }
+  },
+  "extpoint": {
+    "llm_provider": { "description": "LLM auth and model metadata provider (stateless code; carries API Key / base URL / model list)" },
+    "llm_protocol": { "description": "LLM request/response protocol translator (body shaping + path/contentType; stateless code)" },
+    "context_ingest_handler": { "description": "Ordered transform chain before ingest persistence (Message[] → Message[]; truncation / reminder injection)" },
+    "context_assemble_mapper": { "description": "Ordered chain reading assemble data sources (map → deepMerge; transcript/summary/snapshot/prompt)" },
+    "context_assemble_reducer": { "description": "Ordered chain for incremental assemble assembly (reduce → Message[]; head/tail budget slicing)" },
+    "context_clean_view_reducer": { "description": "Ordered chain for clean-up view before feeding LLM (reduce → Message[]; runs on deep-clone, original snapshot untouched)" },
+    "system_prompt_mapper": { "description": "Ordered chain contributing system prompt (map → concat PromptFragment[]; identity/rules/skills/memory etc.)" },
+    "system_prompt_reducer": { "description": "Ordered chain processing system prompt (reduce → PromptFragment[]; tier sort/dedup/budget truncation)" },
+    "system_reminder": { "description": "Ordered chain of system reminder providers (provide → concat SystemReminder[]; env/time/workspace/todo etc.)" },
+    "context_should_compact": { "description": "Compaction trigger predicate (exclusive≤1; usage/tokenLimit>threshold→true; forked scope explicitly selects reject_should_compact returning false to prevent recursive compaction)" },
+    "context_do_compact": { "description": "Compaction action (exclusive≤1; forkedRun(summary)→setSummary; invoked by tryCompact when shouldCompact returns true)" },
+    "context_post_compact": { "description": "Ordered handler chain after compaction completes (e.g. memory_skill_consolidation spawns fork-2 agent to consolidate; forked scope skips to prevent recursion)" },
+    "web_search_provider": { "description": "web_search backend provider (query→structured results; credentials/billing isolated; list — multiple impls coexist, single-point routing by app_config.web_search.type)" },
+    "see_image_provider": { "description": "see_image image-understanding backend provider (text + local image paths→text understanding; credentials/vender capability isolated; list cardinality; routed precisely via app_config.see_image.type)" },
+    "session_store": { "description": "Context engine session store (exclusive≤1, session-level message persistence sink; default→durable transcript / forked→in-memory)" },
+    "channel": { "description": "IM channel access layer (list cardinality; Feishu/future WeChat/DingTalk; message path parallel to web client)" },
+    "skill_market_provider": { "description": "Skill market source provider (exclusive≤1; search/getDetail/fetchSkillFiles hit the market source API; scope `selected` picks the source, fully swappable)" }
+  },
+  "impl": {
+    "toggleAria": "Toggle {{implId}}"
+  },
+  "implConfig": {
+    "ariaLabel": "Configure",
+    "title": "Configure"
+  },
+  "scope": {
+    "defaultBadge": "BASE",
+    "deleteAria": "Delete scope {{name}}",
+    "idPlaceholder": "id (snake_case)",
+    "namePlaceholder": "Name",
+    "descPlaceholder": "Description (optional)",
+    "createSubmit": "Create",
+    "createBtn": "+ New scope",
+    "deleteTitle": "Delete Scope",
+    "deleteBody": "Delete {{name}}? EP activation records and impl configs under this scope will be cleared (revert to default). This cannot be undone."
+  },
+  "ep": {
+    "inheritedHint": "inherits default",
+    "activateBtn": "Activate EP",
+    "deactivateBtn": "Deactivate",
+    "deactivateTitle": "Deactivate Extension Point",
+    "deactivateBody": "Deactivate {{pointId}}? Independent configuration for this EP under this scope will be cleared (revert to inheriting default). This cannot be undone.",
+    "deactivateConfirm": "Confirm deactivate"
+  },
+  "schemaConfig": {
+    "title": "Configuration · {{implId}}"
+  },
+  "empty": {
+    "extPoint": "No extension points under this group.",
+    "plugins": "No registered plugins."
+  }
+}

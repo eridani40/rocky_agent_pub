@@ -1,0 +1,6 @@
+# v0.0.204 scope — studio-leader:parent:main
+# extends default；显式独立成文件（后续按需分化）
+extends: default
+scopeId: studio-leader:parent:main
+name: Studio Leader Main
+description: studio leader 主 session scope（与 default 同链路；独立成文件便分化）

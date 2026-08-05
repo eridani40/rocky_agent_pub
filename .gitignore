@@ -1,0 +1,28 @@
+# 依赖与构建产物
+node_modules/
+dist/
+release/
+*.tsbuildinfo
+.DS_Store
+
+# 真实 env（只保留 *.env.example 与 tests/test.env）
+*.env
+!*.env.example
+!tests/test.env
+
+# 开发工具配置
+.qoder/
+.codex/
+.agents/
+.claude/
+.qoderignore
+.vscode/
+.idea/
+
+# 运行产物
+logs/
+states/**/verify/**/round-*/
+states/**/verify/e2e/
+
+# Swift 构建缓存（含本机绝对路径，绝不入库）
+app/computer-native/swift/.build/
