@@ -5,10 +5,17 @@ release/
 *.tsbuildinfo
 .DS_Store
 
-# 真实 env（只保留 *.env.example 与 tests/test.env）
+# 真实 env（只保留 *.env.example；tests/test.env 源 tracked 会落到工作树，但此规则忽略不入库）
 *.env
 !*.env.example
-!tests/test.env
+
+# Swift 构建缓存（含本机绝对路径）
+app/computer-native/swift/.build/
+
+# build 期生成产物（vite/runtime-config/gen-version）
+app/electron/web-dist/
+app/electron/runtime-config.json
+app/server/app-version.json
 
 # 开发工具配置
 .qoder/
@@ -23,11 +30,3 @@ release/
 logs/
 states/**/verify/**/round-*/
 states/**/verify/e2e/
-
-# Swift 构建缓存（含本机绝对路径，绝不入库）
-app/computer-native/swift/.build/
-
-# build 期生成产物（vite/runtime-config/gen-version），不入库
-app/electron/web-dist/
-app/electron/runtime-config.json
-app/server/app-version.json
