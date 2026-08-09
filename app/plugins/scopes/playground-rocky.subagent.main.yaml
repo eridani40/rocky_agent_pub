@@ -28,4 +28,4 @@ groups:
           - workspace
           - tool_error
           - todo
-          - reachable_agents
+          - squad_agents_status

@@ -11,9 +11,10 @@
  *   杜绝手填非法 modelId 入库（激活时 ModelNotFoundError）。
  *   选中存 modelId（CreateSquadBody.modelDefault 仍为 string，providerId 由后端 resolveProviderModel 跨 provider 搜）。
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { CreateSquadBody } from './squad-types';
+import type { CreateSquadBody, TemplateSummary } from './squad-types';
+import { listSquadTemplates } from '../../lib/squad-api';
 import { ModalShell } from './component-modal-shell';
 import { Icon } from './studio-icons';
 import { INPUT, TEXTAREA, FIELD_LABEL, BTN_SECONDARY, BTN_PRIMARY } from './studio-styles';
@@ -35,6 +36,16 @@ export function NewSquadModal({ onClose, onCreate }: NewSquadModalProps) {
   const [modelSel, setModelSel] = useState<ModelSelection | null>(null);
   const [leaderName, setLeaderName] = useState('Rocky');
   const [submitting, setSubmitting] = useState(false);
+  // 模板选择
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [selectedSlug, setSelectedSlug] = useState('');
+
+  // 组件 mount 时加载模板列表（API 失败降级为只有「无」，不阻断创建）
+  useEffect(() => {
+    listSquadTemplates()
+      .then(setTemplates)
+      .catch(() => { /* 降级：空列表，select 只有「无」 */ });
+  }, []);
 
   const valid =
     name.trim().length > 0 && modelSel !== null && leaderName.trim().length > 0;
@@ -50,6 +61,8 @@ export function NewSquadModal({ onClose, onCreate }: NewSquadModalProps) {
         modelDefault: modelSel!.modelId,
         modelDefaultProviderId: modelSel!.providerId,
         leader: { name: leaderName.trim() },
+        // 选了模板才传 templateSlug（back-compat：不选=不传）
+        ...(selectedSlug ? { templateSlug: selectedSlug } : {}),
       };
       await onCreate(body);
     } finally {
@@ -76,6 +89,28 @@ export function NewSquadModal({ onClose, onCreate }: NewSquadModalProps) {
       <div className="mb-[18px]">
         <label className={FIELD_LABEL}>{t('studio:newSquadModal.nameLabel')}</label>
         <input className={INPUT} value={name} placeholder={t('studio:newSquadModal.namePlaceholder')} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div className="mb-[18px]">
+        <label className={FIELD_LABEL}>{t('studio:newSquadModal.templateLabel', { defaultValue: '模板' })}</label>
+        <select
+          className={INPUT}
+          data-testid="studio.squad.select-template"
+          value={selectedSlug}
+          onChange={(e) => {
+            const slug = e.target.value;
+            setSelectedSlug(slug);
+            // 选模板后预填 leaderName（可编辑，不 disabled）
+            const tpl = templates.find((t2) => t2.slug === slug);
+            if (tpl?.leaderName) setLeaderName(tpl.leaderName);
+          }}
+        >
+          <option value="">{t('studio:newSquadModal.templateNone', { defaultValue: '无（空白创建）' })}</option>
+          {templates.map((tpl) => (
+            <option key={tpl.slug} value={tpl.slug}>
+              {tpl.name}（{tpl.memberCount} 人）
+            </option>
+          ))}
+        </select>
       </div>
       <div className="mb-[18px]">
         <label className={FIELD_LABEL}>{t('studio:newSquadModal.descLabel')}</label>

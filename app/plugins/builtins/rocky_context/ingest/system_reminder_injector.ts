@@ -8,8 +8,11 @@
  *   - 跑 system_reminder provider 链聚合 reminder
  *   - 只针对 ingest 进来的 messages 最后一条；触发条件：
  *     · role="user"（user 发消息）—— 既有路径
+ *     · [v0.0.274] role="tool"（tool_result 消息）—— 工具循环中也刷新 reminder
+ *       （解决 BUG-reminder-only-on-user-message-not-tool：tool 循环中后期 LLM 上下文 reminder 全消失）
  *     · [v0.0.33.3] sender.source="agent"（a2a 消息）—— squad 协作场景必需
  *       （squad_reminder_providers §8：a2a message 也需触发 reminder，leader/mate 群聊交互频繁）
+ *   - assistant/system role 不触发（agent 输出/系统消息不是输入，显式排除）
  *   - 把 reminder 聚合成一个 text content block，追加到该 message content 末尾
  *   - 经 ingest 落库 → 持久化进 transcript；后续 assemble 透明读
  *
@@ -43,8 +46,8 @@ export default class SystemReminderInjectorHandler
   }
 
   /**
-   * 注入 reminder：跑 provider 链 → 聚合 → 追加到末尾 user message。
-   * 无 reminder / 空链 / 末尾非 user message → 不动 messages。
+   * 注入 reminder：跑 provider 链 → 聚合 → 追加到末尾 user/tool/a2a message。
+   * 无 reminder / 空链 / 末尾 assistant/system message → 不动 messages。
    */
   handle(messages: Message[], ctx: IngestCtx): Message[] {
     if (messages.length === 0) return messages;
@@ -59,6 +62,10 @@ export default class SystemReminderInjectorHandler
     //   - 修前仅 role='user' 触发 → mate/leader 群聊交互（a2a message）不注入 reminder
     //   - 修后 a2a message 也触发（squad_reminder_providers §8 / req7 §8.4）
     //   - 注：tool/assistant/system role 不触发（既不接 user 也不接 a2a）
+    // [v0.0.274] 触发再放宽：role='tool'（tool_result 消息）也触发——工具循环中刷新 reminder
+    //   - 修前 tool 循环（tool_call → tool_result → ...）期间不注入 → LLM 上下文 reminder 全消失
+    //   - 修后 tool_result 也注入（wire 层 encodeMessage 保证 LLM 只保留最末一个聚合块，不堆积）
+    //   - assistant/system 显式排除（agent 输出/系统消息不是输入）
     if (!shouldTriggerReminder(last)) return messages;
 
     const text = formatReminders(reminders);
@@ -91,14 +98,15 @@ export function formatReminders(reminders: SystemReminder[]): string {
 
 /**
  * [v0.0.33.3] 判定末尾 message 是否触发 reminder 注入。
- * 触发条件（squad_reminder_providers §8 / req7 §8.4）：
+ * 触发条件（squad_reminder_providers §8 / req7 §8.4 / v0.0.274 R1）：
  *   - role='user'（user 发消息，既有路径）
+ *   - role='tool'（tool_result 消息，v0.0.274 新放宽——工具循环中也刷新 reminder）
  *   - sender.source='agent'（a2a message，squad 协作场景）
- * 不触发：tool/assistant/system role 或 sender.source 非 user/agent（system/approval）。
+ * 不触发：assistant/system role（agent 输出/系统消息不是输入）或 sender.source 非 agent。
  */
 function shouldTriggerReminder(msg: Message): boolean {
-  if (msg.role === 'user') return true;
-  // a2a message：sender.source='agent'（user role 之外的另一触发源）
+  if (msg.role === 'user' || msg.role === 'tool') return true;
+  // a2a message：sender.source='agent'（user/tool role 之外的独立触发源）
   const sender = (msg as { sender?: { source?: string } }).sender;
   return sender?.source === 'agent';
 }

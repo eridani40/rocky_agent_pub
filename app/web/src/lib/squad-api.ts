@@ -16,6 +16,7 @@ import type {
   PatchSquadBody,
   SquadDetail,
   SquadSummary,
+  TemplateSummary,
   BudgetUsage,
   SchedulerHistoryEntry,
 } from '../components/studio-page/squad-types';
@@ -49,6 +50,12 @@ export async function req<T>(path: string, init?: RequestInit, base?: string): P
 }
 
 // —— Squad CRUD（11a §1）——
+
+/** [v0.0.298] GET /squad-templates —— 模板列表（11b §1） */
+export async function listSquadTemplates(base?: string): Promise<TemplateSummary[]> {
+  const r = await req<{ items: TemplateSummary[] }>('/squad-templates', undefined, base);
+  return r.items ?? [];
+}
 
 /** GET /squad —— squad 列表（按 updatedAt desc，11a §1.2） */
 export async function listSquads(base?: string): Promise<SquadSummary[]> {

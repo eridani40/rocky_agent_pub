@@ -8,8 +8,9 @@
  *   - GET  /session/:id/workspace/file       读 UTF-8 文本（供内置 md editor 查看）
  *   - POST /session/:id/workspace/file/save  覆盖写（last-write-wins，不新建文件）
  *
- * 安全：复用 session-workspace.ts export 的 json() + whitelistResolve()（字符串前缀
- *   + realpath 双层校验，防 ../ + symlink 穿越外部，spec §2.6.7 MANDATORY）。
+ * 安全：复用 session-workspace.ts export 的 json() + session-workspace-path.ts 的 whitelistResolve()
+ *   （字符串前缀 + 链式授权解析双层校验，防 ../ + 绝对路径注入；workspace 内 symlink = 用户放置 =
+ *   授权，v0.0.263 起 symlink 文件读写放行，spec §2.6.7 MANDATORY）。
  * 打包护栏 BUG-004：realRoot 经 realpathSync(session.workspaceDir)（workspaceDir 已由
  *   server 启动时 resolveDataDir 展开为绝对路径）；禁字面 ~ / 禁裸 path.resolve 拼接。
  *
@@ -17,7 +18,8 @@
  */
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import type { SessionHandlerDeps } from './session';
-import { json, whitelistResolve } from './session-workspace';
+import { json } from './session-workspace';
+import { whitelistResolve } from './session-workspace-path';
 
 /**
  * 解析 rel 并做白名单校验（read/save 共用安全前置）：
@@ -47,8 +49,10 @@ function resolveWsFilePath(
 }
 
 /**
- * GET /session/:id/workspace/file —— 读 workspace 内文本文件（UTF-8）。
+ * GET /session/:id/workspace/file —— 读 workspace 内文件。
  * 流程：method 校验 → getSession → query path 校验 → realRoot → whitelistResolve → readFileSync。
+ * [v0.0.269] `?binary=1` → 读 Buffer 返 `{ content: base64 }`（image viewer 二进制通道）；
+ *   无 binary 参数 / 非 '1' → UTF-8 文本现状（向后兼容）。
  * 错误：405 非 GET / 404 session+文件不存在 / 400 path 缺失或越界 / 500 workspace+realpath+读失败。
  */
 export async function handleWorkspaceFileRead(
@@ -69,13 +73,20 @@ export async function handleWorkspaceFileRead(
   if (typeof pathParam !== 'string' || pathParam === '') {
     return json(400, { error: 'path required' });
   }
+  // [v0.0.269] binary=1 → base64 二进制通道（image viewer 用）；非 '1'/缺失 → utf8 现状
+  const binary = url.searchParams.get('binary') === '1';
 
   // 路径白名单 + realpath（spec §2.6.7 安全 MANDATORY；traversal→400 / not_found→404）
   const resolved = resolveWsFilePath(got.workspaceDir, pathParam);
   if (!resolved.ok) return resolved.response;
 
-  // 读 UTF-8 文本（.md 文本文件；race 极端删→catch 500）
   try {
+    if (binary) {
+      // 读 Buffer → base64（image viewer 前端拼 data URL；白名单校验与文本同一路径安全面）
+      const buf = readFileSync(resolved.absPath);
+      return json(200, { content: buf.toString('base64') });
+    }
+    // 读 UTF-8 文本（.md 文本文件；race 极端删→catch 500）
     const content = readFileSync(resolved.absPath, 'utf8');
     return json(200, { content });
   } catch {

@@ -47,7 +47,7 @@ describe('ApprovalManager — 基础记忆行为（async）', () => {
   it('同一会话多个 key 互相独立（记录 A key 不影响 B key）', async () => {
     const mgr = new ApprovalManager();
     await mgr.recordAlways('session-a', 'bash:rm-wildcard');
-    expect(await mgr.isApproved('session-a', 'bash:ssh-read')).toBe(false);
+    expect(await mgr.isApproved('session-a', 'bash:custom-1')).toBe(false);
     expect(await mgr.isApproved('session-a', 'bash:rm-wildcard')).toBe(true);
   });
 
@@ -70,10 +70,10 @@ describe('ApprovalManager — sessionId 隔离（INV-P6）', () => {
   it('不同会话可独立记录各自的 key（互不影响）', async () => {
     const mgr = new ApprovalManager();
     await mgr.recordAlways('session-a', 'bash:rm-wildcard');
-    await mgr.recordAlways('session-b', 'bash:ssh-read');
+    await mgr.recordAlways('session-b', 'bash:custom-1');
     expect(await mgr.isApproved('session-a', 'bash:rm-wildcard')).toBe(true);
-    expect(await mgr.isApproved('session-a', 'bash:ssh-read')).toBe(false);
-    expect(await mgr.isApproved('session-b', 'bash:ssh-read')).toBe(true);
+    expect(await mgr.isApproved('session-a', 'bash:custom-1')).toBe(false);
+    expect(await mgr.isApproved('session-b', 'bash:custom-1')).toBe(true);
     expect(await mgr.isApproved('session-b', 'bash:rm-wildcard')).toBe(false);
   });
 
@@ -108,7 +108,7 @@ describe('ApprovalManager — cache-through 持久化（ApprovalStorePort）', (
     expect(await mgr.isApproved('s1', 'bash:rm-wildcard')).toBe(true);
     expect(store.getMock).toHaveBeenCalledWith('s1');
     // cache miss 读到空 key → false
-    expect(await mgr.isApproved('s1', 'bash:ssh-read')).toBe(false);
+    expect(await mgr.isApproved('s1', 'bash:custom-1')).toBe(false);
   });
 
   it('cache hit → 不读 store（热路径 cache 优先）', async () => {

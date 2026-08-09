@@ -231,7 +231,7 @@ panorama task entity（本 spec）
 2. **lazy migration 单一 chokepoint**——所有 schema 读取走 `ensureSystemEntities(store)`（lazy 触发）；define 流程走 `injectSystemEntities`（write 前注入）。两条路径都保证 task entity 恒在。MUST NOT 绕过直读 `readBoard()`（否则 task entity 在冷启动未触达 squad 上不可见）。
 3. **system 标记三段闭环**——(a) parser 不识别 `system` 字段（leader 无法自行标记）+ (b) `checkSystemEntityImmutable` 校验（leader 提交 task 字段与 canonical 不一致 → 拒）+ (c) `injectSystemEntities` 强制覆盖（leader 变体被 canonical 覆盖）。三段缺一则有 leader 误改 task schema 的口子。
 4. **自动 transition 不走用户路径**——`afterTaskWrite` 用 `source='system'` 直调 `transitionInstance`，**不**调 `runTransition`/`validateTransition`（避免 self-loop：hook 触发 transition → transition 后置 hook 再跑）。状态机设计保证 waiting⇄todo 合法（hook 不会触发 illegal_transition）。
-5. **task reminder 复用 SystemReminderPoint**——不另起通道；与 squad_workspace/squad_team_status 并列，瞬时值型（不走 shouldProduce，每轮产出交 dedup）。
+5. **task reminder 复用 SystemReminderPoint**——不另起通道；与 squad_workspace/squad_agents_status 并列，瞬时值型（不走 shouldProduce，每轮产出交 dedup）。
 6. **不造 task 专用工具**——agent 用通用 `panorama(action, entity='task')` 操作；task 语义靠 schema（states/transitions/fields）+ hook（自动依赖）+ reminder（感知）三件套约束，不靠工具封装。
 7. **单一来源**——task schema 仅后端 `task-schema.ts` 定义；前端不镜像（v0.0.240 漂移教训）。
 

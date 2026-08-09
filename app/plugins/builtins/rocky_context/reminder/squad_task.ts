@@ -13,7 +13,7 @@
  * **owner_name 软解析**：join memberStore 取 member.name；owner=null 显「未指派」.
  * **status_label**：task builtin display.status_labels 配死中文（未开始/等待中/进行中/已结束）.
  * **依赖提示**：waiting 状态显「（等 N 项）」（N=未 done 依赖数）.
- * **去重**：瞬时值型，每轮直接产出，交 dedup reducer 收敛（同 squad_workspace/squad_team_status）.
+ * **去重**：瞬时值型，每轮直接产出，交 dedup reducer 收敛（同 squad_workspace/squad_agents_status）.
  *
  * EP: system_reminder，tier=info.
  */

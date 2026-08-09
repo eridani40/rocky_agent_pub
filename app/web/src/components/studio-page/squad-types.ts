@@ -102,6 +102,8 @@ export interface SquadSummary {
   memberCount: number;
   squadChatSessionId: string;
   enableHeartBeat: boolean;
+  /** [v0.0.270] 群聊可见性开关（默认 true=开；false=注入 + UI 入口隐藏） */
+  enableGroupChat: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -117,12 +119,19 @@ export interface SquadDetail {
    * 后端 response mapper 透传；optional（旧 squad 无此字段 → undefined，picker 读侧 fallback 跨 provider 反查）。
    */
   modelDefaultProviderId?: string;
+  /**
+   * [v0.0.279] 团队默认推理强度（squad 级 effort default）。
+   * 后端 toDetail 回显 ?? 'default' → 恒有值（UI 下拉初始态可直用）。
+   */
+  effortDefault: 'default' | 'low' | 'high' | 'max';
   leaderId: string;
   memberIds: string[];
   members: Member[];
   squadChatSessionId: string;
   budget?: { limit: number; window: 'daily'; scope: 'team' } | null;
   enableHeartBeat: boolean;
+  /** [v0.0.270] 群聊可见性开关（默认 true=开；false=注入 + UI 入口隐藏；server toDetail ?? true 回显） */
+  enableGroupChat: boolean;
   /** squad 级心跳配置（null=未配置/使用默认） */
   heartbeatConfig?: SquadHeartbeatConfig | null;
   timezone: string; // IANA，activeWindow + daily 回血都跟它
@@ -139,6 +148,19 @@ export interface CreateSquadBody {
   /** modelDefault 配对 providerId（复合 ModelRef；optional，back-compat 旧 client 不传） */
   modelDefaultProviderId?: string;
   leader: { name: string };
+  /** [v0.0.298] 模板 slug；有值时后端批量 hire mate + 复制配置文件（optional back-compat） */
+  templateSlug?: string;
+}
+
+/** [v0.0.298] GET /squad-templates → items[] 摘要（11b §1） */
+export interface TemplateSummary {
+  slug: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  memberCount: number;
+  /** 预填 leader 名（UI 预填用，来自 manifest.leaderName） */
+  leaderName: string;
 }
 
 /** PATCH /squad/:id 请求体（11a §1.4） */
@@ -150,6 +172,10 @@ export interface PatchSquadBody {
   modelDefaultProviderId?: string;
   budget?: { limit: number; window: 'daily'; scope: 'team' } | null;
   enableHeartBeat?: boolean;
+  /** [v0.0.270] 群聊可见性开关（undefined=不改；false=注入 + UI 入口隐藏） */
+  enableGroupChat?: boolean;
+  /** [v0.0.279] 团队默认推理强度（undefined=不改；显式 'default' 也落盘） */
+  effortDefault?: 'default' | 'low' | 'high' | 'max';
   timezone?: string;
   /** [v0.0.116] squad 级心跳配置（undefined=不改/null=清空回默认） */
   heartbeatConfig?: SquadHeartbeatConfig | null;

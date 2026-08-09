@@ -47,6 +47,9 @@
     "tagLeader": "{{name}} · leader",
     "tagSingle": "{{name}} · direct"
   },
+  "squadStatus": {
+    "title": "Team status"
+  },
   "newSquadModal": {
     "title": "New squad",
     "creating": "Creating…",
@@ -126,6 +129,13 @@
     "nameLabel": "Squad name",
     "descLabel": "Squad description",
     "modelLabel": "Default model modelDefault",
+    "effortDefaultLabel": "Default reasoning effort",
+    "effortOptions": {
+      "default": "Default",
+      "low": "Low",
+      "high": "High",
+      "max": "Max"
+    },
     "save": "Save meta"
   },
   "deleteSquad": {
@@ -150,6 +160,14 @@
     "label": "enableHeartBeat (master autonomy switch)",
     "on": "Autonomous work is on — members will act on their heartbeat cadence",
     "off": "Autonomous work is paused — members only respond to chats",
+    "toggleFail": "Failed to toggle",
+    "errorPrefix": "Failed to toggle: "
+  },
+  "groupChat": {
+    "label": "enableGroupChat (group chat visibility)",
+    "hint": "When off, agents won't see SquadChat and the group chat entry is hidden",
+    "on": "Group chat is on — SquadChat is visible to all members",
+    "off": "Group chat is off — members only use direct chat",
     "toggleFail": "Failed to toggle",
     "errorPrefix": "Failed to toggle: "
   },
@@ -243,12 +261,9 @@
   "tokenWidget": {
     "title": "Token usage",
     "viewDetail": "View details",
-    "todayLabel": "Today",
     "trend7d": "7-day trend",
-    "consumedLabel": "60-day total",
-    "kindInput": "Input",
-    "kindOutput": "Output",
-    "kindCache": "Cache"
+    "todayTotal": "Today",
+    "total60d": "60-day total"
   },
   "task": {
     "statusLabels": {

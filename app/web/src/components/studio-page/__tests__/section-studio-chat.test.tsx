@@ -7,12 +7,14 @@
  * 覆盖（自旧 section-member-chat / section-squad-chat 壳级断言迁移）：
  * ① 单聊（memberId 命中 members）→ topbarLeft 渲 MemberAvatar 首字母 + name + tag，
  *    backActionKey='studio.member-chat.back'
- * ② 群聊（memberId=null）→ topbarLeft 缺省（undefined，走 ChatSessionTopbarLeft），
+ * ② 群聊（memberId=null）→ topbarLeft 显式 ChatSessionTopbarLeft（v0.0.269 恢复 268 前
+ *    形态——团队状态入口已挪 chat 浮菜单，topbar 不再挂 SquadStatusEntry），
  *    backActionKey='studio.group-chat.back'
- * ③ member 缺失兜底（memberId 有值但 members 无匹配）→ 同群聊路径（缺省 header）
+ * ③ member 缺失兜底（memberId 有值但 members 无匹配）→ 同群聊路径（显式 ChatSessionTopbarLeft）
  * ④ 透传：chrome 同引用注入 / prefill / onBack / rootTag='main' / fadeIn
  *
- * 隔离策略：mock SectionChatSession 为断言桩（捕获 props + 渲 topbarLeft(chrome) 输出）。
+ * 隔离策略：mock SectionChatSession 为断言桩（捕获 props + 渲 topbarLeft(chrome) 输出）；
+ *   mock ChatSessionTopbarLeft 为桩（群聊缺省 header 断言用）。
  * vi.mock 路径用 __dirname 绝对派生（MEMORY test-vitest-mock-absolute-path）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
@@ -39,6 +41,14 @@ vi.mock(sessionPath, () => ({
       </div>
     );
   },
+}));
+
+// ─── mock ChatSessionTopbarLeft（群聊缺省 header 桩；v0.0.268 显式渲染）───────
+const topbarLeftPath = vi.hoisted(() =>
+  require('node:path').resolve(__dirname, '../../chat-page/component-chat-session-topbar-left'),
+);
+vi.mock(topbarLeftPath, () => ({
+  ChatSessionTopbarLeft: () => <span data-testid="chat-topbar-left-stub" />,
 }));
 
 // 延后 import：mock 生效后再 import 被测组件
@@ -92,26 +102,31 @@ describe('SectionStudioChat — 身份 header 两形态（chrome.memberId 数据
     );
   });
 
-  it('② 群聊（memberId=null）：topbarLeft 缺省 + backActionKey=studio.group-chat.back', () => {
+  it('② 群聊（memberId=null）：topbarLeft 显式 ChatSessionTopbarLeft + group back key（v0.0.269 恢复 268 前形态）', () => {
     render(
       <SectionStudioChat
         sessionId="sess-g"
         chrome={mkChrome({ kind: 'studio_group', memberId: null, tag: 'Squad A · 群聊' })}
       />,
     );
-    // 群聊不注入自定义 header（走 SectionChatSession 缺省 ChatSessionTopbarLeft：title+tag）
-    expect(screen.getByTestId('default-topbar')).toBeTruthy();
-    expect(captured.current!.topbarLeft).toBeUndefined();
+    // v0.0.269：团队状态入口已挪 chat 浮菜单，topbar 不再挂 SquadStatusEntry（无 squad-status-entry）
+    //   + 显式 ChatSessionTopbarLeft（行为与现状缺省等价）
+    expect(typeof captured.current!.topbarLeft).toBe('function');
+    expect(screen.getByTestId('chat-topbar-left-stub')).toBeTruthy();
+    expect(screen.queryByTestId('squad-status-entry')).toBeNull(); // 入口已删除（v0.0.269）
+    expect(screen.queryByTestId('default-topbar')).toBeNull(); // 不再走 SectionChatSession 缺省
     expect(screen.getByTestId('session-stub').getAttribute('data-back-action-key')).toBe(
       'studio.group-chat.back',
     );
   });
 
-  it('③ member 缺失兜底（memberId 无匹配）→ 缺省 header + group back key', () => {
+  it('③ member 缺失兜底（memberId 无匹配）→ 同群聊路径（显式 ChatSessionTopbarLeft + group back key）', () => {
     render(
       <SectionStudioChat sessionId="sess-x" chrome={mkChrome({ memberId: 'ghost' })} />,
     );
-    expect(screen.getByTestId('default-topbar')).toBeTruthy();
+    expect(typeof captured.current!.topbarLeft).toBe('function');
+    expect(screen.getByTestId('chat-topbar-left-stub')).toBeTruthy();
+    expect(screen.queryByTestId('squad-status-entry')).toBeNull(); // 入口已删除（v0.0.269）
     expect(screen.getByTestId('session-stub').getAttribute('data-back-action-key')).toBe(
       'studio.group-chat.back',
     );

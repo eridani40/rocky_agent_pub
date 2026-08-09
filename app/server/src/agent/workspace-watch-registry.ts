@@ -70,6 +70,33 @@ export class WorkspaceWatchRegistry {
   }
 
   /**
+   * 全量覆盖 (sid, clientId) 的目录集（watch-set 声明式 diff，v0.0.271）。
+   * 返回 `{ added, removed }`：added = 新集合 − 旧集合（caller 需 refInc）；
+   * removed = 旧集合 − 新集合（caller 需 refDec）；交集不动。
+   * 幂等：同集合再调 → added/removed 全空。空集合 → 清 key（该 tab 无持有）。
+   * 纯记账：不直接改 refcount（caller 对 added/removed 调 refInc/refDec）。
+   */
+  setTabSet(sessionId: string, clientId: string, absDirs: string[]): { added: string[]; removed: string[] } {
+    const key = this.tabKey(sessionId, clientId);
+    const oldSet = this.tabDirs.get(key) ?? new Set<string>();
+    const newSet = new Set(absDirs);
+    const added: string[] = [];
+    const removed: string[] = [];
+    for (const dir of newSet) {
+      if (!oldSet.has(dir)) added.push(dir);
+    }
+    for (const dir of oldSet) {
+      if (!newSet.has(dir)) removed.push(dir);
+    }
+    if (newSet.size === 0) {
+      this.tabDirs.delete(key);
+    } else {
+      this.tabDirs.set(key, newSet);
+    }
+    return { added, removed };
+  }
+
+  /**
    * 取出并清除该 tab 名下全部目录（releaseTab 编排用）。无记录 → 返回空数组（幂等 no-op）。
    */
   takeTabDirs(sessionId: string, clientId: string): string[] {

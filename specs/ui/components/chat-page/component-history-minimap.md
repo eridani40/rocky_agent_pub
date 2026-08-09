@@ -9,7 +9,7 @@
 
 ## 复用关系
 - **为什么按侧别而非 kind**：a2a inbox 消息 `role:'user'` 也产 `user-text` 元素（`squad-chat-hel
-- 单聊（`memberSideResolver`）：a2a inbox→右侧（与 user 同侧）→**产 bar**；群聊（默认 `sideOfMessag
+- 单聊（`memberSideResolver`）：a2a inbox→**左侧（assistant 侧）**→**不产 bar**（与 assistant 消息一致，minimap 只索引右侧 user 气泡）；群聊（默认 `sideOfMessag
 - `DEFAULT_BLOCK_FILTER` 已在 flatten 层滤 `isSystemReminder` text block（不产 user-tex
 
 ## Props

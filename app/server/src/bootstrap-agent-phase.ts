@@ -206,6 +206,7 @@ export async function bootstrapAgentPhase(deps: {
     // searchEngine 在后续 phase 填充；agent activate 时（lambda 真正执行）一定已填充。
     const connectorManager = lateBound.connectorManager.value;
     const browserDriverRegistry = lateBound.browserDriverRegistry.value;
+    const browserInstanceManager = lateBound.browserInstanceManager.value;
     const computerNativePort = lateBound.computerNativePort.value;
     const searchEngine = lateBound.searchEngine.value;
     return buildSessionConfigFromDeps(
@@ -214,6 +215,8 @@ export async function bootstrapAgentPhase(deps: {
         appConfig, pluginManager, contextEngine, dataDir,
         ...(connectorManager ? { connectorManager } : {}),
         ...(browserDriverRegistry ? { browserDriverRegistry } : {}),
+        // [v0.0.264] browserInstanceManager → ctx.config.browserInstanceManager（browser 非 attach 前置校验）
+        ...(browserInstanceManager ? { browserInstanceManager } : {}),
         // computerNativePort 必须在此 resolveConfig 通路透传（screenshot tool 依赖）。
         ...(computerNativePort ? { computerNativePort } : {}),
         logWriter,
@@ -299,6 +302,7 @@ export async function bootstrapAgentPhase(deps: {
     const workspaceManager = lateBound.workspaceManager.value;
     const connectorManager = lateBound.connectorManager.value;
     const browserDriverRegistry = lateBound.browserDriverRegistry.value;
+    const browserInstanceManager = lateBound.browserInstanceManager.value;
     const searchEngine = lateBound.searchEngine.value;
     return {
       parentSessionId: parentSid,
@@ -331,6 +335,7 @@ export async function bootstrapAgentPhase(deps: {
         ...(workspaceManager ? { workspaceManager } : {}),
         ...(connectorManager ? { connectorManager } : {}),
         ...(browserDriverRegistry ? { browserDriverRegistry } : {}),
+        ...(browserInstanceManager ? { browserInstanceManager } : {}),
         cronToolDeps: lateBound.cronToolDeps.value, // spec cron_subsystem §6
         ...(searchEngine ? { historyToolDeps: { searchEngine, sessionStore: store } } : {}),
       },
@@ -400,7 +405,7 @@ export async function bootstrapAgentPhase(deps: {
     return { answer: result.answer, usage: result.usage };
   });
 
-  // 注入 squad reminder deps（squad_team_status/squad_task provider 数据源）。
+  // 注入 squad reminder deps（squad_agents_status/squad_task provider 数据源）。
   // SquadStore/MemberStore 句柄复用 setResolveConfig 闭包内同类（无状态封装）。
   // panoramaDataDir = dataDir（squad_task provider 读 PanoramaEntityStore 用）
   contextEngine.setSquadReminderDeps({

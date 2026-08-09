@@ -27,6 +27,7 @@
     "web_search": { "label": "网络搜索" },
     "web_fetch": { "label": "网络抓取" },
     "see_image": { "label": "看图理解" },
+    "bash": { "label": "Bash 工具" },
     "locale": { "label": "语言" },
     "user_memory": { "label": "长期记忆" },
     "llm_request": { "label": "LLM 请求" },
@@ -98,6 +99,14 @@
     "save": "保存",
     "reset": "重置",
     "saving": "保存中…"
+  },
+  "bash": {
+    "sectionDesc": "沙箱（seatbelt）保护 — 在嵌套沙箱环境（如 Rocky agent 自身运行在沙箱内时）可关闭以避免 exit 71",
+    "toggleLabel": "使用沙箱",
+    "save": "保存",
+    "reset": "重置",
+    "saving": "保存中…",
+    "restartNotice": "改动保存后即时生效"
   },
   "observability": {
     "sectionTitle": "可观测性配置",

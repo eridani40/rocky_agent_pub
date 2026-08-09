@@ -24,7 +24,7 @@ import { FsCrudStore } from '../../persistence/fs-store';
 import { SessionStore } from '../../agent/session-store';
 import { AppConfigService } from '../../config/app-config-service';
 import { bootstrapBuiltinPlugins } from '../../bootstrap';
-import { buildSessionConfigFromDeps, type StudioSessionContext } from '../session-config';
+import { buildSessionConfigFromDeps, resolveEffort, type StudioSessionContext } from '../session-config';
 import { buildRealSessionTypePolicy } from '../../agent/__helpers__/session-type-policy-test-helper';
 // [v0.0.56] SessionKind for test kind construction
 import { SessionKind } from '@app/shared';
@@ -97,13 +97,14 @@ function makeMember(over: Partial<MemberRecord> & { role: 'leader' | 'mate' }): 
   };
 }
 
-/** 造一个 squad record（modelDefault 由入参定，默认 squad-default） */
-function makeSquad(modelDefault = 'squad-default'): SquadRecord {
+/** 造一个 squad record（modelDefault 由入参定，默认 squad-default；effortDefault 可选） */
+function makeSquad(modelDefault = 'squad-default', effortDefault?: 'default' | 'low' | 'high' | 'max'): SquadRecord {
   return {
     id: 'sq-1', name: 'squad', description: '', modelDefault,
     leaderId: 'm-leader', memberIds: ['m-leader'],
     squadChatSessionId: ulid(),
     enableHeartBeat: false,
+    ...(effortDefault !== undefined ? { effortDefault } : {}),
   };
 }
 
@@ -374,5 +375,81 @@ describe('buildSessionConfigFromDeps — [round-3 BUG-3 修] studioContext.membe
       undefined, undefined, studioWithMembers,
     );
     expect(cfg2.studioContext?.members).toEqual([member]);
+  });
+});
+
+describe('resolveEffort — [v0.0.279] 覆盖链（成员显式 > 团队默认 > 厂商默认）', () => {
+  it('①成员显式档 low/high/max → 用之（团队无关）', () => {
+    expect(resolveEffort('low', 'max')).toBe('low');
+    expect(resolveEffort('high', undefined)).toBe('high');
+    expect(resolveEffort('max', 'default')).toBe('max');
+  });
+
+  it('②成员 default → 读团队档 low/high/max', () => {
+    expect(resolveEffort('default', 'low')).toBe('low');
+    expect(resolveEffort('default', 'high')).toBe('high');
+    expect(resolveEffort(undefined, 'max')).toBe('max'); // 成员 undefined 同 default 语义
+  });
+
+  it('③成员 default + 团队 default/undefined → undefined（厂商默认，encode 不注入）', () => {
+    expect(resolveEffort('default', 'default')).toBeUndefined();
+    expect(resolveEffort('default', undefined)).toBeUndefined();
+    expect(resolveEffort(undefined, undefined)).toBeUndefined();
+  });
+
+  it('④非 studio（无 squad）→ 只 session 一层（团队不存在 → 成员 default → undefined）', () => {
+    expect(resolveEffort('default', undefined)).toBeUndefined();
+  });
+});
+
+describe('buildSessionConfigFromDeps — [v0.0.279] effort 覆盖链注入 config.effort（真实 resolveEffort 行为）', () => {
+  it('成员显式档 → config.effort = 成员档（不读团队）', () => {
+    const member = makeMember({ role: 'mate' });
+    const studioContext: StudioSessionContext = {
+      role: 'mate', squadId: 'sq-1', memberId: member.id, member, squad: makeSquad('squad-default', 'max'),
+    };
+    const config = buildSessionConfigFromDeps(
+      deps, ulid(), { providerId: 'mock-prov', effort: 'high' }, KIND_MATE, join(tmpRoot, 'ws'), undefined, undefined, studioContext,
+    );
+    expect(config.effort).toBe('high');
+  });
+
+  it('成员 default + 团队档 → config.effort = 团队档', () => {
+    const member = makeMember({ role: 'mate' });
+    const studioContext: StudioSessionContext = {
+      role: 'mate', squadId: 'sq-1', memberId: member.id, member, squad: makeSquad('squad-default', 'low'),
+    };
+    const config = buildSessionConfigFromDeps(
+      deps, ulid(), { providerId: 'mock-prov', effort: 'default' }, KIND_MATE, join(tmpRoot, 'ws'), undefined, undefined, studioContext,
+    );
+    expect(config.effort).toBe('low');
+  });
+
+  it('成员 default + 团队 default/未设 → config.effort 不注入（undefined，encode 走厂商默认）', () => {
+    const member = makeMember({ role: 'mate' });
+    // 团队未设 effortDefault（无字段）
+    const studioContextNoDefault: StudioSessionContext = {
+      role: 'mate', squadId: 'sq-1', memberId: member.id, member, squad: makeSquad('squad-default'),
+    };
+    const cfg1 = buildSessionConfigFromDeps(
+      deps, ulid(), { providerId: 'mock-prov', effort: 'default' }, KIND_MATE, join(tmpRoot, 'ws'), undefined, undefined, studioContextNoDefault,
+    );
+    expect(cfg1.effort).toBeUndefined();
+    // 团队显式 'default'
+    const studioContextDefault: StudioSessionContext = {
+      role: 'mate', squadId: 'sq-1', memberId: member.id, member, squad: makeSquad('squad-default', 'default'),
+    };
+    const cfg2 = buildSessionConfigFromDeps(
+      deps, ulid(), { providerId: 'mock-prov', effort: 'default' }, KIND_MATE, join(tmpRoot, 'ws'), undefined, undefined, studioContextDefault,
+    );
+    expect(cfg2.effort).toBeUndefined();
+  });
+
+  it('非 studio（playground 无 squad）→ 成员 default → config.effort 不注入', () => {
+    const kind = new SessionKind({ biz: 'playground', role: 'rocky', derivation: 'parent' });
+    const config = buildSessionConfigFromDeps(
+      deps, ulid(), { providerId: 'mock-prov', effort: 'default' }, kind, join(tmpRoot, 'ws'),
+    );
+    expect(config.effort).toBeUndefined();
   });
 });

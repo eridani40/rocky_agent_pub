@@ -5,7 +5,7 @@
 
 ## 职责
 **队长 mini 卡**（C 指挥台左列首张卡）：seclabel「队长」+ mini 行+ 操作行。
-**群聊入口**：从 TeamEntryRow 挪到队长卡操作行中档——「进入对话」占一半（flex-1 主色 solid）、「群聊」占一半（flex-1 灰色 outline，不抢主按钮视觉）；群聊按钮右键上抛父级浮层菜单（复制 squadChat sessionId，与 TeamEntryRow 群聊 link 原右键行为同源）。
+**群聊入口**：从 TeamEntryRow 挪到队长卡操作行中档——「进入对话」占一半（flex-1 主色 solid）、「群聊」占一半（flex-1 灰色 outline，不抢主按钮视觉）；群聊按钮右键上抛父级浮层菜单（复制 squadChat sessionId，与 TeamEntryRow 群聊 link 原右键行为同源）。**[v0.0.270] 群聊按钮受 enableGroupChat 控制**：`onOpenGroupChat` / `onGroupChatContextMenu` 不传（undefined）→ 群聊按钮 + 右键菜单**缺省隐藏**（`component-seat-card.tsx:143` 已支持）——SeatsBody 在 `detail.enableGroupChat !== false` 时才传双 prop（关时不传），零新增渲染分支。
 「坐席卡」概念 = 队长卡（本就是卡形态，保留文件名/spec/UT 历史连续）；mate 列表形态见 `component-seat-row.md`。
 菜单项规则不变：编辑（总存）+ bench（mate+deployed）/ deploy（benched）；**leader 菜单无 bench 项**（硬规则，双层拒：UI 不渲染 + API 403）——队长卡由 seats-body 不传 `onBench` 达成。
 菜单机械与 mate 行共享：开关/定位/flip-up/延迟监听全在 `use-seat-menu.ts`；呈现共享（脉冲点/状态文案）在 `seat-present.ts`；弹层走 `component-seat-card-menu` portal body。

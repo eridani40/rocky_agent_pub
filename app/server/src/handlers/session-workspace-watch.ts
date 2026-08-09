@@ -10,11 +10,13 @@
  *
  * 两个端点：POST watch（acquire，展开目录/打开 tab 调）/ POST unwatch（release，收起目录 /
  *   卸载 tab / 切 session 调，path 省略=release-all）。安全：白名单校验同 session-workspace.ts
- *   （resolve+realpath+startsWith），但「目标不存在」在此静默 200（非 404/400，manager 幂等容忍）。
+ *   （resolve + 链式授权解析，v0.0.263 起 symlink 段 realpath 授权，见 session-workspace-path.ts），
+ *   但「目标不存在」在此静默 200（非 404/400，manager 幂等容忍）。
  */
 import { realpathSync } from 'node:fs';
 import type { SessionHandlerDeps } from './session';
-import { json, whitelistResolve } from './session-workspace';
+import { json } from './session-workspace';
+import { whitelistResolve } from './session-workspace-path';
 
 /** watch/unwatch 请求体解析结果（clientId 必填，path 按端点语义可选） */
 interface WatchUnwatchBody {
@@ -122,5 +124,55 @@ export async function handleWorkspaceUnwatch(
   if (!target.ok) return target.res;
 
   await deps.workspaceManager?.unwatch(id, body.clientId, target.realRoot, target.relDir);
+  return json(200, { ok: true });
+}
+
+/**
+ * POST /session/:id/workspace/watch-set —— 声明式替换该 tab 关注集合（v0.0.271 裁决 R1/R5）。
+ * body { clientId, paths: string[] }（完整集合，非增量）；缺 clientId → 400；paths 非数组 → 400；
+ * 逐 path 白名单校验（同 watch 的 resolveWatchTarget：越界 400 / 不存在静默跳过）；
+ * 合法 relDirs → manager.applyWatchSet（全量 diff，不在新集合一律 close）。
+ * ⚠️ 不建议与 watch/unwatch 增量端点混用同一 tab（声明式 diff 基于旧集合，混用状态不一致）。
+ */
+export async function handleWorkspaceWatchSet(
+  req: Request,
+  method: string,
+  id: string,
+  deps: SessionHandlerDeps,
+): Promise<Response> {
+  if (method !== 'POST') return json(405, { error: 'Method Not Allowed' }, 'POST');
+  const got = await deps.store.getSession(id);
+  if (!got) return json(404, { error: 'session not found' });
+
+  let parsed: { clientId?: string; paths?: unknown };
+  try {
+    parsed = (await req.json()) as { clientId?: string; paths?: unknown };
+  } catch {
+    return json(400, { error: 'invalid json body' });
+  }
+  const clientId = typeof parsed.clientId === 'string' ? parsed.clientId : '';
+  if (!clientId) return json(400, { error: 'clientId required' });
+  if (!Array.isArray(parsed.paths)) return json(400, { error: 'paths array required' });
+  const paths = parsed.paths.filter((p): p is string => typeof p === 'string');
+  if (paths.length !== parsed.paths.length) return json(400, { error: 'paths must be strings' });
+
+  // workspaceDir 缺失 → 500（同 watch；空数组也需有根基准语义一致）
+  if (!got.workspaceDir) return json(500, { error: 'session has no workspaceDir' });
+  const rootResult = resolveRoot(got.workspaceDir);
+  if (!rootResult.ok) return json(500, { error: 'workspaceDir not readable' });
+  const realRoot = rootResult.realRoot;
+
+  // 逐 path resolve：越界 400 / 不存在静默跳过（同 watch 单 path 语义）
+  const relDirs: string[] = [];
+  for (const path of paths) {
+    const target = resolveWatchTarget(got.workspaceDir, path);
+    if (!target.ok) {
+      if (target.res.status === 400) return target.res; // 穿越，直接 400
+      continue; // 不存在 → 静默跳过
+    }
+    relDirs.push(target.relDir);
+  }
+
+  await deps.workspaceManager?.applyWatchSet(id, clientId, realRoot, relDirs);
   return json(200, { ok: true });
 }

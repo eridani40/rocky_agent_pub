@@ -16,6 +16,8 @@ import type { SquadStore } from '../../stores/squad-store';
 import type { Job } from '../../scheduling/types';
 import type { CronPayload } from '../../scheduling/payloads';
 import type { CronJobSummary } from './types';
+import type { ReplayableEventBus } from '../../agent/event-bus';
+import type { SessionCronChangedEvent } from '../../agent/session-event-types';
 
 // === 1. CronToolDeps（ctx.config.cronToolDeps 注入） ===
 
@@ -28,6 +30,31 @@ export interface CronToolDeps {
   engine: SchedulerEngine;
   sessionStore: SessionStore;
   squadStore: SquadStore;
+  /** session_panel topic 的 bus（推送 session_cron_changed 轻量信号）；可空 */
+  statusBus?: ReplayableEventBus;
+}
+
+/**
+ * cron 写操作成功后发 session_cron_changed 轻量信号（照抄 todo-store emitChanged）。
+ * topic=session_panel, group=`session_id:<sid>`；data=空对象（消费方收后重拉 GET 全量）。
+ */
+export function emitCronChanged(
+  bus: ReplayableEventBus | undefined,
+  sessionId: string,
+): void {
+  if (!bus) return;
+  try {
+    const e: SessionCronChangedEvent = {
+      id: ulid(),
+      type: 'session_cron_changed',
+      sessionId,
+      createdAt: new Date().toISOString(),
+      data: {},
+    };
+    bus.emit(`session_id:${sessionId}`, { data: e, timestamp: e.createdAt });
+  } catch (err) {
+    console.warn('[CronTool] emit session_cron_changed failed', err);
+  }
 }
 
 /** 从 ctx.config.cronToolDeps 收敛 CronToolDeps（缺省 → null，工具报 RUNTIME_ERROR）。 */
@@ -213,6 +240,7 @@ export async function runCreate(
     const reason = e instanceof Error ? e.message : String(e);
     return errorResult(`[cron:create] internal error: ${reason}`);
   }
+  emitCronChanged(deps.statusBus, sessionId);
   const summary = toSummary(job);
   return textResult(JSON.stringify({ jobId, cron, name, nextFireAt: summary.nextFireAt }));
 }
@@ -261,6 +289,7 @@ export async function runUpdate(
     const reason = e instanceof Error ? e.message : String(e);
     return errorResult(`[cron:update] internal error: ${reason}`);
   }
+  emitCronChanged(deps.statusBus, sessionId);
   const summary = toSummary(updated);
   return textResult(
     JSON.stringify({ jobId, cron: summary.cron, name: summary.name, prompt: summary.prompt }),
@@ -288,6 +317,7 @@ export async function runToggle(
     const reason = e instanceof Error ? e.message : String(e);
     return errorResult(`[cron:${action}] internal error: ${reason}`);
   }
+  emitCronChanged(deps.statusBus, sessionId);
   return textResult(JSON.stringify({ jobId, enabled }));
 }
 
@@ -310,5 +340,6 @@ export async function runDelete(
     const reason = e instanceof Error ? e.message : String(e);
     return errorResult(`[cron:delete] internal error: ${reason}`);
   }
+  emitCronChanged(deps.statusBus, sessionId);
   return textResult(JSON.stringify({ jobId: job.id, deleted: true }));
 }

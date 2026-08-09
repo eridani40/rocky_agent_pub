@@ -13,6 +13,7 @@
  */
 import type { ConnectorManager } from './tools/browser/connector-manager';
 import type { DriverRegistry } from './tools/browser/pick-driver';
+import type { BrowserInstanceManager } from './tools/browser/instance-manager';
 import type { ComputerNativePort } from './platform/computer/native-port';
 import type { SearchEngine } from './persistence/search-engine';
 import type { SessionWorkspaceManager } from './agent/session-workspace-manager';
@@ -30,6 +31,8 @@ export interface LateBoundRefs {
   connectorManager: { value: ConnectorManager | undefined };
   /** browserDriverRegistry — 由 connectors-phase 填充 */
   browserDriverRegistry: { value: DriverRegistry | undefined };
+  /** browserInstanceManager — 由 connectors-phase 填充（headless/managed-profile 常驻实例） */
+  browserInstanceManager: { value: BrowserInstanceManager | undefined };
   /** computerNativePort — 由 connectors-phase 填充（三态降级可能 undefined） */
   computerNativePort: { value: ComputerNativePort | undefined };
   /** searchEngine — 由 search-phase 填充（装配失败 → undefined） */
@@ -48,6 +51,7 @@ export function createLateBoundRefs(): LateBoundRefs {
     cronToolDeps: { value: undefined },
     connectorManager: { value: undefined },
     browserDriverRegistry: { value: undefined },
+    browserInstanceManager: { value: undefined },
     computerNativePort: { value: undefined },
     searchEngine: { value: undefined },
     workspaceManager: { value: undefined },

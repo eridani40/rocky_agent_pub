@@ -1,18 +1,19 @@
 /**
- * link-target —— markdown 链接点击分发 lib（v0.0.253）
+ * link-target —— markdown 链接点击分发 lib（v0.0.253 / v0.0.280 改调共享分发）
  * 参考: specs/tech/version_logs/v0.0.253/change_plan.md 模块 E
+ *       specs/tech/version_logs/v0.0.280/change_plan.md 行 26/27
  *       specs/prd/version_logs/v0.0.253.md §3.2（分发逻辑表）
  *
  * 三职责（全部纯函数，便于 UT）：
  *   1. isDangerousScheme(url) — 危险协议拦截（单一权威，从 primitive-markdown-view isSafeUrl 提取语义）
  *   2. classifyLinkTarget(target) — 分类为 web / local / dangerous
- *   3. openLinkTarget(target, opts) — 按分类路由到 openExternal / openPath / 内置 viewer 回调
+ *   3. openLinkTarget(target, opts) — 按分类路由到 openExternal / openLocalPath（内置 viewer 回调） / openPath
  *
  * 路由策略：
  *   - dangerous → 不动（防 XSS）
  *   - web       → window.rockyShell.openExternal（Electron） / window.open（非 Electron 浏览器兜底）
- *   - local     → isBuiltinEditable(target) ? opts.onLocalViewer(chatLinkTarget) : window.rockyShell.openPath
- *                 非 Electron + 非 viewer 型 → noop（浏览器无法系统打开）
+ *   - local     → 有 onLocalViewer → openLocalPath 共享分发（.url/image/12 格式/系统打开，≡ 右侧文件区）
+ *                 无 onLocalViewer（其它消费方）→ window.rockyShell.openPath（系统打开，行为不变）
  *
  * workspace 相对路径仍走 HTTP readWorkspaceFile（由 viewer 内部调，不经本 lib 路由）。
  */
@@ -34,6 +35,8 @@ export interface ChatLinkTarget {
 export interface OpenLinkTargetOpts {
   /** 12 格式本地文件回调（消费方挂内置 viewer modal） */
   onLocalViewer?: (target: ChatLinkTarget) => void;
+  /** [v0.0.280] 当前 session（openLocalPath workspace 源 .url 嗅探 + 系统打开用；无 Provider 消费方不传） */
+  sessionId?: string;
 }
 
 /**
@@ -42,6 +45,18 @@ export interface OpenLinkTargetOpts {
  */
 export function isDangerousScheme(url: string): boolean {
   return /^\s*(javascript|vbscript|data):/i.test(url);
+}
+
+/**
+ * 图片专用危险协议判定（v0.0.286）。
+ * 与 isDangerousScheme 共存（链接仍走原函数，行为不变）。
+ * 拦 javascript:/vbscript:/非 image data:；放行 data:image/（base64 内联图片白名单）。
+ */
+export function isDangerousImageScheme(url: string): boolean {
+  if (/^\s*(javascript|vbscript):/i.test(url)) return true;
+  // data: 但非 image/ → 拦截（data:text/html 等）；data:image/ → 放行
+  if (/^\s*data:/i.test(url) && !/^\s*data:image\//i.test(url)) return true;
+  return false;
 }
 
 /**
@@ -82,9 +97,9 @@ export function toChatLinkTarget(target: string): ChatLinkTarget {
   };
 }
 
-// 12 内置格式判定复用 file-format.ts 单一权威（isBuiltinEditable = getFileFormat!==null，
+// 共享分发 openLocalPath 复用 file-format.ts 单一权威（getFileFormat/isImagePath/isRemoteLinkPath，
 // 含 .env / .env.* basename 特殊匹配），避免两份格式集漂移。
-import { isBuiltinEditable } from './file-format';
+import { openLocalPath } from './open-local-path';
 
 /** Electron 环境 guard（dev 浏览器无 window.rockyShell） */
 function hasRockyShell(): boolean {
@@ -96,6 +111,10 @@ function hasRockyShell(): boolean {
  *
  * @param target markdown 链接 raw target
  * @param opts   消费方提供 onLocalViewer 回调（无 Provider 时不挂 viewer modal）
+ *
+ * [v0.0.280] local 分支改调 openLocalPath 共享分发（≡ 右侧文件区五路分流：
+ *   .url 嗅探 / image viewer / 12 格式 editor / 系统打开）；
+ *   无 onLocalViewer（其它消费方）→ 降级 rockyShell.openPath 系统打开（行为不变）。
  */
 export function openLinkTarget(target: string, opts: OpenLinkTargetOpts = {}): void {
   const kind = classifyLinkTarget(target);
@@ -109,18 +128,18 @@ export function openLinkTarget(target: string, opts: OpenLinkTargetOpts = {}): v
     }
     return;
   }
-  // local：12 格式 → 内置 viewer（无 onLocalViewer 回调时降级走 openPath 系统打开）；其它 → 系统默认应用
-  if (isBuiltinEditable(target)) {
-    if (opts.onLocalViewer) {
-      opts.onLocalViewer(toChatLinkTarget(target));
-      return;
-    }
-    // 无 Provider（其它消费方：md-editor viewer / skill 预览 / feishu doc）→ 降级系统打开
-    if (hasRockyShell()) {
-      void window.rockyShell!.openPath(target);
-    }
+  // local：有 onLocalViewer → 共享分发（.url/image/12 格式 editor/系统打开，≡ 右侧）；无 → 降级系统打开（行为不变）
+  if (opts.onLocalViewer) {
+    const { source, fileName } = toChatLinkTarget(target);
+    openLocalPath(target, {
+      sessionId: opts.sessionId,
+      source,
+      onEditor: (t) => opts.onLocalViewer!({ path: t.path, source, fileName: t.fileName }),
+      onImageViewer: (t) => opts.onLocalViewer!({ path: t.path, source, fileName: t.fileName }),
+    });
     return;
   }
+  // 无 Provider（其它消费方：md-editor viewer / skill 预览 / feishu doc）→ 降级系统打开
   if (hasRockyShell()) {
     void window.rockyShell!.openPath(target);
   }

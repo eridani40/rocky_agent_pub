@@ -76,7 +76,8 @@
     "memory": "Memory",
     "cron": "Scheduled tasks",
     "skills": "Skills",
-    "todo": "Todos"
+    "todo": "Todos",
+    "squadStatus": "Team status"
   },
   "todoModal": {
     "title": "Todo list",
@@ -163,7 +164,8 @@
     "tree": {
       "loading": "Loading",
       "openFolder": "Open folder",
-      "openFile": "Open file"
+      "openFile": "Open file",
+      "symlinkTooltip": "→ {{target}}"
     },
     "tab": {
       "workspace": "Workspace",
@@ -176,7 +178,14 @@
       "loading": "Loading…",
       "loadFail": "Failed to load",
       "saved": "Saved",
-      "hint": "Edit directly · Save to apply"
+      "hint": "Edit directly · Save to apply",
+      "binaryUnsupported": "Binary file cannot be previewed"
+    },
+    "wsImageViewer": {
+      "title": "Image Preview",
+      "loading": "Loading…",
+      "loadFail": "Failed to load image",
+      "close": "Close"
     }
   },
   "usage": {
@@ -329,6 +338,16 @@
   },
   "linkViewer": {
     "fileNotFound": "File not found: {{path}}",
-    "loadFail": "Failed to open"
+    "loadFail": "Failed to open",
+    "saved": "Saved",
+    "writeFail": "Failed to save"
+  },
+  "scrollGuide": {
+    "newMessage": "New message",
+    "backToBottom": "Back to bottom",
+    "ariaLabel": {
+      "newMessage": "View new messages",
+      "backToBottom": "Back to bottom"
+    }
   }
 }

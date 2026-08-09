@@ -107,7 +107,7 @@ export function PanoramaRoute({ squadId, onAtLeader }: PanoramaRouteProps) {
   }, [dynamicViews, activeTab, defaultTab]);
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex flex-col">
       {schema === undefined && !error && (
         <div className="flex flex-1 items-center justify-center px-8 py-6 text-xs text-muted">
           {t('common:status.loading')}

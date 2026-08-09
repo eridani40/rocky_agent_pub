@@ -327,22 +327,16 @@
       "description": "__MSG_plugin.builtin.rocky_context.impl.todo.description__"
     },
     {
-      "implId": "reachable_agents",
+      "implId": "squad_agents_status",
       "point": "system_reminder",
-      "impl": "./prompt/reachable_agents.ts",
-      "description": "__MSG_plugin.builtin.rocky_context.impl.reachable_agents.description__"
+      "impl": "./reminder/squad_agents_status.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.squad_agents_status.description__"
     },
     {
       "implId": "squad_workspace",
       "point": "system_reminder",
       "impl": "./reminder/squad_workspace.ts",
       "description": "__MSG_plugin.builtin.rocky_context.impl.squad_workspace.description__"
-    },
-    {
-      "implId": "squad_team_status",
-      "point": "system_reminder",
-      "impl": "./reminder/squad_team_status.ts",
-      "description": "__MSG_plugin.builtin.rocky_context.impl.squad_team_status.description__"
     },
     {
       "implId": "squad_task",

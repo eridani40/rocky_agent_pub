@@ -164,7 +164,15 @@ export function buildRunDeps(opts: BuildRunDepsOpts): { spec: RunSpec; loop: Run
           carried: opts.a2aReplyTracker.takePending(sid),
         }
       : undefined;
-  const lifecycle = new RunLifecyclePort({ config: opts.config, store: opts.store, runId, profile, replySettle });
+
+  // [v0.0.273] mate run 退出通知 leader hook 装配：仅 main && role=mate && derivation=parent
+  //   && a2a 投递口齐备（deliverToFn）+ squad 上下文（squadId）→ 注入标记；
+  //   其余（leader/subagent/rocky/旁路 run）→ undefined，RunLifecyclePort 全链路 noop 零通知。
+  const mateExitNotify =
+    isMain && kind.role === 'mate' && kind.derivation === 'parent' && opts.deliverToFn && opts.config.sessionContext?.squadId
+      ? { squadId: opts.config.sessionContext.squadId }
+      : undefined;
+  const lifecycle = new RunLifecyclePort({ config: opts.config, store: opts.store, runId, profile, replySettle, mateExitNotify });
 
   // —— EOS stop seq/eosStripper（main squad 专属）——
   const isSquad = kind.role === 'squad';

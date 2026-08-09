@@ -180,14 +180,14 @@ describe('buildSessionConfigFromDeps — effort 注入 config.effort（透传链
     expect(config.effort).toBeUndefined();
   });
 
-  it('sessionPersist.effort=default → config.effort=default（显式默认档）', () => {
+  it('sessionPersist.effort=default → config.effort undefined（default = 不覆盖，走厂商默认）', () => {
     const config = buildSessionConfigFromDeps(
       deps,
       ulid(),
       { effort: 'default' },
       PG_ROCKY_MAIN,
     );
-    expect(config.effort).toBe('default');
+    expect(config.effort).toBeUndefined();
   });
 
   it('sessionPersist.effort=max → config.effort=max', () => {

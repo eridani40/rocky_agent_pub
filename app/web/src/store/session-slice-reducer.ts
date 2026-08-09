@@ -104,7 +104,9 @@ export type SessionEvent =
   | WorkspaceFileChangedEvent
   | WorkspaceDirChangedEvent
   /** todo 变更轻量信号（fanout → lastTodoEvent → useTodoCrud 消费） */
-  | SessionTodoChangedEvent;
+  | SessionTodoChangedEvent
+  /** cron 变更轻量信号（session_panel topic，use-cron-crud 消费后 refetch 全量） */
+  | { type: 'session_cron_changed'; sessionId: string; createdAt: string; data: Record<string, never> };
 
 /** session_panel reducer 输出切片：sessionRunning（中断按钮 / enqueue-view 可见性权威源） */
 export interface SessionReducerResult {

@@ -123,6 +123,12 @@ function copyResources(pluginIds: string[]): void {
   if (fs.existsSync(skillsSrc)) {
     fs.cpSync(skillsSrc, path.join(DIST_BUILTINS, 'skills'), { recursive: true });
   }
+  // squad-templates/** → dist/builtins/squad-templates/（递归；模板是资源目录，非 plugin）
+  // bootstrap syncBuiltinSquadTemplates 从 dist/builtins/squad-templates/ 读，缺则打包后模板不可见
+  const templatesSrc = path.join(BUILTINS_SRC, 'squad-templates');
+  if (fs.existsSync(templatesSrc)) {
+    fs.cpSync(templatesSrc, path.join(DIST_BUILTINS, 'squad-templates'), { recursive: true });
+  }
 }
 
 /** 产物校验：每 plugin 目录存在 + 至少 1 个 .cjs + scopes/groups.json 齐全，缺则抛错 */

@@ -33,12 +33,48 @@ export abstract class KvConfigService {
   protected readonly schema: SchemaDef;
   /** 按 entity 路由的 CompositeStore（mount 该 entity → FsCrudStore） */
   protected readonly store: CompositeStore;
+  /**
+   * 内存读缓存：group → (key → data)。
+   * lazy fill：首次访问 group 时 query 整 group 填充；写操作后整 group 失效。
+   * 区分「未缓存」(cache.has(group)===false) 与「已缓存但空」(空 Map)。
+   */
+  private readonly cache: Map<string, Map<string, unknown>> = new Map();
 
   constructor(schema: SchemaDef, opts: KvConfigServiceOptions) {
     this.schema = schema;
     // 一个 FsCrudStore 实例承载该 entity 的所有 shard 目录
     const fs = new FsCrudStore({ root: opts.root });
     this.store = new CompositeStore().mount(schema.entity, fs);
+  }
+
+  /**
+   * 确保 group 缓存已填充（lazy fill）。
+   * 首次访问某 group 时 query 整 group 全部 record → 构建 key→data Map 填入缓存。
+   * 已缓存（cache.has(group)）则直接返回，不重复 query（零 fs）。
+   * group 无 record 时填空 Map（区分「未缓存」与「已缓存但空」）。
+   * @param group 分片键 + 逻辑分类
+   * @returns 该 group 的 key→data Map
+   */
+  private ensureGroupCache(group: string): Map<string, unknown> {
+    const cached = this.cache.get(group);
+    if (cached) return cached;
+    const rows = this.store.query(this.schema, { shardKey: group });
+    const map = new Map<string, unknown>();
+    for (const r of rows) {
+      const rec = r as unknown as { key: string; data: unknown };
+      map.set(rec.key, rec.data);
+    }
+    this.cache.set(group, map);
+    return map;
+  }
+
+  /**
+   * 失效某 group 的缓存（write-through invalidate）。
+   * set/setGroup/delete 写后调用，删除整 group 缓存条目，下次 get lazy 重填。
+   * @param group 分片键 + 逻辑分类
+   */
+  private invalidateGroup(group: string): void {
+    this.cache.delete(group);
   }
 
   /**
@@ -50,13 +86,16 @@ export abstract class KvConfigService {
    * @returns 命中返 data；缺失返 undefined（视为未配置，service 不回退默认）
    */
   get(group: string, key: string): unknown | undefined {
-    const hit = this.findRecord(group, key);
-    return hit ? (hit as unknown as { data: unknown }).data : undefined;
+    // 走缓存：ensureGroupCache 命中缓存时零 fs，O(1) Map 取值
+    const groupMap = this.ensureGroupCache(group);
+    return groupMap.get(key);
   }
 
   /**
-   * 私有：按 (group, key) 查单条 record（get/set/delete 共用）。
-   * StoredRecord<SchemaDef> 是宽泛类型，经 unknown 中转访问具体业务字段（key/data/id）。
+   * 私有：按 (group, key) 查单条 record（set/delete 共用，需 id 走 update/delete）。
+   * 经缓存取 record id——命中缓存时零 fs。
+   * 注意：缓存只存 key→data，此处需 id，因此仍需 query 取原始 record。
+   * 但缓存保证了 get/listGroup 不走到这里。
    */
   private findRecord(group: string, key: string): unknown | undefined {
     const rows = this.store.query(this.schema, { shardKey: group });
@@ -68,11 +107,13 @@ export abstract class KvConfigService {
    * @returns [{ key, data }, ...]；group 无 record 返空数组
    */
   listGroup(group: string): { key: string; data: unknown }[] {
-    const rows = this.store.query(this.schema, { shardKey: group });
-    return rows.map((r) => {
-      const rec = r as unknown as { key: string; data: unknown };
-      return { key: rec.key, data: rec.data };
-    });
+    // 走缓存：命中缓存时零 fs，从 Map 构建 [{key, data}]
+    const groupMap = this.ensureGroupCache(group);
+    const result: { key: string; data: unknown }[] = [];
+    for (const [key, data] of groupMap) {
+      result.push({ key, data });
+    }
+    return result;
   }
 
   /**
@@ -90,6 +131,8 @@ export abstract class KvConfigService {
       ? (existing as unknown as { id: string }).id
       : ulid();
     this.store.put(this.schema, { id, group, key, data } as never);
+    // 写后失效整 group 缓存，下次 get lazy 重填（保证缓存与磁盘一致）
+    this.invalidateGroup(group);
   }
 
   /**
@@ -109,7 +152,10 @@ export abstract class KvConfigService {
     const existing = this.findRecord(group, key);
     if (!existing) return false;
     const id = (existing as unknown as { id: string }).id;
-    return this.store.delete(this.schema, id, group);
+    const deleted = this.store.delete(this.schema, id, group);
+    // 删后失效整 group 缓存，下次 get lazy 重填（保证缓存与磁盘一致）
+    this.invalidateGroup(group);
+    return deleted;
   }
 
   /**
@@ -146,5 +192,7 @@ export abstract class KvConfigService {
         { id, group, key: item.key, data: item.data } as never,
       );
     }
+    // 写后失效整 group 缓存，下次 get lazy 重填（保证缓存与磁盘一致）
+    this.invalidateGroup(group);
   }
 }

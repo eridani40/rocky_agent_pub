@@ -1,6 +1,6 @@
 # Web Tools API（v0.0.23 — web_search / web_fetch / browser 工具协议面 + 配置/连接器）
 
-> version: 1.2.2 `[v0.0.123 modified]` · 引入版本 v0.0.23 · 2026-07-15
+> version: 1.4 `[v0.0.266 modified]` · 引入版本 v0.0.23 · 2026-08-06
 > 管什么：v0.0.23 引入的 3 个 agent tool（LLM 可调）的工具协议面契约（`ToolDefinition`：name / description / inputSchema + 输出 ToolResultBlock 形态 + isError 分支）+ app_config `web` group 配置（`[v0.0.89]` 随 dev_config 废弃迁自 `dev_config`，走 `/config/app?group=web`）+ 连接器端点组（browser attach 用户侧门禁）。
 > 不管什么：工具内部实现（jina race / SSRF / chrome launch / MCP attach 细节 → `specs/tech/agent/tools/[P1]web_{search,fetch}_tool.md` + `[P1]browser_tool.md`）；连接器状态机内部（→ `specs/tech/config/[P1]connectors.md`）；UI（→ `specs/ui/overall/05-connectors.md` + `specs/ui/components/connector-page/`）；session/messages/SSE 通用契约（→ `04-agent-session.md`）。
 > **本文件是 AT（API Test）web tools / config-web / connector 域的唯一依据**：api-verifier 黑盒 curl + SSE 观察，不读代码。
@@ -112,9 +112,10 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
     required: ["mode", "action"],
     properties: {
       mode: { enum: ["headless", "managed-profile", "attach"] },
-      action: { enum: ["navigate","snapshot","click","type","listPages",
-                       "selectPage","evaluate","screenshot","disconnect"] },
-      // [v0.0.46] +disconnect（仅 mode=attach 有效；其他 mode 传 disconnect 报参数错误）
+      action: { enum: ["launch","navigate","snapshot","click","type","listPages",
+                       "selectPage","evaluate","screenshot","close"] },
+      // [v0.0.264] +launch/+close（headless/managed-profile 常驻实例生命周期；attach 语义）
+      // [v0.0.266] -disconnect（统一 close：attach close = 断开 MCP 连接，不杀用户 chrome）
       profileName: { type: "string" },
       url: { type: "string" },
       ref: { type: "string" },
@@ -128,7 +129,7 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
 | 字段 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
 | `mode` | enum `headless`/`managed-profile`/`attach` | ✅ | — | chrome 启动/连接模式 |
-| `action` | enum | ✅ | — | `navigate`/`snapshot`/`click`/`type`/`listPages`/`selectPage`/`evaluate`/`screenshot`/`close` + `[v0.0.46]` `disconnect`（仅 mode=attach，主动释放 attach session） |
+| `action` | enum | ✅ | — | `launch`/`navigate`/`snapshot`/`click`/`type`/`listPages`/`selectPage`/`evaluate`/`screenshot`/`close` + `[v0.0.264]` `launch`/`close`（headless/managed-profile 常驻实例生命周期）+ `[v0.0.266]` close 统一覆盖 attach（断开 MCP 连接，不再有独立 `disconnect` action） |
 | `profileName` | string | mode=②③ 必填 | — | profile 名；正则 `/^[a-z0-9][a-z0-9-]*$/` ≤64 |
 | `url` | string | action=navigate 必填 | — | 目标 URL |
 | `ref` | string | action=click/type 必填 | — | element ref（来自 snapshot） |
@@ -141,21 +142,27 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
 
 | action | isError=false 时 content[0].text |
 |--------|---------------------------------|
+| `launch` `[v0.0.264]` | `launched <mode>` / `reuse <mode>`（幂等复用已 ready 实例） |
 | `snapshot` | `{ snapshot: string, refs: Record<id,{role,name,nth}> }` 序列化（a11y tree + ref） |
 | `listPages` | `PageInfo[]`（`{id, url, selected?}`）序列化 |
 | `navigate`/`click`/`type`/`selectPage` | 简短结果描述（如 `navigated to <url>`） |
 | `evaluate` | script 返值序列化（unknown） |
 | `screenshot` | 辅助，`{ mime, data(base64) }`（可空，作 vision 校验/给 LLM 看长相） |
-| `disconnect` `[v0.0.46]` | `browser attach 已断开（若无活跃连接则无副作用）`（idempotent，成功即 `isError:false`） |
+| `close` `[v0.0.264]` | `closed`（幂等：无 instance → `no instance`）；attach 语义 = 断开 MCP 连接（不杀用户 chrome）`[v0.0.266]` |
 
-### 4.3 isError 分支（`[v0.0.46]` attach 门禁分层）
+### 4.3 isError 分支（`[v0.0.46]` attach 门禁分层 + `[v0.0.264]` 前置校验）
 
 | 分支 | isError | content[0].text |
 |------|---------|-----------------|
-| mode=attach 且 switch=off `[v0.0.46]` | **true** | `browser attach 未启用：请在「连接器 → 浏览器」中开启开关`（kind='not_enabled'，**不 lazy connect、不 spawn MCP**） |
-| mode=attach 且被其他 session 占用 `[v0.0.46]` | **true** | `browser attach 已被其他会话占用（sessionId=<owner>），请先在该会话调用 disconnect`（kind='in_use_by_other'；**不通过 UI 通知**、不排队） |
-| mode=attach lazy connect 失败 `[v0.0.46]` | **true** | `browser attach 连接失败：<原因>`（chrome 未开 remote debugging / 版本 <144 / 拒绝 prompt / list_pages round-trip 失败；kind='connect_failed'；沿用 `[v0.0.34]` 失败即停不重试） |
+| mode=attach launch 且 switch=off `[v0.0.46]` | **true** | `browser attach 未启用：请在「连接器 → 浏览器」中开启开关`（kind='not_enabled'，**不连接、不 spawn MCP**） |
+| mode=attach launch 连接失败 `[v0.0.266]` | **true** | `browser attach 连接失败：<原因>`（chrome 未开 remote debugging / 版本 <144 / 拒绝 prompt / list_pages round-trip 失败；kind='attach_failed'；沿用 `[v0.0.34]` 失败即停不重试） |
 | mode=attach 且 HITL 审批被拒 | **true** | 审批拒绝说明 |
+| mode=①② 无 instance 调 action `[v0.0.264]` | **true** | `当前会话没有 headless/managed-profile 浏览器实例，请先调用 browser(action="launch")`（kind='no_browser_instance'；前置校验铁律） |
+| mode=③ 无 attach instance 调操作 action `[v0.0.266]` | **true** | `当前会话没有 attach 浏览器实例，请先调用 browser(action="launch", mode="attach")`（kind='no_browser_instance'；不再 lazy connect） |
+| mode=①② 实例 idle 超时 `[v0.0.264]` | **true** | `浏览器实例已闲置关闭，请重新 launch`（kind='idle_timeout'；默认 15min lazy check） |
+| mode=①② worker 崩溃 `[v0.0.264]` | **true** | `worker 崩溃: <原因>，请重新 launch`（kind='worker_crashed'） |
+| mode=①② action 超时 `[v0.0.264]` | **true** | `cdp_timeout`（kill instance，提示重新 launch） |
+| mode=③ 操作时连接失活 `[v0.0.266]` | **true** | `attach 浏览器连接已断开（Chrome 可能被关闭），请重新 launch`（检测 dispatchAction 返回文本匹配失活模式 → 自动清理失活实例，下次需重新 launch） |
 | mode=② profile 占用冲突 | **true** | `profile <name> in use` + 提示（不抢锁不排队） |
 | mode=③ cdpUrl **非 loopback**（远程私网 / 169.254.169.254 / `file://`）fail-closed | **true** | SSRF 拒绝 |
 | mode=③ cdpUrl loopback（127.x / ::1 / localhost） | — | **豁免** SSRF（CDP 控制面，attach 本机 chrome 正常用法）`[v0.0.29 modified]` |
@@ -163,9 +170,9 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
 
 **needsApproval**：`input.mode === 'attach'` → HITL 审批（操作用户真实浏览器）；mode ①② 不审批。
 
-**生命周期语义（对调用方，`[v0.0.46]` lazy connect + disconnect action）**：mode ①② tool 内自启 chrome、自 close（杀进程）；mode ③ 由 ConnectorManager 管理 attach session——**首次调用 tool.run 时 lazy connect**（`connectForToolRun(sessionId)`：switch=on 且未被占用 → spawn chrome-devtools-mcp + list_pages 判据 → 记 owner=sessionId + 缓存 attachSession），**同 owner 后续复用**；LLM 显式 `action='disconnect'` 主动释放 owner + kill MCP 进程（不杀 chrome）；session 结束/agent DELETE 兜底自动 disconnect；**app 启动 bootstrap 只读 intent 不 connect**（不再自动重连、不再弹「有应用要调试」）。
+**生命周期语义（对调用方，`[v0.0.46]` lazy connect + disconnect action + `[v0.0.264]` 常驻实例 launch/close + `[v0.0.266]` attach 并入 InstanceManager）**：三模式统一由 BrowserInstanceManager 管理——**首次调用 `action='launch'` 建立实例**（幂等：已 ready 复用；attach 的 launch = ChromeMcpDriver.connect，key=`sessionId:attach`），此后 navigate/snapshot/click/type 等 action 在同一实例上执行（页面/登录态/lastRefs 跨 tool_call 保持），`action='close'` 显式关闭：mode ①② 三要素清理（killProcessGroup + headless rmSync + usedPorts.delete），mode ③ attach 断开 MCP 连接（**不杀用户 chrome** / 不删目录 / 不释放端口 / 不持久化）；**非 launch/close action 前置校验**：无 instance → `no_browser_instance` 报错提示先 launch（三模式统一，attach 不再隐式 lazy connect）；attach 操作时 CDP 断线（chrome 被关闭）→ 检测失活 → 自动清理 → 下次需重新 launch（异常自愈）；session 结束/agent DELETE 兜底 releaseSession；服务关闭 shutdown hook releaseAll + 开机自检清孤儿（详见 tech `[P1]browser_instance_manager.md`）。ConnectorManager 瘦身为「switch 门禁 + UI 状态」（enable/disable/bootstrap/getState/getAll/isReady），不再持有 attach session / owner。
 
-> **[v0.0.23.1] mode①② 内部实现路径（对外契约不变）**：mode①② tool run 内调 `driver.executeOnce`（而非 `connect`）——`NodeWorkerDriver.executeOnce` spawn `node browser-worker.cjs` 子进程，worker 内 spawn chrome + connectOverCDP + dispatch 单个 action + cleanup chrome，stdout 返 `{ok,text?} \| {ok:false,error}`。**绕开 Bun 不支持 playwright connectOverCDP 的 bug**（oven-sh/bun#9357）。**[v0.0.46] mode③ attach 路径**：由 ConnectorManager `connectForToolRun(sessionId)` lazy 触发 ChromeMcpDriver 连接（不再由 bootstrap/toggle 触发），门禁分层三态；`action='disconnect'` 走 `disconnect(sessionId)` 释放。仍是 ChromeMcpDriver 长会话，但触发时机与释放接口重构。对外 schema 变化仅 `action` 枚举加 `disconnect`（见 §4.1）；result 形态全不变。详见 tech `[P1]browser_tool.md` §3/§4/§7。
+> **[v0.0.23.1] mode①② 内部实现路径（对外契约变化见 `[v0.0.264]`）**：v0.0.263 及以前 mode①② tool run 内调 `driver.executeOnce`（而非 `connect`）——`NodeWorkerDriver.executeOnce` spawn `node browser-worker.cjs` 子进程，worker 内 spawn chrome + connectOverCDP + dispatch 单个 action + cleanup chrome，stdout 返 `{ok,text?} \| {ok:false,error}`（**绕开 Bun 不支持 playwright connectOverCDP 的 bug**，oven-sh/bun#9357）。**[v0.0.264] mode①② 改走 BrowserInstanceManager 常驻实例**：`launch` 建立 → 其他 action 经 `InstanceManager.execute`（前置校验 + idle check + abort）→ `close` 关闭；`NodeWorkerDriver.executeOnce` 保留仅服务 web_fetch headless render（单次执行器，不引入常驻）；worker 协议升级为循环服务（`loop:true` 判常驻，跨 action 保持 lastRefs）。**[v0.0.266] mode③ attach 并入 InstanceManager**：`launch(mode='attach', cdpUrl?)` = ChromeMcpDriver.connect（经 InstanceManager 注入共享 attachDriver 单例，key=`sessionId:attach` 幂等复用）；操作类 action 经 `getReadyInstance` 前置校验后 tool.ts 主进程 `dispatchAction`（attach 的 screenshot 落盘需 ToolCtx，execute 保持 worker 语义不混入）；CDP 断线失活 → 文本检测 `isAttachConnectionLost` → `handleAttachLost`（state=dead + disconnect 清理）→ 下次 `no_browser_instance` 引导重新 launch；`close(mode='attach')` = attachDriver.disconnect（不杀用户 chrome）。对外 schema 变化：`[v0.0.46]` action 枚举加 `disconnect`、`[v0.0.264]` action 枚举加 `launch`/`close`、`[v0.0.266]` action 枚举去 `disconnect` 统一 close（见 §4.1）。详见 tech `[P1]browser_tool.md` §3/§4/§7 + `[P1]browser_instance_manager.md`。
 
 ## 5. app_config `web` group（复用 `/config/app`）
 
@@ -256,6 +263,8 @@ interface ToggleConnectorBody {
 
 ## 10. 版本
 
+version: 1.4 `[v0.0.266 modified]`（1.3 → 1.4：**browser attach 生命周期并入 InstanceManager + action 枚举去 disconnect，HTTP 端点契约零变化**——§4.1 browser tool `inputSchema.action` 枚举移除 `disconnect`（统一 `close`：attach close = 断开 MCP 连接，不杀用户 chrome）；§4.2 移除 disconnect result 行、close 行补 attach 语义；§4.3 isError 分支按 attach 新语义重写（`not_enabled` 门禁保留；`in_use_by_other` 删除——attach 变 session 级 key=`sessionId:attach` 无全局占用；lazy connect 失败改 launch 连接失败 `attach_failed`；新增 mode=③ 无 instance 前置校验 + 操作失活自愈分支）；§4.3 生命周期语义按三模式统一 BrowserInstanceManager 管理更新（launch=connect / 操作经 getReadyInstance+dispatchAction / close=disconnect；失活自动清理引导重新 launch；ConnectorManager 瘦身为 switch 门禁 + UI 状态）。技术架构详见 `specs/tech/agent/tools/[P1]browser_instance_manager.md` + tech `[P1]browser_tool.md` v1.6）。
+version: 1.3 `[v0.0.264 modified]`（1.2.2 → 1.3：**browser 工具 action 枚举扩展 launch/close + 常驻实例前置校验，HTTP 端点契约零变化**——§4.1 browser tool `inputSchema.action` 枚举增加 `launch`/`close`（headless/managed-profile 常驻实例生命周期）；§4.2 添加 launch/close result 行；§4.3 isError 分支新增 mode①② 前置校验四态（`no_browser_instance` / `idle_timeout` / `worker_crashed` / `cdp_timeout`）；§4.3 生命周期语义按 BrowserInstanceManager 常驻实例更新（launch 建立 → action 前置校验 → close 关闭；session 结束 releaseSession + shutdown hook + 开机自检）；§4.3 内部实现路径更新（mode①② 从 executeOnce 一次性改走 InstanceManager 常驻，executeOnce 保留仅 web_fetch）。技术架构详见 `specs/tech/agent/tools/[P1]browser_instance_manager.md` + tech `[P1]browser_tool.md` v1.5）。
 version: 1.2.2 `[v0.0.123 modified]`（1.2.1 → 1.2.2：**web_search Zhipu provider 1→2 + list 语义补账，无 HTTP 契约变更**——§2 内置 Zhipu 从单 implId `zhipu` 拆为 `zhipu_coding_plan`（MCP 订阅额度）/ `zhipu_api`（REST 按量计费）两独立 impl；§2.2 错误分支/`resolveProvider` 从过时的 exclusive `getExclusiveExtension` 改为 v0.0.72 list 单点路由（type 未配置 / impl 未激活 / 不可用三态）；§5 inventory 透传 impls 从单 provider 改两 impl + choice-cards 改下拉（v0.0.121）。GET/PUT `/config/app?group=web_search` 端点/schema/redact 全不变，仅样例 implId 值 + provider 清单。旧 `zhipu` 一次性迁移到 `zhipu_coding_plan` 见 `app_config.md §3.6`。详见 `specs/tech/version_logs/v0.0.123/change_log.md`）。
 version: 1.2.1 `[v0.0.89 modified]`（1.2 → 1.2.1：**端点迁移 spec 补账，非行为变更**——web `group` 随 `dev_config` 整体废弃（`/config/dev` 全部方法返 404）整组迁入 `app_config`，本文将 §1 facade 面 / §5 标题+正文 / §5.1 redact-merge 描述 / §9 错误表中所有以现行契约口吻出现的 `/config/dev` 更正为 `/config/app`，「dev_config web group」→「app_config web group」；group/key 名与 jinaApiKey redact/占位 merge 语义**零变更**，仅 entity 从 `dev_config` 改 `app_config`、端点从 `/config/dev` 改 `/config/app`。权威迁移描述见 `03-config-center.md` 头部 v0.0.89 注 + §3.6。此前 08-web-tools 未跟上 v0.0.89 迁移，仍以现行口吻写 `/config/dev`，本次为 spec 补账。）
 version: 1.2 `[v0.0.46 modified]`（1.1 → 1.2：**连接器 lazy connect 时机重构** —— HTTP 端点契约本身**零变化**（GET/PUT `/config/connectors` 端点/请求体/响应码全不变），语义调整：§4.1 browser tool `inputSchema.action` 枚举增加 `disconnect`（仅 mode=attach 有效）；§4.2 添加 disconnect result 行；§4.3 attach isError 分支重写为门禁分层三态（`not_enabled` / `in_use_by_other` / `connect_failed`），删除旧「未连接」错误；§4.3 生命周期语义按 lazy connect + disconnect action + owner sessionId 更新；§6.1 `ConnectorState.switch` 语义注释改为 feature flag（与 connection 完全解耦）；§6.2 `PUT enable=true` 只写 intent + UI 态**不再触发 connect**（connect 由 tool.run 首次调 attach lazy 触发）；状态迁移表按 v0.0.46 语义重写；§6.2 保留 202 返回码兼容。详见 `specs/prd/version_logs/v0.0.46.connector_opt/change_log.md` + tech `[P1]connectors.md` v1.2 + `[P1]browser_tool.md` v1.4。）

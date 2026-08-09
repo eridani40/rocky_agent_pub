@@ -25,7 +25,7 @@ import type { LoopObservability } from './agent-loop-observability';
  *  （`appConfig.get('agent','maxIterations') ?? DEFAULT_MAX_ITERATIONS`）。
  * maxIterOf 不再兜底它——兜底是死代码（buildSessionConfigFromDeps 必填 config.maxIterations）。
  */
-export const DEFAULT_MAX_ITERATIONS = 200;
+export const DEFAULT_MAX_ITERATIONS = 1000;
 
 /**
  * main 链路 maxIter：直接读 config.maxIterations。

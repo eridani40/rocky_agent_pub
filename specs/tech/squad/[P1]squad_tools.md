@@ -27,7 +27,7 @@ related: [[P1]squad_definition.md, [P1]squad_reminder_providers.md]
 
 ## 1. 收敛原则
 
-- **同概念合并为单工具 + action 分派**：team 管理（hire/deploy/bench/edit/list/query）→ `team(action, ...)`。
+- **同概念合并为单工具 + action 分派**：team 管理（hire/deploy/bench/edit/list/query/reset）→ `team(action, ...)`。
 - **少占 tool slot**：LLM 上下文里 tool definition 是稀缺资源，收敛后每个收敛工具只占 1 个 slot。
 - **action 名 = 真实团队动词**（不用 enable/disable 等技术词）。
 - **权限按 action 内嵌**：工具层校验"谁能做什么 action"（leader-only / 全员）。
@@ -35,7 +35,7 @@ related: [[P1]squad_definition.md, [P1]squad_reminder_providers.md]
 
 ---
 
-## 2. `team` 工具（团队管理 — 6 action：list/query/hire/deploy/bench/edit）
+## 2. `team` 工具（团队管理 — 7 action：list/query/hire/deploy/bench/edit/reset）
 
 ```typescript
 team(action, ...args)
@@ -50,7 +50,8 @@ team(action, ...args)
 | `list` | —（`filter?: { state?, type? }` 入参 spec-only 未落地——impl `team-tool.ts runList` 直接 `listMembers` 全量无 filter） | **全员**（含 member——看花名册 Q1） | 列全量成员（roleId/name/type/state/lastUpdatedAt），保留管理全视角（含 benched 可恢复） |
 | `query` | `{ ref }` | **全员**（含 member） | 单成员详情（含 `skillConfig` overlay 快照 `{mode,overrides}`/tools/model/state/sessionId）。身份正文由 squad_role fragment 承载（member.systemPrompt 已删）；`skills` 白名单字段已推翻为 `skillConfig` overlay |
 
-- **member 也可调 `team`，但仅 `list` / `query` 两个只读 action**——看花名册（Q1 见全队，对应 agent_member §6）；管理动作（hire/deploy/bench/edit）拒。
+| `reset` | `roleId` | leader / user | **重置 mate 会话上下文**（单体操作，无批量）：清 transcript+summary+runs+usage（复用 `store.clearSession` → `clearSessionStoreOp`，同聊天页「清理上下文」按钮链路）+ presence（`currentWork=null`，read-modify-write 剥信封对齐 `presence-tool.ts` 模式）+ todo（`todoStore.removeAll(sid)`，缺省 skip）。**running 保护**：`state∈{running,interrupting}` → 拒绝 `errorResult`（不 abort，让 leader 知道「等跑完再 reset」）。**不动** memory（group 级 `.rocky/memory/`）/ agent md（定义层）。代码路径：`team-write-actions.ts runReset()` |
+- **member 也可调 `team`，但仅 `list` / `query` 两个只读 action**——看花名册（Q1 见全队，对应 agent_member §6）；管理动作（hire/deploy/bench/edit/reset）拒。
 - **send_message 保底语义**：leader/mate 的 a2a 能力依赖 `send_message`。`TOOL_POLICY['studio-leader'|'studio-mate'].bound` 恒含 `send_message`（由 `resolveTools(role)` 单方法 resolve，`session_config_studio.md §3.1`），不再依赖旧 `member.tools` 字段或 ad-hoc 保底注入。
 
 **member state 状态机**（U5 确认：仅 bench，无 fire / archived 终态）：
@@ -60,9 +61,9 @@ team(action, ...args)
 - `deployed`（在岗，含心跳）/ `benched`（坐板凳，无心跳，但 reactive 仍响应）。
 - `hire` 一步到位 = 创建 + 立即 deployed（无单独 hired 态，简化状态机）。
 - `bench` 调用须给 reason → **leader 在自己 session 的 final text 告知 user**（"X 被 bench，原因…"）（v0.0.128 用户裁决）；tool/HTTP 层 bench 只写 member state，**不发 send_message**——user 不在 a2a 拓扑，通知走 caller session 的回复语境（a2a_protocol §4.1）。
-- **没有 fire**（U5：永久剔除 ≈ 长期 bench；session 留盘可读）。要彻底"看不见" → 各消费点过滤 benched 成员即可（数据层 `listMembers` 不动——认知/协作层 team_roster/reachable_agents/mention + UI 默认在岗视图均 deployed-only；**team tool `list` 例外保留全量**让 leader 管理全视角 + 可 `team deploy` 恢复）。
+- **没有 fire**（U5：永久剔除 ≈ 长期 bench；session 留盘可读）。要彻底"看不见" → 各消费点过滤 benched 成员即可（数据层 `listMembers` 不动——认知/协作层 team_roster/squad_agents_status/mention + UI 默认在岗视图均 deployed-only；**team tool `list` 例外保留全量**让 leader 管理全视角 + 可 `team deploy` 恢复）。
 
-**写 action 实现单源**（v0.0.128）：`hire / deploy / bench / edit` 4 个 member 写 action 走 `team-write-actions.ts` → `services/member-mutations.ts`（deploy/bench/patch 共享 service）+ `createMemberService`（hire）调底层 store，与 HTTP handler 同源（三路不重写，D6 决策）。代码路径：`team-tool.ts.run() → team-write-actions.ts.runHire/runDeploy/runBench/runEdit → services/member-mutations.ts → stores/squad-store.MemberStore.putMember`。
+**写 action 实现单源**（v0.0.128）：`hire / deploy / bench / edit` 4 个 member 写 action 走 `team-write-actions.ts` → `services/member-mutations.ts`（deploy/bench/patch 共享 service）+ `createMemberService`（hire）调底层 store，与 HTTP handler 同源（三路不重写，D6 决策）。代码路径：`team-tool.ts.run() → team-write-actions.ts.runHire/runDeploy/runBench/runEdit → services/member-mutations.ts → stores/squad-store.MemberStore.putMember`。`reset`（v0.0.282）也落 `team-write-actions.ts runReset()`，但不走 member-mutations——reset 操作的是 session 上下文（transcript/presence/todo）不是 member 配置，复用 `store.clearSession` + `memberStore.putMember`（presence 清）+ `todoStore.removeAll` 直接调底层 store。
 
 ---
 

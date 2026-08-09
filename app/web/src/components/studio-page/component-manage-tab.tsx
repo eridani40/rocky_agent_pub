@@ -11,10 +11,16 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PatchSquadBody, SquadDetail } from './squad-types';
 import { SquadDeleteSection } from './component-squad-delete';
+import { GroupChatToggle } from './component-group-chat-toggle';
+import { Dropdown } from './component-shared-selector';
 import { Icon } from './studio-icons';
 import { INPUT, TEXTAREA, FIELD_LABEL, BTN_PRIMARY } from './studio-styles';
 import { ModelPicker } from '../chat/ModelPicker';
 import type { ModelSelection } from '../../lib/providers';
+import type { EffortLevel } from '../chat-page/component-input-effort-picker';
+
+/** [v0.0.279] 团队默认推理强度 4 档（顺序对齐成员级 picker；EFFORT_LEVELS 未 export，本地定义值数组） */
+const EFFORT_LEVEL_OPTIONS: EffortLevel[] = ['default', 'low', 'high', 'max'];
 
 interface ManageTabProps {
   detail: SquadDetail;
@@ -34,6 +40,8 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
       ? { providerId: detail.modelDefaultProviderId ?? '', modelId: detail.modelDefault }
       : null,
   );
+  // [v0.0.279] 团队默认推理强度（detail 恒有值——后端回显 ?? 'default'）
+  const [effortDefault, setEffortDefault] = useState<EffortLevel>(detail.effortDefault);
   const [saving, setSaving] = useState(false);
 
   const dirty =
@@ -41,7 +49,9 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
     description !== detail.description ||
     // 复合 dirty 判定：modelId 或 providerId 任一变 → dirty
     (modelDefaultSel?.modelId ?? '') !== detail.modelDefault ||
-    (modelDefaultSel?.providerId ?? '') !== (detail.modelDefaultProviderId ?? '');
+    (modelDefaultSel?.providerId ?? '') !== (detail.modelDefaultProviderId ?? '') ||
+    // [v0.0.279] 推理强度变更 → dirty
+    effortDefault !== detail.effortDefault;
 
   const save = async () => {
     if (!dirty || !name.trim()) return;
@@ -54,6 +64,8 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
         ...(modelDefaultSel
           ? { modelDefault: modelDefaultSel.modelId, modelDefaultProviderId: modelDefaultSel.providerId }
           : { modelDefault: '' }),
+        // [v0.0.279] 团队默认推理强度（显式 'default' 也落盘）
+        effortDefault,
       });
     } finally {
       setSaving(false);
@@ -86,10 +98,32 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
           onChange={(sel) => setModelDefaultSel(sel)}
         />
       </div>
+      {/* [v0.0.279] 团队默认推理强度下拉（4 档，恒有值——detail 回显 ?? 'default'） */}
+      <div className="mb-4">
+        <label className={FIELD_LABEL}>{t('studio:manageTab.effortDefaultLabel')}</label>
+        <Dropdown
+          value={effortDefault}
+          options={EFFORT_LEVEL_OPTIONS.map((l) => ({
+            value: l,
+            label: t(`studio:manageTab.effortOptions.${l}`),
+          }))}
+          onChange={(v) => setEffortDefault((v as EffortLevel) ?? 'default')}
+          actionKey="studio.squad.select-default-effort"
+        />
+      </div>
       <div className="mb-5 flex justify-end">
         <button type="button" data-action-key="studio.squad.save" onClick={() => void save()} disabled={!dirty || saving} className={BTN_PRIMARY}>
           <Icon name="check" size={12} /> {saving ? t('common:status.saving') : t('studio:manageTab.save')}
         </button>
+      </div>
+
+      {/* [v0.0.292] 群聊可见性开关（从 autowork-tab 迁入；元信息编辑区后、危险操作区前） */}
+      <div className="mb-5">
+        <GroupChatToggle
+          squadId={detail.id}
+          enableGroupChat={detail.enableGroupChat}
+          onPatch={(patch) => onSaveMeta(patch)}
+        />
       </div>
 
       {/* 危险操作区：team 硬删除（解散） */}

@@ -23,6 +23,7 @@ import { TokenStatsRoute } from './component-token-stats-route';
 import { NewSquadModal } from './component-new-squad-modal';
 import { BenchModal } from './component-bench-modal';
 import { SeatsPanel } from './component-seats-panel';
+import { SquadStatusProvider } from './squad-status-provider';
 import type { ChatNode } from './chat-node';
 import { useViewStore } from '../../store/view-store';
 import { Icon } from './studio-icons';
@@ -63,13 +64,8 @@ export function PageStudio() {
     window.setTimeout(() => setToast(null), 2600);
   }, []);
 
-  // v0.0.168：mutation 后统一回落首页 seats；无选中 squad 时保持空 seats（占位）
-  const fallbackToSeats = useCallback(() => {
-    if (selectedSquadId) setMainView({ kind: 'seats', squadId: selectedSquadId });
-    else setMainView({ kind: 'seats', squadId: '' });
-  }, [selectedSquadId]);
-
-  // mutation handler 簇（含 reloadSquads/reloadDetail/refresh 三 fetch 工具）
+  // mutation handler 簇（含 reloadSquads/reloadDetail/refresh 三 fetch 工具）。
+  // [v0.0.276] fallbackToSeats 后移以引用 reloadDetail（hook 输出）；fallbackToHome 用 inline 箭头延迟解析无 TDZ
   const {
     reloadDetail, refresh,
     handleCreateSquad, handleHire, handleBench, handleDeploy,
@@ -81,9 +77,19 @@ export function PageStudio() {
     setSelectedSquadId, setDetail,
     setModalClose: () => setModal(null),
     // v0.0.168 mutation 后统一回落首页 seats（panel 路由已废）
-    fallbackToHome: fallbackToSeats,
+    fallbackToHome: () => fallbackToSeats(),
+    // v0.0.304 创建 squad 成功后选中并跳新 squad seats 首页
+    onSelectSquad: (id) => selectSquad(id),
     flash, t,
   });
+
+  // v0.0.168：mutation 后统一回落首页 seats；无选中 squad 时保持空 seats（占位）
+  // [v0.0.276] seats 激活即刷新：回落 seats 时 void reloadDetail 重拉 detail（fire-and-forget，幂等无害）
+  const fallbackToSeats = useCallback(() => {
+    const id = selectedSquadId;
+    setMainView({ kind: 'seats', squadId: id ?? '' });
+    if (id) void reloadDetail(id);
+  }, [selectedSquadId, reloadDetail]);
 
   const memberPanel = useMemberPanelHandlers({ squadId: selectedSquadId, detail, onSaved: refresh, flash });
 
@@ -137,6 +143,21 @@ export function PageStudio() {
       setMainView({ kind: 'member-create' });
     }
   }, [studioDerivePrefill, detail, selectedSquadId]);
+
+  // [v0.0.268] chat 分支 onBack useCallback（稳定引用供 StudioChatRouter memo 阻断级联）：
+  //   deps 只含 backSquadId 派生值 + fallbackToSeats——page-studio SSE re-render 不重建
+  const chatBackSquadId = mainView.kind === 'chat' ? (mainView.node.squadId ?? selectedSquadId) : null;
+  const handleChatBack = useCallback(() => {
+    if (chatBackSquadId) {
+      setMainView({ kind: 'seats', squadId: chatBackSquadId });
+      void reloadDetail(chatBackSquadId);
+    } else fallbackToSeats();
+  }, [chatBackSquadId, fallbackToSeats, reloadDetail]);
+
+  // [v0.0.268] SquadStatusProvider 的 onEnterChat（语义与 SeatsPanel 传参一致：setMainView chat）
+  const handleSquadEnterChat = useCallback((node: ChatNode) => {
+    setMainView({ kind: 'chat', node });
+  }, []);
 
   const renderEmptyState = () => (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
@@ -193,16 +214,22 @@ export function PageStudio() {
       ? renderEmptyState()
       : <div className="flex flex-1 items-center justify-center text-xs text-muted">{t('common:status.loading')}</div>;
   } else if (mainView.kind === 'chat') {
-    const backSquadId = mainView.node.squadId ?? selectedSquadId;
+    // [v0.0.268] chat 分支包 SquadStatusProvider（仅 chat 需要；seats 不包）：
+    //   入口组件（SquadStatusEntry）经 Context 读 memberStateMap/detail，不新增 SSE 订阅
     mainArea = (
-      <StudioChatRouter
-        node={mainView.node}
-        prefill={mainView.prefill}
-        onBack={() => {
-          if (backSquadId) setMainView({ kind: 'seats', squadId: backSquadId });
-          else fallbackToSeats();
-        }}
-      />
+      <SquadStatusProvider
+        detail={detail}
+        stateMap={stateMap}
+        onEnterChat={handleSquadEnterChat}
+        reloadDetail={reloadDetail}
+        selectedSquadId={selectedSquadId}
+      >
+        <StudioChatRouter
+          node={mainView.node}
+          prefill={mainView.prefill}
+          onBack={handleChatBack}
+        />
+      </SquadStatusProvider>
     );
   } else if (mainView.kind === 'token-stats') {
     // token 统计独立路由态（与 panorama 同级）

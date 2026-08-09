@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   applyWorkspaceDirChanged,
   applyWorkspaceFileChanged,
+  clearStructuralStalePaths,
   expandedPathsByDepth,
   initialWorkspaceState,
   resetForRefresh,
@@ -51,7 +52,7 @@ const dirChanged = (newDir: string, prevDir = '/old'): WorkspaceDirChangedEvent 
 });
 
 describe('initialWorkspaceState', () => {
-  it('空 state + 空 stalePaths Set', () => {
+  it('空 state + 空 stalePaths/structuralStalePaths Set', () => {
     const s = initialWorkspaceState();
     expect(s.workspaceDir).toBe('');
     expect(s.tree).toEqual([]);
@@ -60,6 +61,8 @@ describe('initialWorkspaceState', () => {
     expect(s.loadingChildren).toEqual({});
     expect(s.stalePaths).toBeInstanceOf(Set);
     expect(s.stalePaths.size).toBe(0);
+    expect(s.structuralStalePaths).toBeInstanceOf(Set);
+    expect(s.structuralStalePaths.size).toBe(0);
     expect(s.loading).toBe(false);
   });
 });
@@ -302,6 +305,93 @@ describe('applyWorkspaceFileChanged（watch event 局部刷新分流）', () => 
     const s0 = initialWorkspaceState();
     const s = applyWorkspaceFileChanged(s0, fileChanged(''));
     expect(s).toBe(s0);
+  });
+
+  it('[v0.0.275] addDir 事件 → 父目录同时标 stalePaths + structuralStalePaths', () => {
+    const s0 = initialWorkspaceState();
+    // t1 里建 t2 → addDir('t1/t2') → parent='t1' → 双标
+    const s = applyWorkspaceFileChanged(s0, fileChanged('t1/t2', 'addDir'));
+    expect(s.stalePaths.has('t1')).toBe(true);
+    expect(s.structuralStalePaths.has('t1')).toBe(true);
+  });
+
+  it('[v0.0.275] unlinkDir 事件 → 父目录同时标 stalePaths + structuralStalePaths', () => {
+    const s0 = initialWorkspaceState();
+    const s = applyWorkspaceFileChanged(s0, fileChanged('t1/t2', 'unlinkDir'));
+    expect(s.stalePaths.has('t1')).toBe(true);
+    expect(s.structuralStalePaths.has('t1')).toBe(true);
+  });
+
+  it('[v0.0.275] 顶层 addDir → 父="" 双标（root tree refetch）', () => {
+    const s0 = initialWorkspaceState();
+    const s = applyWorkspaceFileChanged(s0, fileChanged('t1', 'addDir'));
+    expect(s.stalePaths.has('')).toBe(true);
+    expect(s.structuralStalePaths.has('')).toBe(true);
+  });
+
+  it('[v0.0.275] 文件事件（add/change/unlink）→ 只标 stalePaths 不标 structural', () => {
+    const s0 = initialWorkspaceState();
+    for (const kind of ['add', 'change', 'unlink']) {
+      const s = applyWorkspaceFileChanged(s0, fileChanged(`dir/${kind}.ts`, kind));
+      expect(s.stalePaths.has('dir')).toBe(true);
+      expect(s.structuralStalePaths.size).toBe(0);
+    }
+  });
+
+  it('[v0.0.275] 同 parent 结构性事件去重：已标 structural → 不重复标（同 Set 引用）', () => {
+    const s0: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      stalePaths: new Set<string>(['t1']),
+      structuralStalePaths: new Set<string>(['t1']),
+    };
+    const s = applyWorkspaceFileChanged(s0, fileChanged('t1/t2', 'addDir'));
+    // 双标都已存在 → 返回同一 state 引用（未重建）
+    expect(s).toBe(s0);
+  });
+
+  it('[v0.0.275] 文件事件已标 stale → 结构事件补标 structural（各自独立去重）', () => {
+    const s0: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      stalePaths: new Set<string>(['t1']),
+    };
+    // stale 已有 t1；addDir 补 structural
+    const s = applyWorkspaceFileChanged(s0, fileChanged('t1/t2', 'addDir'));
+    expect(s.stalePaths).toBe(s0.stalePaths); // stale 未重建
+    expect(s.structuralStalePaths.has('t1')).toBe(true); // structural 新增
+  });
+
+  it('[v0.0.275] applyWorkspaceDirChanged 清 structuralStalePaths', () => {
+    const s0: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      stalePaths: new Set<string>(['src']),
+      structuralStalePaths: new Set<string>(['src']),
+    };
+    const s = applyWorkspaceDirChanged(s0, dirChanged('/new'));
+    expect(s.structuralStalePaths.size).toBe(0);
+    expect(s.stalePaths.size).toBe(0);
+  });
+
+  it('[v0.0.275] resetForRefresh 清 structuralStalePaths', () => {
+    const s0: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      stalePaths: new Set<string>(['src']),
+      structuralStalePaths: new Set<string>(['src']),
+    };
+    const s = resetForRefresh(s0);
+    expect(s.structuralStalePaths.size).toBe(0);
+    expect(s.stalePaths.size).toBe(0);
+  });
+
+  it('[v0.0.275] clearStructuralStalePaths 清空（空集 → 同引用不重建）', () => {
+    const s0 = initialWorkspaceState();
+    expect(clearStructuralStalePaths(s0)).toBe(s0);
+    const s1: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      structuralStalePaths: new Set<string>(['src']),
+    };
+    const s2 = clearStructuralStalePaths(s1);
+    expect(s2.structuralStalePaths.size).toBe(0);
+    expect(s2).not.toBe(s1);
   });
 });
 

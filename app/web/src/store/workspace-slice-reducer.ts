@@ -34,6 +34,7 @@ export function initialWorkspaceState(): WorkspaceState {
     expanded: {},
     loadingChildren: {},
     stalePaths: new Set<string>(),
+    structuralStalePaths: new Set<string>(),
     loading: false,
   };
 }
@@ -41,13 +42,16 @@ export function initialWorkspaceState(): WorkspaceState {
 /**
  * 应用一条 session_workspace_file_changed event 到 workspace state（§3.2）。
  *
- * 分流逻辑（spec §3.2）：
+ * 分流逻辑（spec §3.2 + v0.0.275 R3 结构刷新）：
  *   1. 计算变化文件的父目录 parentPath（顶层时 = ''）
  *   2. 父目录已展开（expanded[parentPath] === true）→ 把 parentPath 加入 stalePaths
  *      （组件 effect 监听 stalePaths 变化 → re-fetch 该层子节点；100ms debounce 由后端聚合）
  *   3. 父目录未展开 → 仅标记父目录 stale（下次展开时清缓存重拉，不立即拉）
+ *   4. [v0.0.275] 结构性事件（kind ∈ {addDir, unlinkDir}）→ 额外把 parentPath 加入 structuralStalePaths
+ *      （结构刷新 effect 消费——refetch parentOf(P) 刷新未展开目录 twisty）
  *
  * 无论父展开与否都标 stale（区分仅在于组件是否触发 re-fetch）；re-fetch 由组件层观察 stalePaths。
+ * 结构性事件**同时**标 stalePaths + structuralStalePaths（父目录渲染刷新 + twisty 刷新两机制正交）。
  */
 export function applyWorkspaceFileChanged(
   state: WorkspaceState,
@@ -56,11 +60,23 @@ export function applyWorkspaceFileChanged(
   const relPath = evt.data?.path ?? '';
   if (!relPath) return state;
   const parentPath = parentOfPath(relPath);
+  const isStructural = evt.data?.kind === 'addDir' || evt.data?.kind === 'unlinkDir';
   // 已经标过 stale 就不重建 Set（避免无谓 render）
-  if (state.stalePaths.has(parentPath)) return state;
-  const next = new Set(state.stalePaths);
-  next.add(parentPath);
-  return { ...state, stalePaths: next };
+  if (state.stalePaths.has(parentPath) && (!isStructural || state.structuralStalePaths.has(parentPath))) {
+    return state;
+  }
+  let next = state;
+  if (!state.stalePaths.has(parentPath)) {
+    const stale = new Set(state.stalePaths);
+    stale.add(parentPath);
+    next = { ...next, stalePaths: stale };
+  }
+  if (isStructural && !state.structuralStalePaths.has(parentPath)) {
+    const structural = new Set(state.structuralStalePaths);
+    structural.add(parentPath);
+    next = { ...next, structuralStalePaths: structural };
+  }
+  return next;
 }
 
 /**
@@ -85,6 +101,7 @@ export function applyWorkspaceDirChanged(
     expanded: {},
     loadingChildren: {},
     stalePaths: new Set<string>(),
+    structuralStalePaths: new Set<string>(),
     loading: true,
   };
 }
@@ -161,8 +178,15 @@ export function resetForRefresh(state: WorkspaceState): WorkspaceState {
     childrenCache: {},
     loadingChildren: {},
     stalePaths: new Set<string>(),
+    structuralStalePaths: new Set<string>(),
     loading: true,
   };
+}
+
+/** [v0.0.275] 结构刷新 effect 触发后清 structuralStalePaths（防重复 refetch；新建 Set 触发 render） */
+export function clearStructuralStalePaths(state: WorkspaceState): WorkspaceState {
+  if (state.structuralStalePaths.size === 0) return state;
+  return { ...state, structuralStalePaths: new Set<string>() };
 }
 
 /**

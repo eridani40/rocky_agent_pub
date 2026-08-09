@@ -100,15 +100,15 @@ describe('rocky_context plugin builtin-loader 登记', () => {
     expect(handlers.length).toBe(5);
   });
 
-  it('impl 登记（ingest 5 + prompt_mapper 12 + prompt_reducer 3 + reminder 9）= 29', () => {
+  it('impl 登记（ingest 5 + prompt_mapper 12 + prompt_reducer 3 + reminder 8）= 28', () => {
     // v0.0.164 起 prompt_mapper 10→11（+memory_squad，v0.0.205 改名 memory_group）；
     // v0.0.232 11→12（+agent_profile）；v0.0.237 reminder 11→8（摘 squad_charter/task/squad_board）；
-    // v0.0.240 reminder 8→9（+squad_task）.
+    // v0.0.240 reminder 8→9（+squad_task）；v0.0.273 reminder 9→8（reachable_agents + squad_team_status → squad_agents_status 统一）.
     const counts = {
       'context_ingest_handler': 5,
       'system_prompt_mapper': 12,
       'system_prompt_reducer': 3,
-      'system_reminder': 9,
+      'system_reminder': 8,
     };
     for (const [pointId, expected] of Object.entries(counts)) {
       const ep = BUILTIN_EXTENSION_POINTS.find((e) => e.id === pointId)!;

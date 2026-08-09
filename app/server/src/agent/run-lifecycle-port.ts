@@ -25,6 +25,9 @@ import type { ResolvedSessionProfile, ProfileUsagePartition } from './session-ty
 import type { UsagePartition } from './session-store-types';
 import type { A2aReplyTracker } from './a2a-reply-tracker';
 import { settleAgentReplyFallback, type ReplySettleReason } from './subagent-reply-fallback';
+import type { StopReason } from './agent-event-types';
+import type { PendingToolCall } from '../tools/types';
+import { notifyMateExit } from './mate-exit-notify';
 
 /**
  * profile.runShape.usagePartition（current/sub/summary/consolidate）→ store UsagePartition（current/sub/forked）。
@@ -40,6 +43,9 @@ function mapUsagePartition(p: ProfileUsagePartition): UsagePartition {
  * profile 驱动 LifecyclePort：构造时持 ResolvedSessionProfile，三 hook 按 profile 字段分派。
  */
 export class RunLifecyclePort implements LifecyclePort {
+  /** [v0.0.273] run 起点时间戳（通知耗时计算：退出 diff） */
+  private readonly startedAt = Date.now();
+
   constructor(private readonly deps: {
     config: SessionConfig;
     store: SessionStore;
@@ -55,6 +61,12 @@ export class RunLifecyclePort implements LifecyclePort {
       baseline: number;
       carried: AgentReplyRequest[];
     };
+    /**
+     * [v0.0.273] mate run 退出通知 leader hook 装配（buildRunDeps 注入；仅 main && role=mate
+     * && derivation=parent && deliverToFn && squadId）。缺省 undefined → 全链路 noop
+     * （leader/subagent/rocky/旁路 run 不装配不触发）。
+     */
+    mateExitNotify?: { squadId: string };
   }) {}
 
   async onRunEnd(state: LoopState): Promise<void> {
@@ -85,6 +97,10 @@ export class RunLifecyclePort implements LifecyclePort {
         await this.settle(state, reason);
       }
     }
+    // [v0.0.273] mate run 退出通知 leader hook（主链 persistRun/CAS/回报之后；失败仅 warn 不阻断）
+    if (this.deps.mateExitNotify) {
+      await this.notifyMateExit(state, state.stopReason ?? 'error');
+    }
   }
 
   async onUsage(usage: Usage | null): Promise<void> {
@@ -108,6 +124,36 @@ export class RunLifecyclePort implements LifecyclePort {
     // transcript 收尾仍归 abort api 4 步（本 hook 不做 emit/ingest/状态机）；
     // 仅装配 replySettle 的 main subagent run 开「系统代发回报」旁路（interrupted→结局通知）。
     await this.settle(state, 'interrupted');
+    // [v0.0.273] interrupted 也通知 leader（abort 4 步收尾已完成，通知在 settle 之后；失败仅 warn）
+    if (this.deps.mateExitNotify) {
+      await this.notifyMateExit(state, 'interrupted');
+    }
+  }
+
+  /**
+   * [v0.0.273] mate run 退出通知：tool_pending 时读 Session.pendingToolCalls 摘要。
+   * 通知执行失败不阻断主链（notifyMateExit 内部已 try/catch，此处再兜一层防未来实现抛错）。
+   */
+  private async notifyMateExit(state: LoopState, stopReason: StopReason): Promise<void> {
+    const mn = this.deps.mateExitNotify;
+    if (!mn) return;
+    try {
+      const durationSec = Math.max(1, Math.round((Date.now() - this.startedAt) / 1000));
+      let pendingToolCalls: PendingToolCall[] | undefined;
+      if (stopReason === 'tool_pending') {
+        const session = await this.deps.store.getSession(this.deps.config.sessionId);
+        pendingToolCalls = session?.pendingToolCalls;
+      }
+      await notifyMateExit(state, {
+        config: this.deps.config,
+        squadId: mn.squadId,
+        stopReason,
+        durationSec,
+        pendingToolCalls,
+      });
+    } catch (e) {
+      console.warn('[mateExitNotify] notify failed (ignored):', e instanceof Error ? e.message : String(e));
+    }
   }
 
   /**

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
- * component-ws-tree-item 单测 —— 结构 + 布局稳定性 + 文件夹/文件分支
+ * component-ws-tree-item 单测 —— 结构 + 布局稳定性 + 文件夹/文件分支 + symlink 渲染（v0.0.263）
  * 参考: specs/ui/components/chat-page/component-workspace-panel.md §4.3（展开/收起）
  *       + §4.4（hover 打开按钮 opacity 切换不位移）+ §6.5（视觉基线 .ws-item）
+ *       + specs/prd/version_logs/v0.0.263.workspace_symlink_browse/prd.md §3.5（symlink 节点渲染）
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
@@ -153,5 +154,69 @@ describe('ComponentWsTreeItem - 布局稳定性（§4.4）', () => {
     item = container.querySelector('.ws-item') as HTMLElement;
     // 6 + 2*14 = 34
     expect(item.style.paddingLeft).toBe('34px');
+  });
+});
+
+describe('ComponentWsTreeItem - symlink 渲染（v0.0.263）', () => {
+  const symlinkFile = (path: string, linkTarget: string): WsTreeNode => ({
+    name: path.split('/').pop() ?? path,
+    path,
+    type: 'file',
+    hasChildren: false,
+    isSymlink: true,
+    linkTarget,
+  });
+
+  it('isSymlink=true → 渲染 link 角标（data-testid）+ name title 设 tooltip（i18n 未初始化 → raw key）', () => {
+    const { container } = render(
+      <ComponentWsTreeItem
+        node={symlinkFile('link.md', '/real/path/link.md')}
+        depth={0}
+        expanded={false}
+        onToggleExpand={() => {}}
+        onOpen={() => {}}
+      />,
+    );
+    expect(container.querySelector('[data-testid="symlink-badge-link.md"]')).toBeTruthy();
+    const name = container.querySelector('.ws-name') as HTMLElement;
+    // i18n 未初始化 → raw key（既有测试风格一致）；非空证明 tooltip 分支已设（缺省时 title=''）
+    expect(name.title).toBe('chat:workspace.tree.symlinkTooltip');
+  });
+
+  it('isSymlink 缺省（undefined）→ 与旧渲染零差异（无角标、无 title）', () => {
+    const { container } = render(
+      <ComponentWsTreeItem
+        node={file('a.ts')}
+        depth={0}
+        expanded={false}
+        onToggleExpand={() => {}}
+        onOpen={() => {}}
+      />,
+    );
+    expect(container.querySelector('[data-testid^="symlink-badge-"]')).toBeNull();
+    const name = container.querySelector('.ws-name') as HTMLElement;
+    expect(name.title).toBe('');
+  });
+
+  it('dir-symlink（isSymlink + type=dir + hasChildren）→ twisty 正常 + 角标在', () => {
+    const node: WsTreeNode = {
+      name: 'linkdir',
+      path: 'linkdir',
+      type: 'dir',
+      hasChildren: true,
+      isSymlink: true,
+      linkTarget: '/real/dir',
+    };
+    const { container } = render(
+      <ComponentWsTreeItem
+        node={node}
+        depth={0}
+        expanded={false}
+        onToggleExpand={() => {}}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'common:action.expand' })).toBeTruthy();
+    expect(container.querySelector('[data-testid="symlink-badge-linkdir"]')).toBeTruthy();
   });
 });

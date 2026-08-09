@@ -176,7 +176,7 @@ describe('system_reminder_injector', () => {
     expect(out[0]!.metadata?.isSystemReminder).toBeUndefined();
   });
 
-  it('末尾非 user message → 不动', () => {
+  it('末尾 assistant message → 不动（agent 输出不是输入，显式排除）', () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const a = mkMsg('a1', 'assistant', 'hi');
     const out = h.handle([a], {
@@ -184,6 +184,36 @@ describe('system_reminder_injector', () => {
       reminderRunner: () => [{ id: 'env', content: 'app=dev' }],
     });
     expect(out[0]!.content).toHaveLength(1);
+  });
+
+  it('[v0.0.274] 末尾 system message → 不动（系统消息不是输入，显式排除）', () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const s = mkMsg('s1', 'system', 'system directive');
+    const out = h.handle([s], {
+      config: {} as never,
+      reminderRunner: () => [{ id: 'env', content: 'app=dev' }],
+    });
+    expect(out[0]!.content).toHaveLength(1);
+  });
+
+  it('[v0.0.274] 末尾 tool message（role=tool，tool_result block）→ 触发 reminder 追加（工具循环刷新）', () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const t = mkToolMsg('t1', 'call-1', 'tool result data');
+    const out = h.handle([t], {
+      config: {} as never,
+      reminderRunner: () => [{ id: 'env', content: 'app=dev', tier: 'info' }],
+    });
+    // tool_result block 原样保留 + 末尾追加 reminder block
+    expect(out[0]!.content).toHaveLength(2);
+    expect(out[0]!.content[0]).toEqual({
+      type: 'tool_result',
+      toolCallId: 'call-1',
+      isError: false,
+      content: [{ type: 'text', text: 'tool result data' }],
+    });
+    expect((out[0]!.content[1] as { text: string }).text).toContain('app=dev');
+    // [v0.0.50] 块级 TextBlock.isSystemReminder 唯一权威
+    expect((out[0]!.content[1] as { isSystemReminder?: boolean }).isSystemReminder).toBe(true);
   });
 
   it('无 reminderRunner（ctx 缺失）→ 不动', () => {

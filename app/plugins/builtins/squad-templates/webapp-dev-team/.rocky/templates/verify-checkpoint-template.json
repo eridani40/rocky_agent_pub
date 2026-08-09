@@ -1,0 +1,14 @@
+{
+  "phase": "design | executing | completed",
+  "type": "unit-test | api-test | e2e-test",
+  "selectors": {},
+  "scripts": [
+    {
+      "name": "01-example.py",
+      "status": "pending | passed | failed",
+      "error": null
+    }
+  ],
+  "currentIndex": 0,
+  "completedAt": null
+}

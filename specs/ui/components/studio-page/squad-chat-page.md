@@ -13,4 +13,4 @@
 | 哑路由语义（SquadChat agent 只派发不创作 answer；角色回复全是 a2a inbox 消息） | `specs/tech/squad/[P1]agent_squad_chat.md`（权威） |
 | 窄输入区 max-w-760 | `component-chat-session-input.tsx`（`caps.groupRender` 驱动） |
 
-设计动机（群聊 a2a 为何→左）：群聊里 a2a = 「他人发言」，与 user 各占一侧（区别于单聊 a2a→右）；渲染层 mute 不是后端不产——transcript 里 `role='assistant'` 的 `<EOS>` 占位仍存在，读 transcript / 写测试不要假设它不存在。
+设计动机（群聊 a2a 为何→左）：群聊里 a2a = 「他人发言」，与 user 各占一侧（单聊 a2a 同样→左信封折叠，v0.0.295 起对齐）；渲染层 mute 不是后端不产——transcript 里 `role='assistant'` 的 `<EOS>` 占位仍存在，读 transcript / 写测试不要假设它不存在。

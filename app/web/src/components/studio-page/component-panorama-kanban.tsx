@@ -52,8 +52,9 @@ export function PanoramaKanban({ view, entity, records, onTransition, onEdit, on
             key={col}
             data-action-key="studio.panorama.drop-column"
             className={
-              // v0.0.223 响应式列宽：min-w + flex-1（窄屏缩/宽屏平铺），overflow-x-auto 兜底
-              'flex min-w-[200px] flex-1 flex-col overflow-hidden rounded-xl border bg-surface ' +
+              // v0.0.223 响应式列宽：min-w + flex-1（窄屏缩/宽屏平铺）
+              // [v0.0.294] 去 overflow-hidden，列高度随内容撑开（整页滚动由外层负责）
+              'flex min-w-[200px] flex-1 flex-col rounded-xl border bg-surface ' +
               (dropHover === col ? 'border-accent' : 'border-border')
             }
             onDragOver={

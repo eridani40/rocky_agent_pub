@@ -1,10 +1,18 @@
 ---
 type: log
 title: Context KB 变更记录
-updated: 2026-08-04
+updated: 2026-08-07
 ---
 
 # Context KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-07 · v0.0.273（squad_agents_status 统一块取代 reachable_agents — reminder provider 名清理）
+
+- **`[P0]system_reminder.md`**：§3 provider 表 `reachable_agents` → `squad_agents_status`（[v0.0.273] 三合一取代 reachable_agents + squad_team_status，数据源 studioContext → squadContext）+ §5.1 段重写（统一块核心概念/设计思路/代码路径/接口签名/版本演进）+ §7 squad 场景注记同步（6 provider 清单）。
+- **`[P0]extension point and implementations.md`**：§3.6 `system_reminder` 表 9 个 → 8 个（squad_charter/squad_tasks/squad_board 已于 v0.0.237 移除，本次顺带对齐；`reachable_agents` → `squad_agents_status`，3 squad-scoped = squad_agents_status/squad_workspace/squad_task）+ §5 manifest 描述 squad-scoped impl 清单同步。
+- **`index.md`**：导航表 system_reminder 行 provider 名同步。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① plugin.json `system_reminder` EP 8 个（env/time/workspace/tool_error/todo/squad_agents_status/squad_workspace/squad_task）✅；② 旧 provider 文件已删（reminder/squad_team_status.ts + prompt/reachable_agents.ts）✅；③ 当前态 spec 无旧 provider 名残留（仅「取代/曾名」语境）✅。
+- 详情：`specs/tech/version_logs/v0.0.273/change_plan.md`（8 裁决 R1-R8）+ `change_log.md`
 
 ## 2026-08-04 · v0.0.256 clean_view 加 bubble_text_before_tool_call（assistant text 冒泡到 tool_call 前，修 provider 400）
 

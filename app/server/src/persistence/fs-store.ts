@@ -1,18 +1,8 @@
 /**
  * FsCrudStore — CrudStore 契约的文件系统 engine（spec §2-§5）
  * 参考: specs/tech/persistence/[P0]fs_crud_store_engine.md §2-§5
- *       states/v0.0.2/task.json keyDecisions.fsLayout
- *
- * 编排扁平目录 / 分片 / json / jsonl 段文件四种组合：
- *   - 路径计算 → fs-paths.ts
- *   - 同步原子写 + 通用 IO → fs-io.ts
- *   - jsonl 段文件读写（段名/排序/append/roll/重写插入）→ fs-jsonl.ts
- *   - 信封注入/mode/ifVersion → 复用 envelope.ts computeEnvelope（T2）
- *   - 校验 → 复用 schema-validation.ts（T1）
- *
- * put 主线（spec §4 put 映射）：
- *   validateRecord → 读 existing 信封 → computeEnvelope（得新信封或抛错）
- *   → 分片则从 record[shardKeyField] 提取 shardKey → json/jsonl 落盘 → 返回 data+信封
+ * 编排：路径 fs-paths / IO fs-io / jsonl fs-jsonl / 信封 envelope / 校验 schema-validation
+ * put 主线：validateRecord → 读 existing → computeEnvelope → json/jsonl 落盘 → 返回 data+信封
  */
 import type { CrudStore, PutOptions, QueryFilter, StoredRecord, RecordMeta } from './crud-types';
 import type { SchemaDef, InferRecord } from './schema-types';
@@ -34,31 +24,21 @@ import {
 } from './fs-io';
 import { jsonlPut, jsonlGet, jsonlDelete, jsonlQuerySegments } from './fs-jsonl';
 import { withFileLock } from './file-lock';
+import { acquireFsSlot, trackFsTime } from './fs-yield';
 import { queryWithSlowLog } from './slow-query';
 
 /** FsCrudStore 构造参数 */
 export interface FsCrudStoreOptions {
-  /** 基目录（所有路径从此起拼接，不自加前缀，见 keyDecisions.fsLayout） */
   root: string;
-  /**
-   * 时间源（engine 专有扩展，便于测试固定时间）。
-   * 缺省用 new Date().toISOString()。
-   */
-  now?: () => string;
-  /**
-   * 毫秒时钟（query 慢查询计时用，engine 专有扩展，便于 UT 控制耗时）。
-   * 与 now（信封 ISO 时间）职责不同不混用。缺省 Date.now。
-   */
-  nowMs?: () => number;
+  now?: () => string;   // 时间源（信封 ISO 时间；缺省 new Date().toISOString()）
+  nowMs?: () => number; // 毫秒时钟（query 慢查询计时；缺省 Date.now）
 }
 
 /** 默认时间源 */
 const defaultNow = () => new Date().toISOString();
 
 /**
- * 文件系统实现的 CrudStore（spec §1）。
- *
- * 同步语义（与 CrudStore 契约 + bun:sqlite 对齐）；多进程并发写不保证（spec §5）。
+ * 文件系统实现的 CrudStore（spec §1）。同步语义（与 bun:sqlite 对齐）；多进程并发写不保证（spec §5）。
  */
 export class FsCrudStore implements CrudStore {
   private readonly root: string;
@@ -183,8 +163,13 @@ export class FsCrudStore implements CrudStore {
   ): Promise<StoredRecord<S>> {
     const id = (record as unknown as { id: string }).id;
     const shardKey = this.isSharded(schema) ? this.extractShardKey(schema, record) : undefined;
-    return withFileLock(this.targetWritePath(schema, id, shardKey), async () =>
-      this.put(schema, record, opts));
+    return withFileLock(this.targetWritePath(schema, id, shardKey), async () => {
+      await acquireFsSlot();
+      const t0 = process.hrtime.bigint();
+      const result = this.put(schema, record, opts);
+      trackFsTime(process.hrtime.bigint() - t0);
+      return result;
+    });
   }
 
   /** async delete — sync delete 外包 withFileLock；同 lockPath 串行，第二个返 false（spec §4.1） */
@@ -194,8 +179,13 @@ export class FsCrudStore implements CrudStore {
     shardKey?: string,
   ): Promise<boolean> {
     this.assertShardKeyIfSharded(schema, shardKey, 'deleteAsync');
-    return withFileLock(this.targetWritePath(schema, id, shardKey), async () =>
-      this.delete(schema, id, shardKey));
+    return withFileLock(this.targetWritePath(schema, id, shardKey), async () => {
+      await acquireFsSlot();
+      const t0 = process.hrtime.bigint();
+      const result = this.delete(schema, id, shardKey);
+      trackFsTime(process.hrtime.bigint() - t0);
+      return result;
+    });
   }
 
   /** 写锁路径（§4.2）：jsonl→entity 段目录（roll 改段名仍同段目录防漏锁）、json→record 文件 */
@@ -209,10 +199,8 @@ export class FsCrudStore implements CrudStore {
   }
 
   query<S extends SchemaDef>(schema: S, filter: QueryFilter): StoredRecord<S>[] {
-    // 慢查询性能日志埋点：计时包原查询，超阈值经模块级 sink 上报
-    // （sink 未注册/开关 false 均零副作用，见 slow-query.ts）
+    // 慢查询性能日志埋点（sink 未注册/开关 false 均零副作用，见 slow-query.ts）
     return queryWithSlowLog('fs', schema, filter, () => {
-      // 收集候选记录列表（json/jsonl × 分片单 shard / scatter）
       const records = this.collectAll(schema, filter);
       return applyFilter(records, filter) as StoredRecord<S>[];
     }, this.nowMs);

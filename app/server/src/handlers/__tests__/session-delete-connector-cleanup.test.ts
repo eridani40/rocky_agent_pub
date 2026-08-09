@@ -1,13 +1,14 @@
 /**
- * DELETE /session/:id → connectorManager.disconnect 兜底 UT（v0.0.46 P7）
- * 参考: specs/tech/config/[P1]connectors.md v1.2 §3
- *       states/v0.0.46.connector_opt/design.md §5（session 结束兜底 disconnect）
+ * DELETE /session/:id → browserInstanceManager.releaseSession 兜底 UT（v0.0.264+，v0.0.266 attach 纳入）
+ * 参考: specs/tech/agent/tools/[P1]browser_instance_manager.md
+ *       change_plan v0.0.266 行 40-41（ConnectorManager.disconnect 兜底删除——attach session 归 InstanceManager）
  *
  * 覆盖：
- *   - DELETE session → connectorManager.disconnect('browser', sessionId) 被调 1 次
- *   - 重复 DELETE（第一次已删）→ 404，disconnect 不再被调（disconnect 内部幂等由 T1 UT 覆盖，此处只关注调用次数）
- *   - deps.connectorManager 未注入 → DELETE 仍返 204（健壮）
- *   - connectorManager.disconnect 抛错 → DELETE 仍返 204（吞错）
+ *   - DELETE session → browserInstanceManager.releaseSession(sid) 被调 1 次
+ *   - 重复 DELETE（第一次已删）→ 404，releaseSession 不再被调
+ *   - deps.browserInstanceManager 未注入 → DELETE 仍返 204（可选依赖）
+ *   - releaseSession 抛错 → DELETE 仍返 204（吞错）
+ *   - connectorManager.disconnect 兜底已删除（v0.0.266）：不注入 connectorManager 也正常
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,7 +24,7 @@ import {
   handleSessionItem,
   type SessionHandlerDeps,
 } from '../session';
-import type { ConnectorManager } from '../../tools/browser/connector-manager';
+import type { BrowserInstanceManager } from '../../tools/browser/instance-manager';
 
 let tmpRoot: string;
 let deps: SessionHandlerDeps;
@@ -62,6 +63,16 @@ async function createSession(): Promise<string> {
   return body.id;
 }
 
+/** mock BrowserInstanceManager（仅 releaseSession 被 DELETE 路径消费） */
+function makeFakeInstanceManager(
+  over: Partial<BrowserInstanceManager> = {},
+): BrowserInstanceManager {
+  return {
+    releaseSession: vi.fn(async () => {}),
+    ...over,
+  } as unknown as BrowserInstanceManager;
+}
+
 beforeEach(async () => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'rocky-session-delete-cm-'));
   const fs = new FsCrudStore({ root: tmpRoot });
@@ -88,77 +99,59 @@ afterEach(() => {
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-describe('DELETE /session/:id → connectorManager.disconnect 兜底（v0.0.46 P7）', () => {
-  it('DELETE session → connectorManager.disconnect("browser", sessionId) 被调 1 次；返 204', async () => {
-    const disconnect = vi.fn(async () => {});
-    const cm: ConnectorManager = {
-      isReady: () => false,
-      getAttachSession: () => undefined,
-      disconnect,
-    };
-    deps.connectorManager = cm;
+describe('DELETE /session/:id → browserInstanceManager.releaseSession 兜底（v0.0.264 + v0.0.266）', () => {
+  it('DELETE session → releaseSession(sid) 被调 1 次；返 204', async () => {
+    const releaseSession = vi.fn(async () => {});
+    deps.browserInstanceManager = makeFakeInstanceManager({ releaseSession });
 
     const sid = await createSession();
     const r = await handleSessionItem(req('DELETE', `/session/${sid}`), 'DELETE', sid, deps);
     expect(r.status).toBe(204);
-    expect(disconnect).toHaveBeenCalledTimes(1);
-    expect(disconnect).toHaveBeenCalledWith('browser', sid);
+    expect(releaseSession).toHaveBeenCalledTimes(1);
+    expect(releaseSession).toHaveBeenCalledWith(sid);
   });
 
-  it('重复 DELETE（第二次 404）→ disconnect 不再被调（session 已不存在，前置 404 早返）', async () => {
-    const disconnect = vi.fn(async () => {});
-    const cm: ConnectorManager = {
-      isReady: () => false,
-      getAttachSession: () => undefined,
-      disconnect,
-    };
-    deps.connectorManager = cm;
+  it('重复 DELETE（第二次 404）→ releaseSession 不再被调（session 已不存在，前置 404 早返）', async () => {
+    const releaseSession = vi.fn(async () => {});
+    deps.browserInstanceManager = makeFakeInstanceManager({ releaseSession });
 
     const sid = await createSession();
     const r1 = await handleSessionItem(req('DELETE', `/session/${sid}`), 'DELETE', sid, deps);
     expect(r1.status).toBe(204);
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(releaseSession).toHaveBeenCalledTimes(1);
 
     const r2 = await handleSessionItem(req('DELETE', `/session/${sid}`), 'DELETE', sid, deps);
     expect(r2.status).toBe(404);
-    // 404 早返，disconnect 未再调
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(releaseSession).toHaveBeenCalledTimes(1);
   });
 
-  it('deps.connectorManager 未注入 → DELETE 仍返 204（可选依赖）', async () => {
-    // 不注入 connectorManager
+  it('deps.browserInstanceManager 未注入 → DELETE 仍返 204（可选依赖）', async () => {
+    // 不注入 browserInstanceManager
     const sid = await createSession();
     const r = await handleSessionItem(req('DELETE', `/session/${sid}`), 'DELETE', sid, deps);
     expect(r.status).toBe(204);
   });
 
-  it('connectorManager.disconnect 抛错 → DELETE 仍返 204（吞错）', async () => {
-    const disconnect = vi.fn(async () => {
-      throw new Error('driver kill boom');
+  it('releaseSession 抛错 → DELETE 仍返 204（吞错）', async () => {
+    const releaseSession = vi.fn(async () => {
+      throw new Error('kill boom');
     });
-    const cm: ConnectorManager = {
-      isReady: () => false,
-      getAttachSession: () => undefined,
-      disconnect,
-    };
-    deps.connectorManager = cm;
+    deps.browserInstanceManager = makeFakeInstanceManager({ releaseSession });
 
     const sid = await createSession();
     const r = await handleSessionItem(req('DELETE', `/session/${sid}`), 'DELETE', sid, deps);
     expect(r.status).toBe(204);
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(releaseSession).toHaveBeenCalledTimes(1);
   });
 
-  it('deps.connectorManager 无 disconnect 方法（只有 isReady/getAttachSession）→ DELETE 仍返 204', async () => {
-    const cm: ConnectorManager = {
-      isReady: () => false,
-      getAttachSession: () => undefined,
-      // 无 disconnect：接口可选
-    };
-    deps.connectorManager = cm;
+  it('v0.0.266：不再调 connectorManager.disconnect 兜底（attach 归 InstanceManager）', async () => {
+    // 不注入 connectorManager（接口已删 disconnect）；releaseSession 覆盖 attach disconnect 语义
+    const releaseSession = vi.fn(async () => {});
+    deps.browserInstanceManager = makeFakeInstanceManager({ releaseSession });
 
     const sid = await createSession();
     const r = await handleSessionItem(req('DELETE', `/session/${sid}`), 'DELETE', sid, deps);
     expect(r.status).toBe(204);
+    expect(releaseSession).toHaveBeenCalledTimes(1);
   });
 });

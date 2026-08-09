@@ -1,13 +1,20 @@
 ---
 type: log
 title: Agent Interface & Loop KB 变更记录
-updated: 2026-08-04
+updated: 2026-08-07
 ---
 
 # Agent Interface & Loop KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-07 · v0.0.273（mate run 退出通知 leader hook — mateExitNotify 装配）
+
+- **`[P0]agent_loop_unified.md §3.2`**：RunLifecyclePort 表 onRunEnd/onInterrupted 两行追加 mate 退出通知分派（仅装配 mateExitNotify 的 mate main run）；新增「mateExitNotify 装配」段——`buildRunDeps` 仅 `isMain && kind.role==='mate' && kind.derivation==='parent' && opts.deliverToFn && opts.config.sessionContext?.squadId` 装配（其余 undefined 全链路 noop 零通知）；onRunEnd 在 persistRun/CAS/replySettle 后带 `state.stopReason`（6 种正常）+ onInterrupted 在 settle 后固定 `interrupted`——7 种 stopReason 全覆盖；通知内容 = lastAssistantContent block 摘要（5 类过滤 + 前后 500 截断）+ 耗时 + tool_pending 读 pendingToolCalls；投递 = Message 仿 send-message-tool（sender.source='agent' + needReply:false）→ deliverTo，失败仅 warn 不阻断主链。§4 中断退出/正常退出 main 条同步（onInterrupted 默认 noop，例外 = replySettle 代发旁路 + mateExitNotify 退出通知旁路）。
+- **实现**：`mate-exit-notify.ts`（truncateText/NOTIFY_BLOCK_TYPES/formatMateExitNotify/notifyMateExit 两跳解析）+ `run-lifecycle-port.ts`（deps.mateExitNotify + startedAt + onRunEnd/onInterrupted 双触发）+ `build-run-deps.ts` L171-174（装配条件）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① 双 hook 7 stopReason 全覆盖（onRunEnd L100-103 + onInterrupted L127-130）✅；② 装配条件 leader/subagent/非 squad/旁路零通知（测试 1 正 4 负）✅。
+- 详情：`specs/tech/version_logs/v0.0.273/change_plan.md`（8 裁决 R1-R8）+ `change_log.md`
 
 ## 2026-08-04 · v0.0.255（RunLifecyclePort 加回报兜底钩子 — replySettle 装配 + onInterrupted 代发旁路）
 

@@ -152,10 +152,11 @@ describe('renderMessageContentWithPrefix — content 注入', () => {
     expect(rendered[1]?.type).toBe('tool_result');
   });
 
-  it('空 content → 单个前缀 TextBlock', () => {
+  it('空 content → 无 block 遍历 → 空数组（v0.0.294 per-block 遍历行为变更）', () => {
     const msg = makeMsg({ sender: { source: 'user' }, content: [] });
     const rendered = renderMessageContentWithPrefix(msg);
-    expect(rendered).toEqual([{ type: 'text', text: '[User]: ' }]);
+    // per-block 遍历：无 block → 无前缀注入 → 空数组
+    expect(rendered).toEqual([]);
   });
 
   it('无 sender → 原样返回 content（无前缀注入，引用相同）', () => {
@@ -241,5 +242,98 @@ describe('toLogicalMessages — sender 展平入首块 + 保留字段 + 不 muta
     expect((logical[1]!.content[0] as { text: string }).text).toBe(
       '[Message from bot (mate, needReply=false)]: ack',
     );
+  });
+});
+
+// ── [v0.0.294] per-block sender 前缀注入 ──────────────────────
+
+describe('renderMessageContentWithPrefix — [v0.0.294] per-block sender 注入', () => {
+  it('block 带 sender → 按 block.sender per-block 注入前缀', () => {
+    const senderA: MessageSender = { source: 'user' };
+    const senderB: MessageSender = {
+      source: 'agent',
+      agent: { ref: { type: 'mate', sessionId: 's1', name: 'coder' }, needReply: false },
+    };
+    // 模拟 role_merge 合并后的 message：sender 清空，block 各自带 sender
+    const msg = makeMsg({
+      sender: undefined,
+      content: [
+        { type: 'text', text: 'hello', sender: senderA },
+        { type: 'text', text: 'world', sender: senderB },
+      ],
+    });
+    const rendered = renderMessageContentWithPrefix(msg);
+    expect(rendered).toHaveLength(2);
+    expect((rendered[0] as { text: string }).text).toBe('[User]: hello');
+    expect((rendered[1] as { text: string }).text).toBe(
+      '[Message from coder (mate, needReply=false)]: world',
+    );
+  });
+
+  it('block 不带 sender 但 message 带 sender → 按 message.sender 注入（向后兼容）', () => {
+    const msg = makeMsg({
+      sender: { source: 'user' },
+      content: [
+        { type: 'text', text: 'a' },
+        { type: 'text', text: 'b' },
+      ],
+    });
+    const rendered = renderMessageContentWithPrefix(msg);
+    // 未合并的 message：block 无 sender → 回退到 message.sender
+    expect(rendered).toHaveLength(2);
+    expect((rendered[0] as { text: string }).text).toBe('[User]: a');
+    expect((rendered[1] as { text: string }).text).toBe('[User]: b');
+  });
+
+  it('混合（部分 block 带 sender 部分不带）→ 各自正确', () => {
+    const senderB: MessageSender = { source: 'system', system: { kind: 'reminder' } };
+    const msg = makeMsg({
+      sender: { source: 'user' },
+      content: [
+        { type: 'text', text: 'first' }, // 无 block.sender → 回退 message.sender
+        { type: 'text', text: 'second', sender: senderB }, // 有 block.sender → 用 block.sender
+        { type: 'text', text: 'third' }, // 无 block.sender → 回退 message.sender
+      ],
+    });
+    const rendered = renderMessageContentWithPrefix(msg);
+    expect(rendered).toHaveLength(3);
+    expect((rendered[0] as { text: string }).text).toBe('[User]: first');
+    expect((rendered[1] as { text: string }).text).toBe('[System reminder]: second');
+    expect((rendered[2] as { text: string }).text).toBe('[User]: third');
+  });
+
+  it('block 带 sender + 非 text block → prepend 前缀 TextBlock', () => {
+    const sender: MessageSender = { source: 'user' };
+    const msg = makeMsg({
+      sender: undefined,
+      content: [
+        { type: 'tool_call', id: 'c1', name: 'bash', arguments: {}, sender } as ContentBlock,
+      ],
+    });
+    const rendered = renderMessageContentWithPrefix(msg);
+    expect(rendered).toHaveLength(2);
+    expect(rendered[0]).toEqual({ type: 'text', text: '[User]: ' });
+    expect(rendered[1]?.type).toBe('tool_call');
+  });
+
+  it('不 mutate 原 block（返回新对象）', () => {
+    const sender: MessageSender = { source: 'user' };
+    const origBlock = { type: 'text', text: 'hi', sender } as ContentBlock;
+    const msg = makeMsg({ sender: undefined, content: [origBlock] });
+    const rendered = renderMessageContentWithPrefix(msg);
+    // 原始 block 未被修改
+    expect((origBlock as { text: string }).text).toBe('hi');
+    // 返回的是新对象
+    expect(rendered[0]).not.toBe(origBlock);
+    expect((rendered[0] as { text: string }).text).toBe('[User]: hi');
+  });
+
+  it('所有 block 都无 sender 且 message 无 sender → 返回原 content 引用', () => {
+    const msg = makeMsg({
+      sender: undefined,
+      content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }],
+    });
+    const rendered = renderMessageContentWithPrefix(msg);
+    expect(rendered).toBe(msg.content);
   });
 });

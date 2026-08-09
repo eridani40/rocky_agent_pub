@@ -15,6 +15,7 @@ squad 团队/成员 token 用量可视化视图：4 维度+ model 筛选 + 日�
 - **model 筛选下拉 value = `${providerId}/${modelId}`，modelId 可含 `/`**（OpenRouter 等 vendor 前缀命名，如 `deepseek/deepseek-chat`）；解码（`parseModelSelection`，见 helpers）按**首个 `/`** 切——providerId 恒为 slash-free ULID 或 `__unknown__`，首斜杠是唯一分隔符，modelId 后半段整体保留，**禁止 `split('/')` 截断**（否则后端过滤不命中）
 - 视图切换：`calendar` + `granularity=hour` → 显空态引导（与 demo 沿用）
 - **hover 明细走 createPortal 到 document.body**（修过的 overflow 裁剪 bug 不回退）+ native title 兜底
+- **范围/模型自定义下拉（CustomDropdown）面板同走 createPortal 到 document.body + `position:fixed`**（脱离父 stacking context，盖过日历 cell / 时间轴 bar 图表列）+ `bg-surface` 不透明 + `z-popover`；定位 = open 时取 trigger `getBoundingClientRect()` 贴下沿 4px 左对齐；outside-close 用 `triggerRef + panelRef` 双 contains（Portal 后面板脱离 trigger DOM 分支，单判 trigger 会把点选项误判为容器外 → 选项 onClick 不触发）
 - 503 sqlite 未就绪 → 主区显「统计功能未就绪」空态，不崩
 - 503 范围外错误 → 显 error 空态 + retry 按钮（简化：仅显文案）
 

@@ -33,6 +33,7 @@ export type SessionEventType =
   | 'session_workspace_file_changed'
   | 'session_read_update'
   | 'session_todo_changed'
+  | 'session_cron_changed'
   | string; // 预留扩展
 
 /** usage 变更（updateUsage 写+推一体 / notifyUsageChanged 触发；负载 = getUsageView 全量） */
@@ -69,7 +70,19 @@ export type SessionEvent =
   | SessionWorkspaceDirChangedEvent
   | SessionWorkspaceFileChangedEvent
   | SessionReadUpdateEvent
-  | SessionTodoChangedEvent;
+  | SessionTodoChangedEvent
+  | SessionCronChangedEvent;
+
+/**
+ * session_cron_changed 事件（照抄 session_todo_changed 模式）。
+ * cron 写操作（create/update/toggle/delete）成功后 emit
+ * （topic=session_panel，group=session_id:<sid>）。
+ * data 为空对象（轻量信号不携带 cron 数据；消费方收事件后重拉 GET /session/:id/cron 全量）。
+ */
+export interface SessionCronChangedEvent extends SessionEventBase {
+  type: 'session_cron_changed';
+  data: Record<string, never>;
+}
 
 /**
  * messages_cleared 事件（v0.0.16；session_clear.md §5 step4）。

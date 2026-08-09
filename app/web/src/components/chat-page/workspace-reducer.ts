@@ -9,6 +9,7 @@ import type { WsTreeNode, WorkspaceState } from './workspace-types';
 import {
   applyWorkspaceDirChanged,
   applyWorkspaceFileChanged,
+  clearStructuralStalePaths,
   initialWorkspaceState,
   resetForRefresh,
   setChildrenLoaded,
@@ -26,7 +27,8 @@ export type WsAction =
   | { type: 'reset' }
   | { type: 'fresh' }
   | { type: 'file-changed'; payload: Parameters<typeof applyWorkspaceFileChanged>[1] }
-  | { type: 'dir-changed'; payload: Parameters<typeof applyWorkspaceDirChanged>[1] };
+  | { type: 'dir-changed'; payload: Parameters<typeof applyWorkspaceDirChanged>[1] }
+  | { type: 'clear-structural' };
 
 /** workspace reducer（委托 workspace-slice-reducer 纯函数） */
 export function wsReducer(s: WorkspaceState, action: WsAction): WorkspaceState {
@@ -47,6 +49,8 @@ export function wsReducer(s: WorkspaceState, action: WsAction): WorkspaceState {
       return applyWorkspaceFileChanged(s, action.payload);
     case 'dir-changed':
       return applyWorkspaceDirChanged(s, action.payload);
+    case 'clear-structural':
+      return clearStructuralStalePaths(s);
     default:
       return s;
   }

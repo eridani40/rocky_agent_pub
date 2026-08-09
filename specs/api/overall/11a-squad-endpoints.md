@@ -1,6 +1,6 @@
 # Squad / Member / Charter 端点契约（v0.0.33.1 — 11-squad.md 姊妹文件）
 
-> version: 1.10 · 引入版本 v0.0.33.1 · **[v0.0.89 modified]** 加 `summaryModelDefault` · **[v0.0.113 modified]** Member.skills→skillConfig overlay · **[v0.0.116 modified]** squad 级心跳（PATCH /squad 加 heartbeatConfig，废弃 PATCH /member/:mid/heartbeat）+ Member.currentWork presence · **[v0.0.142 modified]** Member + PatchMemberBody 加 `workStyle`（可空/空串=清空/无 400；hire 不含；仅用户可编辑）· **[v0.0.158 modified]** 删「独立 summary 模型」层——`summaryModelDefault` + `summaryModelDefaultProviderId` 两字段整删（Schema + POST/PATCH body + GET 响应 + 校验规则）· **[v0.0.169 modified]** hire（§2.1）扩 `workStyle?`（fresh 直传 trim 回写/空串=空串/无 400；derive 默认复制父 + `overrides.workStyle` 覆盖，空串=清空——对齐 §2.2 v0.0.142 语义）· **[v0.0.192.delete_cleanup modified]** §1.5 `DELETE /squad/:id` 行为修订——step② `listSessionsBySquad` 按 squadId 平铺快照全量 squad session（含 spawn children）；step④ 改 `deleteSquadAdministrativeSubpaths`（只删管理性子路径），**保留 workspaces/outputs/reports 工作产出** · **[v0.0.210 modified]** §2.1 hire body 加 `mode: 'derive_academy'`（从教室学生版本派生；academySource 三字段；tech `specs/tech/academy/[P1]squad_derive.md`）· **[v0.0.233 modified]** §2.1 derive_academy 分支加 `resolution?`（同名裁决：默认全 skip 同名 + 用户逐项改 overwrite + 不同名 merge）+ §2.5 新增 `POST /squad/:id/member/derive-academy/preview`（派生前预检，纯只读返 PreviewResult）—— tech 权威 `specs/tech/academy/[P1]derive_preview_conflict.md` · **[v0.0.237 removed]** §3 Charter 整组端点（GET/PUT/GET history `/squad/:id/charter*`）+ `/squad/:id/board/*` 全套 board endpoint（后者曾在 11b-squad-workitems.md，已随 board 全链路删）+ squad.charter schema 字段 + charter_history entity 整体退役——AT 不可 curl，§3 细节保留作历史契约 · **[v0.0.250 modified]** §1.3 Member + §2.1 HireMemberBody derive 分支 + step 删 `inheritMemory`（dead：声明「派生复制父记忆」从未落地；memory 已 v0.0.232 团队盘 `.rocky/memory/` 全队共享，无复制语义）+ §2.1 step 列表加 7.5（derive 复制父成员个人 AGENTS.md，父无/失败 → 静默 no-op 不回滚）
+> version: 1.11 · 引入版本 v0.0.33.1 · **[v0.0.89 modified]** 加 `summaryModelDefault` · **[v0.0.113 modified]** Member.skills→skillConfig overlay · **[v0.0.116 modified]** squad 级心跳（PATCH /squad 加 heartbeatConfig，废弃 PATCH /member/:mid/heartbeat）+ Member.currentWork presence · **[v0.0.142 modified]** Member + PatchMemberBody 加 `workStyle`（可空/空串=清空/无 400；hire 不含；仅用户可编辑）· **[v0.0.158 modified]** 删「独立 summary 模型」层——`summaryModelDefault` + `summaryModelDefaultProviderId` 两字段整删（Schema + POST/PATCH body + GET 响应 + 校验规则）· **[v0.0.169 modified]** hire（§2.1）扩 `workStyle?`（fresh 直传 trim 回写/空串=空串/无 400；derive 默认复制父 + `overrides.workStyle` 覆盖，空串=清空——对齐 §2.2 v0.0.142 语义）· **[v0.0.192.delete_cleanup modified]** §1.5 `DELETE /squad/:id` 行为修订——step② `listSessionsBySquad` 按 squadId 平铺快照全量 squad session（含 spawn children）；step④ 改 `deleteSquadAdministrativeSubpaths`（只删管理性子路径），**保留 workspaces/outputs/reports 工作产出** · **[v0.0.210 modified]** §2.1 hire body 加 `mode: 'derive_academy'`（从教室学生版本派生；academySource 三字段；tech `specs/tech/academy/[P1]squad_derive.md`）· **[v0.0.233 modified]** §2.1 derive_academy 分支加 `resolution?`（同名裁决：默认全 skip 同名 + 用户逐项改 overwrite + 不同名 merge）+ §2.5 新增 `POST /squad/:id/member/derive-academy/preview`（派生前预检，纯只读返 PreviewResult）—— tech 权威 `specs/tech/academy/[P1]derive_preview_conflict.md` · **[v0.0.237 removed]** §3 Charter 整组端点（GET/PUT/GET history `/squad/:id/charter*`）+ `/squad/:id/board/*` 全套 board endpoint（后者曾在 11b-squad-workitems.md，已随 board 全链路删）+ squad.charter schema 字段 + charter_history entity 整体退役——AT 不可 curl，§3 细节保留作历史契约 · **[v0.0.250 modified]** §1.3 Member + §2.1 HireMemberBody derive 分支 + step 删 `inheritMemory`（dead：声明「派生复制父记忆」从未落地；memory 已 v0.0.232 团队盘 `.rocky/memory/` 全队共享，无复制语义）+ §2.1 step 列表加 7.5（derive 复制父成员个人 AGENTS.md，父无/失败 → 静默 no-op 不回滚）· **[v0.0.270 modified]** §1.3 SquadDetail + §1.4 PatchSquadBody 加 `enableGroupChat`（群聊可见性：回显 ?? true / PATCH !== undefined 才改）· **[v0.0.279 modified]** §1.3 SquadDetail + §1.4 PatchSquadBody 加 `effortDefault`（团队默认推理强度：回显 ?? 'default' / PATCH !== undefined 才改，显式 'default' 也落盘不清空 / 非法值 400 先于 404）
 > 管什么：v0.0.33.1 squad/member 两组管理端点的**完整端点契约**（payload / 响应 / 行为 / 错误码）——§1 Squad CRUD + §2 Member 管理（§3 Charter 组已于 v0.0.237 移除，详见该章节头）。
 > 不管什么：session schema 增量字段 + bizType 隔离 + 占位 chat 403 + SSE 策略 + AT 映射 + 文件清单（→ `11-squad.md`）；agent loop / chat 真实跑（→ v0.0.33.2）。
 > **本文件是 AT（API Test）squad/member/charter 端点的唯一依据**：api-verifier 黑盒 curl，不读代码。
@@ -85,6 +85,8 @@ interface SquadDetail {
   name: string;
   description: string;
   modelDefault: string;
+  // [v0.0.279] 团队默认推理强度（canonical 语义键 4 档 'default'|'low'|'high'|'max'；存量无字段回显 ?? 'default'——UI 下拉恒有值）
+  effortDefault: 'default' | 'low' | 'high' | 'max';
   // [v0.0.158] summaryModelDefault 字段整删（响应不再回显；旧前端读为 undefined 兼容）
   leaderId: string;
   memberIds: string[];
@@ -93,6 +95,7 @@ interface SquadDetail {
   charter: Charter;               // embedded 4 字段
   budget: { limit: number; window: "daily"; scope: "team" } | null;  // [v0.0.116] null=off=不限量；非null=on=限量
   enableHeartBeat: boolean;       // [v0.0.33.4] 实跑（scheduler killswitch，总开关）
+  enableGroupChat: boolean;       // [v0.0.270] 群聊可见性（true=注入 SquadChat + UI 入口可见；false=两者隐藏；存量无字段回显 ?? true=开）
   timezone?: string;              // [v0.0.33.4] IANA tz（如 "Asia/Shanghai"），activeWindows + daily 回血窗口都跟它；缺省 user local
   heartbeatConfig: {              // [v0.0.116] squad 级统一心跳配置（null=未配=默认 interval=15/全天/all）
     interval: number;             // 5|15|30|60，默认 15
@@ -146,16 +149,19 @@ interface Charter {
 
 | 方法 | 路径 | 语义 | 请求体 | 成功响应 |
 |------|------|------|--------|---------|
-| `PATCH` | `/squad/:id` | 改 name/description/modelDefault；`[v0.0.33.4]` **enableHeartBeat / budget / timezone 真生效**（写后 `scheduler.reloadSquad()`） | `PatchSquadBody` | `200` + `SquadDetail`（必含 enableHeartBeat / budget / timezone 三字段回显） |
+| `PATCH` | `/squad/:id` | 改 name/description/modelDefault；`[v0.0.33.4]` **enableHeartBeat / budget / timezone 真生效**（写后 `scheduler.reloadSquad()`）；`[v0.0.270]` **enableGroupChat**（群聊可见性） | `PatchSquadBody` | `200` + `SquadDetail`（必含 enableHeartBeat / budget / timezone / enableGroupChat 字段回显） |
 
 ```typescript
 interface PatchSquadBody {
   name?: string;
   description?: string;
   modelDefault?: string;
+  // [v0.0.279] 团队默认推理强度（canonical 语义键 4 档）。undefined=不修改；显式 'default' 也落盘（不清空，与 enableGroupChat 模式对称）；非法值 → 400（字段级，先于 404）
+  effortDefault?: 'default' | 'low' | 'high' | 'max';
   // [v0.0.158] summaryModelDefault + summaryModelDefaultProviderId 两字段已整删（兼容层：旧 client 传字段被静默忽略，不返 400 / 不落库）
   // [v0.0.33.4] 以下字段本版生效（v0.0.33.1 仅占位存）：
   enableHeartBeat?: boolean;        // killswitch，toggle 后 ≤1s 生效（scheduler 每 tick 轮询）
+  enableGroupChat?: boolean;        // [v0.0.270] 群聊可见性：false=隐藏（agents 注入 SquadChat + UI 入口 + send_message('squadchat') 门控）；true/缺省=开。undefined=不修改（对齐 enableHeartBeat 模式）
   budget?: { limit: number; window: "daily"; scope: "team" } | null;  // [v0.0.116] null=off=不限量；非null=on=限量（limit token/天）
   timezone?: string;                // IANA tz，默认 user local；activeWindows + daily 回血都跟它
   // [v0.0.116] squad 级统一心跳配置（替代废弃的 PATCH /member/:mid/heartbeat）：
@@ -173,9 +179,9 @@ interface PatchSquadBody {
 - 写 `timezone` → activeWindow 判定 + daily 窗口分桶即时切新 tz。
 - 三字段均触发 `scheduler.reloadSquad()`（主要刷 budget/timezone 缓存；killswitch 本就每 tick 轮询）。
 - **[v0.0.116] 写 `heartbeatConfig`** → `scheduler.reloadSquad()` 重建 squad heartbeat job（新 interval/activeWindows/scope/tz 实时生效；取代废弃的 `PATCH /member/:mid/heartbeat` + reloadRole）。
-- **SquadDetail 完整回显**：响应必含 `enableHeartBeat` / `budget`（含 null 未配）/ `timezone` / **`heartbeatConfig`（含 null）** 字段（GET /squad/:id 同样回显），前端据此回显 UI 状态。
+- **SquadDetail 完整回显**：响应必含 `enableHeartBeat` / `budget`（含 null 未配）/ `timezone` / **`heartbeatConfig`（含 null）** / **[v0.0.270] `enableGroupChat`** / **[v0.0.279] `effortDefault`** 字段（GET /squad/:id 同样回显），前端据此回显 UI 状态。**[v0.0.270] enableGroupChat 回显 `?? true` 兜底**（存量 squad 无字段=开，与 reachable 注入 `!== false` 语义一致）；`!== undefined` 才 patch（不误改旧 squad 其他字段）。**[v0.0.279] effortDefault 回显 `?? 'default'` 兜底**（存量 squad 无字段=厂商默认档）；`!== undefined` 才 patch，显式 `'default'` 也落盘（不清空，与 enableGroupChat 模式对称）。
 
-**错误**：`400` body 非法 / timezone 非 IANA / budget.limit<0 / **[v0.0.116] heartbeatConfig.activeWindows 段间重叠 或 单段 start>=end（跨0点）或格式错 / interval 非 5\|15\|30\|60 / scope.mode 非法**；`404` squad 不存在。
+**错误**：`400` body 非法 / timezone 非 IANA / budget.limit<0 / **[v0.0.116] heartbeatConfig.activeWindows 段间重叠 或 单段 start>=end（跨0点）或格式错 / interval 非 5\|15\|30\|60 / scope.mode 非法** / **[v0.0.279] effortDefault 非 'default'\|'low'\|'high'\|'max'（字段级校验，先于 404）**；`404` squad 不存在。
 
 ### 1.5 `DELETE /squad/:id` — team 硬删除（解散，`[v0.0.111]` 新增；`[v0.0.192.delete_cleanup]` 保留工作产出 + 级联删子孙）
 

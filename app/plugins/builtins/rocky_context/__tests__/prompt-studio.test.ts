@@ -8,13 +8,15 @@
  *   - charter/tasks mapper 已迁 reminder provider（不再作为 system_prompt_mapper）→ 本文件移除其旧 mapper 测试
  *   - identity studio 三 scope（leader/mate/squad）返空（squad_role mapper 接管身份正文）
  *   - subagent 不变（继续读 config.systemPrompt）；standalone 不变（Rocky）
- *   - team_roster/parent_task/reachable_agents mapper 行为不变
+ *   - team_roster/parent_task mapper 行为不变
+ * [v0.0.273] reachable_agents 测试迁移：旧 provider 被 squad_agents_status 取代（统一全员状态块），
+ *   本文件删除 reachable_agents 断言（分派/门控/benched/subagent 场景由
+ *   reminder/__tests__/squad-agents-status-provider.test.ts 覆盖，数据源 squadContext）。
  */
 import { describe, it, expect } from 'vitest';
 import IdentityMapper from '../prompt/identity';
 import TeamRosterMapper from '../prompt/team_roster';
 import ParentTaskMapper from '../prompt/parent_task';
-import ReachableAgentsReminderProvider from '../prompt/reachable_agents';
 
 /**
  * mock 自动从 sessionType 推导 config.kind（readSessionType → readSessionKind 已切到读 config.kind）。
@@ -284,128 +286,11 @@ describe('v0.0.33.2 subagent identity 接通（D9 修路径）', () => {
   });
 });
 
-// ============================================================
-// 4. reachable_agents reminder（4 scope 拓扑 + user 永不在）
-// ============================================================
-describe('v0.0.33.2 reachable_agents reminder（a2a §3 派生表）', () => {
-  it('standalone（!sessionType）→ []（无 a2a 对端）', () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(mkCtx());
-    expect(out).toEqual([]);
-  });
-
-  // [BUG-004] playground kind.role='rocky'（非省略 kind）行为回归不变：仍 []（正向匹配调用方不受影响）
-  it("playground（kind.role='rocky'）→ []（同 standalone，回归不变）", () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'rocky' }),
-    );
-    expect(out).toEqual([]);
-  });
-
-  it('squad → [leader, ...all mates]（群聊路由对端，不含 squadchat=self）', () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'squad', studioContext: mkStudioCtx() }),
-    );
-    expect(out).toHaveLength(1);
-    const content = out[0]!.content;
-    expect(content).toContain('alice'); // leader
-    expect(content).toContain('bob'); // mate
-    expect(content).toContain('carol'); // mate
-    expect(content).toContain('01SL'); // leader sessionId
-    // squad 自身即 squadchat，不在自己列表里
-    expect(content).not.toContain(SQUADCHAT_SID);
-  });
-
-  it('leader → [squadchat, ...mates]（不含 leader 自己）', () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'leader', memberId: LEADER.id, studioContext: mkStudioCtx(LEADER.id) }),
-    );
-    expect(out).toHaveLength(1);
-    const content = out[0]!.content;
-    expect(content).toContain(SQUADCHAT_SID); // squadchat 可达
-    expect(content).toContain('bob'); // mate 可达
-    expect(content).toContain('carol'); // mate 可达
-    // leader 不含自己
-    expect(content).not.toContain('01SL');
-  });
-
-  it('mate → [squadchat, leader, ...peers]（不含 mate 自己）', () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'mate', memberId: MATE_A.id, studioContext: mkStudioCtx(MATE_A.id) }),
-    );
-    expect(out).toHaveLength(1);
-    const content = out[0]!.content;
-    expect(content).toContain(SQUADCHAT_SID); // squadchat
-    expect(content).toContain('alice'); // leader
-    expect(content).toContain('carol'); // peer mate (bob 自己排除)
-    // bob（self）不在自己的 reachable 列表
-    expect(content).not.toContain('01SA');
-  });
-
-  it('subagent → [parent]（拓扑硬约束仅 parent）', () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({
-        sessionType: 'subagent',
-        agentToolContext: {
-          parentSessionId: '01PARENT',
-          parent: { type: 'mate', sessionId: '01PARENT', name: 'bob' },
-        },
-      }),
-    );
-    expect(out).toHaveLength(1);
-    expect(out[0]!.content).toContain('01PARENT');
-  });
-
-  it('subagent 仅 parentSessionId（无 canonical parent ref）→ [parent]', () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({
-        sessionType: 'subagent',
-        agentToolContext: { parentSessionId: '01P2' },
-      }),
-    );
-    expect(out).toHaveLength(1);
-    expect(out[0]!.content).toContain('01P2');
-  });
-
-  it('硬约束：user 永不在任何 reachable_agents 列表（4 scope 全验）', () => {
-    const types: Array<{ type: string; memberId?: string; studio: boolean }> = [
-      { type: 'squad', studio: true },
-      { type: 'leader', memberId: LEADER.id, studio: true },
-      { type: 'mate', memberId: MATE_A.id, studio: true },
-    ];
-    for (const t of types) {
-      const ctx = mkCtx({
-        sessionType: t.type,
-        ...(t.memberId ? { memberId: t.memberId } : {}),
-        ...(t.studio ? { studioContext: mkStudioCtx(t.memberId) } : {}),
-      });
-      const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(ctx);
-      if (out.length === 0) continue;
-      // reminder 正文绝不出现 "user" 作为对端 type
-      expect(out[0]!.content).not.toMatch(/\(user,/i);
-      expect(out[0]!.content).not.toMatch(/send_message.*user/is);
-    }
-    // subagent 同理
-    const subOut = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({
-        sessionType: 'subagent',
-        agentToolContext: { parentSessionId: '01P' },
-      }),
-    );
-    expect(subOut[0]!.content).not.toMatch(/\(user,/i);
-  });
-
-  it('squad sessionType 但无 studioContext（数据未注入）→ []（graceful）', () => {
-    const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'squad' }),
-    );
-    expect(out).toEqual([]);
-  });
-});
 
 // ============================================================
 // 5. bench 过滤（认知/协作层只看 deployed；判据 state !== 'benched'，state 缺失按 deployed 兼容）
 // ============================================================
-describe('bench 过滤（team_roster + reachable_agents 只看 deployed）', () => {
+describe('bench 过滤（team_roster 只看 deployed）', () => {
   const BENCHED = mkMember({ id: 'mem-d', name: 'dave', role: 'mate', sessionId: '01SD', state: 'benched' });
   const MEMBERS_WITH_BENCH = [...ALL_MEMBERS, BENCHED];
 
@@ -429,33 +314,12 @@ describe('bench 过滤（team_roster + reachable_agents 只看 deployed）', () 
     expect(out).toEqual([]);
   });
 
-  it('reachable_agents：squad/leader/mate 三分支均不含 benched 对端', () => {
-    const studio = { ...mkStudioCtx(), members: MEMBERS_WITH_BENCH };
-    const cases: Array<Record<string, unknown>> = [
-      { sessionType: 'squad', studioContext: studio },
-      { sessionType: 'leader', memberId: LEADER.id, studioContext: { ...studio, member: LEADER } },
-      { sessionType: 'mate', memberId: MATE_A.id, studioContext: { ...studio, member: MATE_A } },
-    ];
-    for (const c of cases) {
-      const out = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(mkCtx(c));
-      expect(out).toHaveLength(1);
-      const content = out[0]!.content;
-      expect(content).not.toContain('dave');
-      expect(content).not.toContain('01SD');
-    }
-  });
-
   it('state 缺失的成员按 deployed 对待仍可见（兼容旧数据）', () => {
-    // ALL_MEMBERS 均无 state 字段 → roster 与 reachable 均照常渲染
+    // ALL_MEMBERS 均无 state 字段 → roster 照常渲染（reachable 语义已迁 squad_agents_status）
     const roster = new TeamRosterMapper('team_roster', {}).map(
       mkCtx({ sessionType: 'leader', studioContext: mkStudioCtx(LEADER.id) }),
     );
     expect(roster[0]!.content).toContain('bob');
-    const reachable = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'squad', studioContext: mkStudioCtx() }),
-    );
-    expect(reachable[0]!.content).toContain('bob');
-    expect(reachable[0]!.content).toContain('carol');
   });
 
   it('全 deployed（显式 state）输出与无 state 现状逐字节一致（回归）', () => {
@@ -467,12 +331,5 @@ describe('bench 过滤（team_roster + reachable_agents 只看 deployed）', () 
       mkCtx({ sessionType: 'leader', studioContext: mkStudioCtx(LEADER.id) }),
     );
     expect(rosterNew[0]!.content).toBe(rosterOld[0]!.content);
-    const reachNew = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'mate', memberId: MATE_A.id, studioContext: { ...mkStudioCtx(MATE_A.id), members: deployedMembers } }),
-    );
-    const reachOld = new ReachableAgentsReminderProvider('reachable_agents', {}).provide(
-      mkCtx({ sessionType: 'mate', memberId: MATE_A.id, studioContext: mkStudioCtx(MATE_A.id) }),
-    );
-    expect(reachNew[0]!.content).toBe(reachOld[0]!.content);
   });
 });

@@ -10,14 +10,19 @@
  * hasMore：顶部 hidden sentinel + onScroll 触发 loadMore；副作用抽到 useMessageScrollPagination hook。
  * 消息 bubble 后追加 <MsgTime/>（三页共享，独立 primitive，见 component-msg-time.tsx）。
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ContentBlock, FlattenedView, LoadingPhase, Message, RunFinish, RunRetryStatus, ViewElement } from './types';
+import type { ContentBlock, FlattenedView, LoadingPhase, Message, RunFinish, RunRetryStatus } from './types';
 import { flattenAndGroup } from './message-flatten';
+import { buildRenderRows } from './build-render-rows';
 import { ComponentToolBatch } from './component-tool-batch';
+import { ScrollGuideBubble } from './component-scroll-guide-bubble';
 import { PrimitiveBubble } from '../common/primitive-bubble';
 import { PrimitiveMarkdownView } from '../common/primitive-markdown-view';
+// [v0.0.295] a2a 消息信封折叠渲染
+import { isA2aInbox } from './chat-actor-strategy';
+import { ComponentA2aEnvelope } from './component-a2a-envelope';
 import { ComponentRunFinish } from './component-run-finish';
 import { MentionRender } from './component-mention-render';
 import { ComponentLoadingStatus } from './component-loading-status';
@@ -82,12 +87,6 @@ interface MessageStreamProps {
   isLoadingMore?: boolean;
 }
 
-/** 渲染单元；user-text.name=[v0.0.107] IM 渠道来源徽标（非 client type，如 'feishu'；client/无 channel=undefined 不渲染） */
-type RenderRow =
-  | { type: 'user-text'; key: string; messageId: string; text: string; name?: string }
-  | { type: 'agent-answer'; key: string; messageId: string; textIndex: number; text: string }
-  | { type: 'tool-batch'; key: string; messageId: string; calls: Extract<ViewElement, { kind: 'tool-call-item' }>[] };
-
 /**
  * 消息 → 渲染侧判定（默认判定，导出供 caller 复用，保持单一来源）。
  * a2a inbox（sender.source='agent'）→ assistant 侧（左），即便 role='user'（后端 a2a 存 role='user'）；
@@ -137,16 +136,8 @@ export function ComponentMessageStream({
       `toolCallItems=${dbgToolCallItems} batches=${batches.length}`,
   );
 
-  // batch key → 该 batch 内的 tool-call-item 组
-  const batchCallsByKey = new Map<string, Extract<ViewElement, { kind: 'tool-call-item' }>[]>();
-  for (const b of batches) {
-    const calls: Extract<ViewElement, { kind: 'tool-call-item' }>[] = [];
-    for (const ek of b.elementKeys) {
-      const e = elements.find((x) => x.key === ek);
-      if (e && e.kind === 'tool-call-item') calls.push(e);
-    }
-    batchCallsByKey.set(b.key, calls);
-  }
+  // batch key → 该 batch 内的 tool-call-item 组（rows 折叠用，见 build-render-rows.ts）
+  const rows = buildRenderRows(elements, elementBatch, batches);
 
   // messageId → Message（actor 解析 + side 判定都需要，始终构建）
   const msgById = new Map<string, Message>();
@@ -158,54 +149,38 @@ export function ComponentMessageStream({
     return resolveActor(msgById.get(messageId) ?? ({} as Message));
   };
 
-  // 把 elements 折叠为 RenderRow 序列：连续 tool-call-item 合并为一条 tool-batch row
-  const rows: RenderRow[] = [];
-  let i = 0;
-  while (i < elements.length) {
-    const el = elements[i]!;
-    if (el.kind === 'tool-call-item') {
-      const batchKey = elementBatch.get(el.key);
-      if (batchKey) {
-        const calls = batchCallsByKey.get(batchKey) ?? [];
-        rows.push({
-          type: 'tool-batch',
-          key: `row-${batchKey}`,
-          messageId: calls[0]?.messageId ?? el.messageId,
-          calls,
-        });
-        while (i < elements.length && elementBatch.get(elements[i]!.key) === batchKey) i++;
-        continue;
-      }
-      i++;
-      continue;
-    }
-    if (el.kind === 'user-text') {
-      rows.push({
-        type: 'user-text',
-        key: el.key,
-        messageId: el.messageId,
-        text: el.text,
-        name: el.name,
-      });
-    } else if (el.kind === 'agent-answer') {
-      rows.push({ type: 'agent-answer', key: el.key, messageId: el.messageId, textIndex: el.textIndex, text: el.text });
-    }
-    i++;
-  }
-
   // 滚动分页副作用抽到 useMessageScrollPagination hook
-  const { onScroll } = useMessageScrollPagination({
+  // [v0.0.262] 内容签名 = `${rows.length}:${textLenSum}`（行数 + text 长度和；tool-batch 无 text 跳过）。
+  //   流式 text_block_delta 更新同一条消息内容时 rows.length 不变但 text 长度变 → 签名变 → autoScroll effect 触发滚底
+  //   （跟丢修复核心：旧依赖 rows.length 单维度，delta 只更新内容不增行 → effect 不触发）。
+  //   useMemo 依赖 rows（change_plan 行 3 契约：contentSignature 为纯计算，基于已构建 rows）。
+  const contentSignature = useMemo(() => {
+    let textLenSum = 0;
+    for (const row of rows) {
+      // tool-batch 行无 text（calls 数组），跳过
+      if (row.type !== 'tool-batch') textLenSum += row.text.length;
+    }
+    return `${rows.length}:${textLenSum}`;
+  }, [rows]);
+  const { onScroll, nearBottom, scrollToBottom, markUserInteract } = useMessageScrollPagination({
     scrollRef, hasMore, isLoadingMore, onLoadMore,
     messagesLength: messages.length,
-    autoScrollDeps: [rows.length, lastRunFinish, runActive],
+    autoScrollDeps: [contentSignature, lastRunFinish, runActive],
   });
 
 
   return (
     <ChatLinkHandlerProvider value={{ onLocalViewer: setChatLinkTarget, sessionId }}>
+      {/* [v0.0.262] relative wrapper：为 absolute 气泡提供定位上下文（scroll 容器内部不能挂——
+          absolute 随内容滚动）；scroll div className 原样保留（布局稳定性），气泡不占文档流 */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
       <div
         ref={scrollRef}
         onScroll={onScroll}
+        onWheel={markUserInteract}
+        onTouchMove={markUserInteract}
+        onKeyDown={markUserInteract}
+        tabIndex={0}
         className="flex-1 overflow-y-auto py-6 pl-8 pr-[80px] pb-[60px] flex flex-col gap-7"
       >
       <div className="max-w-[820px] mx-auto w-full flex flex-col gap-7">
@@ -261,13 +236,18 @@ export function ComponentMessageStream({
               {actor ? actor.avatar : <DefaultAgentAvatar messageId={row.messageId} />}
               <div className="flex-1 min-w-0 flex flex-col items-start gap-1.5 pt-0.5">
                 {/* a2a 角色名前缀行（群聊：actor.showNameAsPrefix 时渲染） */}
-                {actor?.showNameAsPrefix && actor.name && (
+                {actor?.showNameAsPrefix && actor.name && !isA2aInbox(msg as Message) && (
                   <div className="font-mono text-[11px] text-accent">
                     {actor.name}:
                   </div>
                 )}
                 {isToolBatch ? (
                   <ComponentToolBatch calls={row.calls} runActive={runActive} />
+                ) : isA2aInbox(msg as Message) ? (
+                  /* [v0.0.295] a2a 消息用信封折叠组件，替代普通 assistant 气泡 */
+                  <ComponentA2aEnvelope senderName={actor?.name ?? ''}>
+                    {text}
+                  </ComponentA2aEnvelope>
                 ) : (
                   <PrimitiveBubble variant="assistant">
                     <PrimitiveMarkdownView source={text} />
@@ -293,6 +273,15 @@ export function ComponentMessageStream({
         {!sessionRunning && lastRunFinish && <ComponentRunFinish finish={lastRunFinish} />}
         <ComponentChatLinkViewer target={chatLinkTarget} sessionId={sessionId} onClose={() => setChatLinkTarget(null)} />
       </div></div>
+      {/* [v0.0.262] 滚动引导气泡：用户不在底部时显示（新消息/回到底部），点击平滑滚底。
+          absolute 定位不占文档流（wrapper 提供定位上下文）；nearBottom/scrollToBottom 来自 hook（行 1/2 扩展） */}
+      <ScrollGuideBubble
+        nearBottom={nearBottom}
+        runActive={runActive}
+        hasMessages={messages.length > 0}
+        onScrollToBottom={() => scrollToBottom('smooth')}
+      />
+      </div>
     </ChatLinkHandlerProvider>
   );
 }

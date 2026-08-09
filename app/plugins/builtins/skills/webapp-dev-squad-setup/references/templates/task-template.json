@@ -1,0 +1,25 @@
+{
+  "version": "v0.0",
+  "description": "",
+  "tasks": [
+    {
+      "id": 1,
+      "category": "infrastructure | feature | bugfix | test | refactor | documentation",
+      "title": "",
+      "description": "",
+      "coversModules": [],
+      "coversFiles": [],
+      "coversMethods": [],
+      "priority": "high | medium | low",
+      "estimatedComplexity": "low | medium | high",
+      "dependencies": [],
+      "acceptanceCriteria": [],
+      "status": "pending | coding | code_review | verifying | verified",
+      "assignedTo": null,
+      "codeReview": null,
+      "codingCompletedAt": null,
+      "reviewPassedAt": null,
+      "verifiedAt": null
+    }
+  ]
+}

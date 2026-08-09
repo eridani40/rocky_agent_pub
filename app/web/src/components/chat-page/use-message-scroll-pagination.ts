@@ -8,7 +8,9 @@
  *   prepend 保持位置 / sticky-bottom 门控。
  *
  * Invariants（MUST NOT 破坏）：
- *   ① 自动滚底只在「新消息/run 状态变化」触发；loadMore 前插绝不触发滚底（isLoadingMore=true 跳过）。
+ *   ① 自动滚底只在「消息内容变化/run 状态变化」触发（v0.0.262 起触发语义 = 内容变化：
+ *     deps 由 caller 传内容签名 `${rows.length}:${textLenSum}`，流式 delta 更新同一条消息内容
+ *     时 rows.length 不变也能触发）；loadMore 前插绝不触发滚底（isLoadingMore=true 跳过）。
  *   ② loadMore 完成后下一帧也跳过一次自动滚底（防 setMessages 后又滚回底）。
  *   ③ prepend 后视觉保持原顶部条目位置：prevHeight = scrollHeight - scrollTop 技巧
  *     （useLayoutEffect 在 DOM paint 前捕获 + 恢复，无视觉跳屏）。
@@ -17,7 +19,7 @@
  *   ⑤ [v0.0.129] onScroll 始终挂载（不管 hasMore）：内部同时做 near-bottom 追踪（始终）+
  *     loadMore 触发（仅 hasMore && scrollTop<threshold）。component-message-stream 无需条件挂载。
  */
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /** onScroll threshold——scrollTop < 120px 触发 loadMore（边界缓冲，禁裸 scrollTop===0） */
 export const LOAD_MORE_THRESHOLD = 120;
@@ -27,6 +29,11 @@ export const LOAD_MORE_THRESHOLD = 120;
  * LOAD_MORE_THRESHOLD=120；选 120 与 loadMore 对称，给上下边界同等缓冲。
  */
 export const NEAR_BOTTOM_THRESHOLD = 120;
+/**
+ * [v0.0.287] 用户操作时效窗口毫秒数。用户交互（wheel/touchmove/keydown）后
+ * 此窗口内 onScroll 正常更新 nearBottom；窗口外跳过（内容撑高不算用户操作）。
+ */
+export const USER_INTERACT_WINDOW_MS = 300;
 
 interface PaginationOpts {
   /** 滚动容器 ref（caller 传入） */
@@ -39,7 +46,9 @@ interface PaginationOpts {
   onLoadMore: (() => void) | undefined;
   /** caller 传 messages.length——prepend 时变化触发 restore effect */
   messagesLength: number;
-  /** caller 传 [rows.length, lastRunFinish, runActive]——自动滚底 effect 依赖 */
+  /** [v0.0.262] caller 传 [内容签名, lastRunFinish, runActive]——自动滚底 effect 依赖。
+   *   内容签名 = `${rows.length}:${textLenSum}`（含行数维度，替代旧 rows.length 单维度，
+   *   流式 delta 更新同一条消息内容时 rows.length 不变也能触发） */
   autoScrollDeps: unknown[];
 }
 
@@ -51,6 +60,12 @@ interface PaginationOpts {
  */
 export function useMessageScrollPagination(opts: PaginationOpts): {
   onScroll: () => void;
+  /** [v0.0.262] 是否在底部附近（引导气泡消费）。初始 true；onScroll 值去重更新 */
+  nearBottom: boolean;
+  /** [v0.0.262] 编程滚底（气泡点击用）。el.scrollTo({ top: scrollHeight, behavior }) + 同步 nearBottom=true */
+  scrollToBottom: (behavior?: 'auto' | 'smooth') => void;
+  /** [v0.0.287] 标记用户交互（wheel/touchmove/keydown → 开时效窗口，onScroll 据此区分用户/非用户 scroll） */
+  markUserInteract: () => void;
 } {
   const { scrollRef, hasMore, isLoadingMore, onLoadMore, messagesLength, autoScrollDeps } = opts;
   // prepend 位置保持：loadMore 进入时捕获 prevHeight，messages 变化后恢复 scrollTop
@@ -58,8 +73,15 @@ export function useMessageScrollPagination(opts: PaginationOpts): {
   // 跳过 loadMore 完成后下一帧的自动滚底（防 setMessages 后又滚回底）
   const wasLoadingMoreRef = useRef(false);
   // [v0.0.129] sticky-bottom 门控：用户是否在底部附近。onScroll 里实时更新；初始 true
-  // （新会话首次挂载时视作用户在底部，第一条消息到达即滚到底）。
   const nearBottomRef = useRef(true);
+  // [v0.0.262] nearBottom 暴露为 React state（引导气泡消费）。初始 true 保持「新会话首条消息即滚底」
+  const [nearBottom, setNearBottom] = useState(true);
+  // [v0.0.262] autoScroll rAF 合并句柄
+  const rafRef = useRef<number | null>(null);
+  // [v0.0.287] 程序滚动标记位：编程设 scrollTop 前置 true，onScroll 检测到则跳过 nearBottom 更新（防误判）
+  const programmaticScrollRef = useRef(false);
+  // [v0.0.287] 用户操作时效截止时间戳（performance.now() 基准）。初始 0=过期态=无窗口
+  const userInteractDeadlineRef = useRef(0);
 
   // capture：isLoadingMore false→true 那帧 paint 前记 prevHeight = scrollHeight - scrollTop
   useLayoutEffect(() => {
@@ -70,29 +92,51 @@ export function useMessageScrollPagination(opts: PaginationOpts): {
   }, [isLoadingMore, scrollRef]);
 
   // restore：messagesLength 变化且 prevHeight !== null 时设 scrollTop（视觉保持原顶部条目位置）
+  // [v0.0.287] 编程设 scrollTop 前置标记位，防 prepend restore 的 scroll 事件误判 nearBottom
   useLayoutEffect(() => {
     if (prevHeightForPrependRef.current !== null && scrollRef.current) {
+      programmaticScrollRef.current = true;
       scrollRef.current.scrollTop =
         scrollRef.current.scrollHeight - prevHeightForPrependRef.current;
+      queueMicrotask(() => { programmaticScrollRef.current = false; });
     }
   }, [messagesLength, scrollRef]);
 
-  // 自动滚底：messages/lastRunFinish/runActive 变化时 scrollTop = scrollHeight。
+  // 自动滚底：消息内容/run 状态变化时滚到底。
   // 跳过：loadMore 期间（isLoadingMore）+ 完成后下一帧（wasLoadingMoreRef 防滚回底）。
   // [v0.0.129] sticky-bottom 门控：仅当 nearBottomRef.current=true（用户在底部附近）才滚。
   //   读的是「上一刻用户位置」——新内容长高前 scroll 事件已把当前位置记入 ref，
   //   即使用户本来在底部、新内容长高后 (scrollHeight - scrollTop - clientHeight) 暂时 > 阈值，
   //   ref 仍为 true，effect 仍滚到底。
+  // [v0.0.262] rAF 合并：cancel + requestAnimationFrame（每帧最多一次滚底，流式 delta 逐帧防抖）；
+  //   cleanup cancel 未执行的 rAF（组件卸载/依赖再变时不留悬空回调）。
   useEffect(() => {
     if (isLoadingMore || wasLoadingMoreRef.current) {
       wasLoadingMoreRef.current = isLoadingMore;
       return;
     }
+    // [v0.0.287] 用户滚动过程中 + 停止后 USER_INTERACT_WINDOW_MS(300ms) 内 → skip autoScroll
+    //   防止流式内容更新触发 autoScroll 和用户滚动抢
+    if (performance.now() < userInteractDeadlineRef.current) return;
     if (nearBottomRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      // 编程设 scrollTop 不触发 scroll 事件——显式置 true 保持 sticky（滚到底后自然在底部附近）。
-      nearBottomRef.current = true;
+      const el = scrollRef.current;
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        // [v0.0.287] 编程设 scrollTop 会异步触发 scroll 事件——前置标记位防 onScroll 误判 nearBottom，
+        //   queueMicrotask 异步清标记（scroll 事件在当前宏任务后、微任务前派发，microtask 保证 handler 看到标记后清）。
+        programmaticScrollRef.current = true;
+        el.scrollTop = el.scrollHeight;
+        nearBottomRef.current = true;
+        queueMicrotask(() => { programmaticScrollRef.current = false; });
+        rafRef.current = null;
+      });
     }
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...autoScrollDeps, isLoadingMore, scrollRef]);
 
@@ -101,19 +145,56 @@ export function useMessageScrollPagination(opts: PaginationOpts): {
     if (!isLoadingMore) prevHeightForPrependRef.current = null;
   }, [isLoadingMore]);
 
-  // [v0.0.129] onScroll 始终挂载：同时处理 near-bottom 追踪（始终）+ loadMore 触发（仅 hasMore）。
-  //   caller 把它直接挂到 onScroll 即可，无需条件判断。
+  // [v0.0.287] onScroll 四状态决策：
+  //   ① programmaticScrollRef=true → 程序滚动（autoScroll/scrollToBottom/prepend）→ 跳过 nearBottom 更新
+  //   ② performance.now() < userInteractDeadlineRef → 用户操作窗口内 → 正常更新 nearBottom（空间判定）
+  //   ③ 窗口外 → 内容撑高等非用户操作 → 跳过 nearBottom 更新（防误判 false → sticky 失效）
+  //   loadMore 检查始终执行（invariant ⑤）。
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    // near-bottom 追踪（始终更新——hasMore=false 时也要工作，sticky-bottom 不依赖分页）
-    nearBottomRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_THRESHOLD;
+    // ① 程序滚动 → 跳过 nearBottom 更新（标记位由 queueMicrotask 异步清）
+    if (programmaticScrollRef.current) {
+      // 仍做 loadMore 检查（invariant ⑤ 保留——loadMore 不受标记位影响）
+      if (hasMore && !isLoadingMore && onLoadMore && el.scrollTop < LOAD_MORE_THRESHOLD) {
+        onLoadMore();
+      }
+      return;
+    }
+    // ② 用户操作窗口内 → 正常更新 nearBottom（空间判定）
+    if (performance.now() < userInteractDeadlineRef.current) {
+      const nextNearBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_THRESHOLD;
+      nearBottomRef.current = nextNearBottom;
+      setNearBottom(nextNearBottom);
+    }
+    // ③ 窗口外 → 非用户操作（内容撑高等）→ 不更新 nearBottom（nearBottomRef 保持 true = 追赶）
     // loadMore 触发（仅 hasMore 时；保留原有重入守卫）
     if (hasMore && !isLoadingMore && onLoadMore && el.scrollTop < LOAD_MORE_THRESHOLD) {
       onLoadMore();
     }
   };
 
-  return { onScroll };
+  // [v0.0.262] 编程滚底（引导气泡点击用）：el.scrollTo({ top: scrollHeight, behavior })。
+  //   同步 nearBottomRef/setNearBottom(true)——点击滚底后气泡即时消失。
+  // [v0.0.287] 前置标记位防 scroll 事件误判 + 重置 userInteractDeadlineRef=0（D4 恢复吸底：
+  //   重置后不在用户窗口内→nearBottom 不被后续 scroll 篡改→吸底持续）。
+  const scrollToBottom = useCallback((behavior: 'auto' | 'smooth' = 'auto') => {
+    const el = scrollRef.current;
+    if (!el) return;
+    programmaticScrollRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    nearBottomRef.current = true;
+    setNearBottom(true);
+    userInteractDeadlineRef.current = 0;
+    queueMicrotask(() => { programmaticScrollRef.current = false; });
+  }, [scrollRef]);
+
+  // [v0.0.287] 标记用户交互（message-stream 挂 wheel/touchmove/keydown → 调此方法）。
+  //   设时效窗口 deadline——onScroll 在窗口内正常更新 nearBottom（用户上翻→false→门控不追）。
+  const markUserInteract = useCallback(() => {
+    userInteractDeadlineRef.current = performance.now() + USER_INTERACT_WINDOW_MS;
+  }, []);
+
+  return { onScroll, nearBottom, scrollToBottom, markUserInteract };
 }

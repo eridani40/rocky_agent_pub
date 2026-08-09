@@ -11,6 +11,9 @@ import {
   getFileFormat,
   getCategory,
   isBuiltinEditable,
+  isImagePath,
+  isRemoteLinkPath,
+  looksBinary,
   type FileFormat,
   type FileFormatCategory,
 } from '../../file-format';
@@ -147,4 +150,52 @@ describe('isBuiltinEditable — 与 getFileFormat 一致', () => {
       expect(isBuiltinEditable(p)).toBe(false);
     });
   }
+});
+
+describe('isRemoteLinkPath — .url 远程链接判定（v0.0.263）', () => {
+  const remote = ['link.url', 'shortcut.URL', 'dir/sub/link.url', 'a.Url'];
+  for (const p of remote) {
+    it(`isRemoteLinkPath('${p}') === true`, () => {
+      expect(isRemoteLinkPath(p)).toBe(true);
+    });
+  }
+  const local = ['a.md', 'a.py', 'a.txt', 'Makefile', 'a.url.txt', ''];
+  for (const p of local) {
+    it(`isRemoteLinkPath('${p}') === false`, () => {
+      expect(isRemoteLinkPath(p)).toBe(false);
+    });
+  }
+});
+
+describe('isImagePath — image 6 格式判定（v0.0.269）', () => {
+  const images = ['a.png', 'a.jpg', 'a.jpeg', 'a.gif', 'a.webp', 'a.svg', 'dir/sub/logo.PNG', 'photo.JpEg'];
+  for (const p of images) {
+    it(`isImagePath('${p}') === true`, () => {
+      expect(isImagePath(p)).toBe(true);
+    });
+  }
+  const non = ['a.txt', 'a.png.txt', 'a.zip', 'a.bmp', 'a.tiff', 'a.ico', 'Makefile', 'a.md', '.env', ''];
+  for (const p of non) {
+    it(`isImagePath('${p}') === false`, () => {
+      expect(isImagePath(p)).toBe(false);
+    });
+  }
+});
+
+describe('looksBinary — 二进制内容判定（v0.0.263）', () => {
+  it('纯文本 → false', () => {
+    expect(looksBinary('hello world')).toBe(false);
+    expect(looksBinary('')).toBe(false);
+  });
+  it('含 NUL（\\u0000）占比 >5% → true（二进制）', () => {
+    // 20 字符中 2 个 NUL = 10% > 5%
+    expect(looksBinary('a\u0000b\u0000' + 'x'.repeat(16))).toBe(true);
+  });
+  it('少量替换符（≤5%）→ false（文本容忍）', () => {
+    // 100 字符中 1 个 \uFFFD = 1% ≤ 5%
+    expect(looksBinary('a\uFFFD' + 'x'.repeat(98))).toBe(false);
+  });
+  it('大量替换符（>5%）→ true（二进制/乱码）', () => {
+    expect(looksBinary('\uFFFD'.repeat(3) + 'x'.repeat(40))).toBe(true);
+  });
 });

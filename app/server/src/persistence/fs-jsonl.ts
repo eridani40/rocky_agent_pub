@@ -22,6 +22,13 @@ import { jsonlSegmentFile } from './fs-paths';
 /** 段文件内一条记录 = 一行 JSON */
 type Row = Record<string, unknown>;
 
+/**
+ * 模块级尾段缓存（D6）：热路径连续追加时零读文件。
+ * key = dir（entity 段目录），value = { segName, count, maxId }。
+ * 无持久化——进程级内存，重启自动冷填充（安全回退到读文件）。
+ */
+const tailCache = new Map<string, { segName: string; count: number; maxId: string }>();
+
 /** 读单个段文件全部行（按行 JSON.parse）；文件不存在返回 undefined */
 function readSegment(segPath: string): Row[] | undefined {
   let raw: string;
@@ -47,6 +54,14 @@ function readRaw(p: string): string {
 function writeSegment(segPath: string, rows: Row[]): void {
   const body = rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length > 0 ? '\n' : '');
   atomicWriteSync(segPath, body);
+}
+
+/**
+ * 追加一行到段文件末尾（纯 append，不读旧内容不重写）。
+ * 段文件格式不变：每行一条 JSON + 末尾换行。
+ */
+function appendSegmentLine(segPath: string, row: Row): void {
+  fs.appendFileSync(segPath, JSON.stringify(row) + '\n');
 }
 
 /** 段目录 */
@@ -91,8 +106,28 @@ export function jsonlPut(dir: string, id: string, stored: Row, maxCount: number)
   // 无段 → 新建首段（段名=id）
   if (segNames.length === 0) {
     writeSegment(segPath(dir, id), [stored]);
+    tailCache.set(dir, { segName: id, count: 1, maxId: id });
     return;
   }
+
+  // ── 热路径：tailCache 命中 → 零读文件直接 append ──
+  const cached = tailCache.get(dir);
+  if (cached && id > cached.maxId) {
+    const tailPath = segPath(dir, cached.segName);
+    if (cached.count < maxCount) {
+      // 尾段未满 → 纯 append 一行
+      appendSegmentLine(tailPath, stored);
+      cached.count++;
+      cached.maxId = id;
+    } else {
+      // 尾段满 → 新开一段（段名=id）
+      writeSegment(segPath(dir, id), [stored]);
+      tailCache.set(dir, { segName: id, count: 1, maxId: id });
+    }
+    return;
+  }
+
+  // ── 冷路径：cache miss 或乱序回填 → 走原逻辑 ──
 
   // 最大段名（= 当前 shard 最大 id 范围段）
   const lastSeg = segNames[segNames.length - 1] ?? id;
@@ -105,12 +140,16 @@ export function jsonlPut(dir: string, id: string, stored: Row, maxCount: number)
 
   if (id > maxId) {
     // §3.4 append 尾段：尾段未满→append；满→新开一段（段名=id）
+    // 冷路径首次 miss：读一次填缓存，后续命中热路径
     if (lastRows.length < maxCount) {
-      lastRows.push(stored); // 保证按 id 有序（id>maxId）
-      writeSegment(segPath(dir, lastSeg), lastRows);
+      appendSegmentLine(segPath(dir, lastSeg), stored);
     } else {
       writeSegment(segPath(dir, id), [stored]);
     }
+    // 填充/更新 tailCache
+    const newCount = lastRows.length < maxCount ? lastRows.length + 1 : 1;
+    const newSeg = lastRows.length < maxCount ? lastSeg : id;
+    tailCache.set(dir, { segName: newSeg, count: newCount, maxId: id });
     return;
   }
 
@@ -130,6 +169,7 @@ export function jsonlPut(dir: string, id: string, stored: Row, maxCount: number)
   if (atRow && atRow.id === id) {
     rows[i] = stored; // update（覆盖）
     writeSegment(targetPath, rows);
+    tailCache.delete(dir); // 乱序回填后缓存可能不准，失效待下次冷填充
     return;
   }
   rows.splice(i, 0, stored); // 插入
@@ -142,6 +182,7 @@ export function jsonlPut(dir: string, id: string, stored: Row, maxCount: number)
   } else {
     writeSegment(targetPath, rows);
   }
+  tailCache.delete(dir); // 乱序回填后缓存可能不准，失效待下次冷填充
 }
 
 /** 从段文件读取一条记录（按 id 二分段名 + 段内行查找） */
@@ -185,6 +226,7 @@ export function jsonlDelete(dir: string, id: string): boolean {
         r2.splice(j, 1);
         if (r2.length === 0) removeFileSync(segPath(dir, sn));
         else writeSegment(segPath(dir, sn), r2);
+        tailCache.delete(dir); // 段结构已变，清缓存
         return true;
       }
     }
@@ -203,6 +245,7 @@ export function jsonlDelete(dir: string, id: string): boolean {
       writeSegment(target, rows);
     }
   }
+  tailCache.delete(dir); // 段结构已变，清缓存
   return true;
 }
 

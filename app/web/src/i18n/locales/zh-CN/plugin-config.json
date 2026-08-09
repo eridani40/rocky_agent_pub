@@ -153,9 +153,8 @@
           "workspace": { "description": "system reminder 工作区状态（当前 workspace/grep 上下文）" },
           "tool_error": { "description": "system reminder 工具错误提示（工具调用失败时的引导）" },
           "todo": { "description": "system reminder 待办清单（todo 进度跟踪提示）" },
-          "reachable_agents": { "description": "[v0.0.33.2] reachable_agents reminder（按 sessionType 派生 a2a 对端，user 永不在；volatile，保 system prompt cache）" },
+          "squad_agents_status": { "description": "[v0.0.273] squad 统一全员状态 reminder（leader/mate/squad/subagent 分派；全员列出 running/idle + presence；SquadChat 行随 enableGroupChat 门控；取代 reachable_agents + squad_team_status）" },
           "squad_workspace": { "description": "[v0.0.111] squad 团队盘 reminder（leader + mate；注入团队盘根 <dataDir>/squads/<squadId>；与个人 workspace 并存）" },
-          "squad_team_status": { "description": "[v0.0.116] squad 团队当前状态 reminder（leader only；只列 session 正在 running 的成员及其 presence 标记 currentWork；每轮直出）" },
           "squad_task": { "description": "[v0.0.240] squad 待办任务 reminder（leader 看全队活跃 / mate 看 owner∪依赖我的；task = panorama builtin entity，归档不进；每轮直出交 dedup）" },
           "threshold_should_compact": {
             "description": "[v0.0.40] compact 谓词：(totalTokens+maxOutputTokens)/tokenLimit > compactRatio(默认0.6) → true；提前压非撞墙压",

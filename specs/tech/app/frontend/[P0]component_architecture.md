@@ -136,7 +136,7 @@ app/web/src/components/
   - `blockFilter`：block 级过滤。两场景都用内核默认 `DEFAULT_BLOCK_FILTER`（全局滤 reminder，零侵入见 `specs/tech/agent/message/[P0]agent_message_interface.md §4.1`）。
   - `sideOfMessage(msg)`：左右侧判定。关键 — a2a inbox（`sender.source='agent'`）→ assistant 侧（左），即便 `role='user'`（后端 a2a 存 `role='user'`）；其余按 role。playground 无 a2a → 默认行为零回归。
   - 不传策略 hook 时全走默认（playground 零改动，视觉/行为零回归）。
-- **代码路径**：`app/web/src/components/chat-page/component-message-stream.tsx.ComponentMessageStream()`（共享内核）← `chat-page/section-chat-session.tsx`（唯一装配消费方；策略由 `chat-actor-strategy.tsx.deriveRenderStrategy(chrome)` 按 chrome.groupRender/memberId 派生——群聊=白名单+a2a actor、单聊=对端 actor+a2a→右、playground=零策略默认）；拍平 + 过滤在 `message-flatten.ts.flattenAndGroup()`。
+- **代码路径**：`app/web/src/components/chat-page/component-message-stream.tsx.ComponentMessageStream()`（共享内核）← `chat-page/section-chat-session.tsx`（唯一装配消费方；策略由 `chat-actor-strategy.tsx.deriveRenderStrategy(chrome)` 按 chrome.groupRender/memberId 派生——群聊=白名单+a2a actor、单聊=对端 actor+a2a→左（信封折叠，与群聊对齐）、playground=零策略默认）；拍平 + 过滤在 `message-flatten.ts.flattenAndGroup()`。
 - **接口签名**：`MessageStreamProps { messages, resolveActor?, messageFilter?, blockFilter?, containerTestid?, rowTestid?, senderPrefixTestid?, runActive?, sessionRunning?, lastRunFinish? }` —— 除 `messages` 外全可选（保 playground 零回归）。
 - **版本演进**：`[v0.0.39]` squad 对话 UI 重写引入策略化内核 + `common/member-avatar.tsx`（色块 + 首字母，对端 member 头像）。`[v0.0.216]` 策略接线收敛进 SectionChatSession（谓词 isUser/isA2aInbox 等迁 `chat-page/chat-actor-strategy.tsx`，逐行等价）。组件 spec 见 `specs/ui/components/chat-page/section-chat-session.md` + `studio-page/section-studio-chat.md` + `common/member-avatar.md`。
 
@@ -165,7 +165,7 @@ app/web/src/components/
   - 切 session cleanup：unsubscribe 两 topic（hook 自建实例额外 destroy）。
 - **与 store 的关系**（B 的核心——store 瘦身）：
   - **store 砍掉**：messages/hasMore/runActive/loadingPhase/lastRunFinish/sessionRunning/enqueueItems/usage/summaryTask 及 actions（applyAgentEvent/applySessionEvent/setMessages/setSessionRunning/setUsage/removeEnqueueItem/resetRunState）。
-  - **store 保留**：sessions[] 列表（setSessions/setSessionUnread/**applySessionMetaEvent 含 P1 bizType 守卫**）+ activeSessionId/setActiveSession + subagent tree（childrenByParent/activeSubId/setChildren/setActiveSubId）+ lastWorkspaceEvent/setLastWorkspaceEvent（workspace 扇出，section-workspace-panel 读）。
+  - **store 保留**：sessions[] 列表（setSessions/setSessionUnread/**applySessionMetaEvent 含 P1 bizType 守卫**）+ activeSessionId/setActiveSession + subagent tree（childrenByParent/activeSubId/setChildren/setActiveSubId）+ lastWorkspaceEvent/setLastWorkspaceEvent（workspace 扇出，section-workspace-panel 读）+ **drafts/saveDraft/clearDraft（[v0.0.267] sessionId → 输入草稿缓存，内存级无 persist；ChatComposer 经 `use-chat-draft.ts` 全 getState 读写不订阅 → 输入零 re-render）**。
 - **SSE 隔离**（对 playground 零回归）：playground 注入 page-chat 的 sharedSse（模块级单例，hook 只 sub/unsub 不 destroy）；studio 单聊省略 sseClient → hook 内部 new + connect + cleanup 时 destroy（不碰 playground sharedSse）。
 - **代码路径（历史，v0.0.94 已拆 area-hooks / v0.0.216 收敛 SectionChatSession）**：纯 reducer 仍在 `store/{chat-slice-reducer,session-slice-reducer}.ts`（由 area-hooks 调用）。
 - **subagent 只读页 transcript**：实时性由 useMessages 的 agent_loop 订阅承担（`use-subagent-run-refresh.ts` 已删——run 结束丢帧的根因在 reducer 层根治：tool_call_* 按 evt.messageId 锚定 + 缺 message 兜底建 assistant message）。
@@ -191,13 +191,13 @@ app/web/src/components/
 - **核心概念**：`component-message-stream` 加可选 `sideResolver?: (msg: Message) => 'user' | 'assistant'`——caller 可覆盖内核默认 `sideOfMessage`（左右侧判定）。**单一职责**：sideResolver 只控「左右侧」，头像/名字仍由 `resolveActor` 控制（不受 sideResolver 影响）。
 - **设计思路**（actor `side` 字段方案 vs 独立 sideResolver prop 的对比，**采纳独立 prop**）：
   - **独立 prop（采纳）**：单一职责——`resolveActor` 管头像/名字，`sideResolver` 管左右。两者解耦、可独立覆盖；不传 resolver 时全走默认（playground 零回归）。
-  - **actor.side 字段（否决）**：把「左右侧」语义塞进 actor 解析结果，与头像/名字混在一起；单聊 a2a→右需要绕开默认头像解析（仍是 member 头像）只改 side，actor.side 字段方案耦合不清。
+  - **actor.side 字段（否决）**：把「左右侧」语义塞进 actor 解析结果，与头像/名字混在一起；a2a 侧别（单聊/群聊统一左）需要绕开默认头像解析只改 side，actor.side 字段方案耦合不清。
 - **接口签名**：`MessageStreamProps` 加 `sideResolver?: (msg: Message) => 'user' | 'assistant'`；内核渲染 `side = sideResolver?.(msg) ?? sideOfMessage(msg)`（默认逻辑不动）。**不影响 actor 解析**——actor 仍由 `resolveActor(msg)` 决定，与 side 独立。
 - **三视图策略**（接线单点 = `chat-actor-strategy.tsx.deriveRenderStrategy(chrome)`，SectionChatSession 消费）：
-  - **studio 单聊**（chrome.memberId 非空）：`sideResolver = msg => isA2aInbox(msg) ? 'user' : sideOfMessage(msg)`（a2a 收件→右与 user 同侧；assistant 自答+tool 仍左）。`sideOfMessage` 从内核导出复用（保持默认逻辑单一来源）。
+  - **studio 单聊**（chrome.memberId 非空）：`sideResolver = memberSideResolver`（= 内核 `sideOfMessage`，a2a 收件→左与群聊对齐；assistant 自答+tool 仍左）。`sideOfMessage` 从内核导出复用（保持默认逻辑单一来源）。
   - **studio 群聊**（chrome.capabilities.groupRender=true）：不传 sideResolver（沿用默认 a2a→左）。
   - **playground / academy**：不传（默认零回归）。
-- **代码路径**：`app/web/src/components/chat-page/component-message-stream.tsx` 加 prop + 内核 `sideOfMessage` 改为可被覆盖（导出供 caller 复用）← `chat-page/chat-actor-strategy.tsx.memberSideResolver`（a2a→右 resolver，单聊策略）。详见组件 spec `specs/ui/components/chat-page/component-message-stream.md`。
+- **代码路径**：`app/web/src/components/chat-page/component-message-stream.tsx` 加 prop + 内核 `sideOfMessage` 改为可被覆盖（导出供 caller 复用）← `chat-page/chat-actor-strategy.tsx.memberSideResolver`（a2a→左 resolver，单聊策略）。详见组件 spec `specs/ui/components/chat-page/component-message-stream.md`。
 
 ### 3.7 [v0.0.42] 两层状态 UI（stop 圆环 + on-message spinner）
 

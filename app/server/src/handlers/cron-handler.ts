@@ -28,6 +28,8 @@ import {
   findJobById,
 } from '../tools/cron/cron-tool-shared';
 import type { CronJobSummary, CreateCronBody, UpdateCronBody } from '../tools/cron/types';
+import type { ReplayableEventBus } from '../agent/event-bus';
+import { emitCronChanged } from '../tools/cron/cron-tool-shared';
 
 /** CronRouteDeps（router 注入；bootstrap 装配后透传） */
 export interface CronRouteDeps {
@@ -35,7 +37,10 @@ export interface CronRouteDeps {
   engine: SchedulerEngine;
   sessionStore: SessionStore;
   squadStore: SquadStore;
+  /** session_panel topic 的 bus（推送 session_cron_changed 轻量信号）；可空 */
+  statusBus?: ReplayableEventBus;
 }
+
 
 /** JSON Response 构造（与现有 handler 一致） */
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
@@ -126,6 +131,7 @@ async function handleCreate(
     const reason = e instanceof Error ? e.message : String(e);
     return json(500, { error: `cron create failed: ${reason}` });
   }
+  emitCronChanged(deps.statusBus, sessionId);
   return json(201, toSummary(job));
 }
 
@@ -171,6 +177,7 @@ async function handleUpdate(
     const reason = e instanceof Error ? e.message : String(e);
     return json(500, { error: `cron update failed: ${reason}` });
   }
+  emitCronChanged(deps.statusBus, sessionId);
   return json(200, toSummary(updated));
 }
 
@@ -197,6 +204,7 @@ async function handleToggle(
     const reason = e instanceof Error ? e.message : String(e);
     return json(500, { error: `cron toggle failed: ${reason}` });
   }
+  emitCronChanged(deps.statusBus, sessionId);
   // id 用 job.id（canonical decoded），与 GET list summary.id 一致；不回传入参（可能 encoded）
   return json(200, { id: job.id, enabled });
 }
@@ -223,6 +231,7 @@ async function handleDelete(
     const reason = e instanceof Error ? e.message : String(e);
     return json(500, { error: `cron delete failed: ${reason}` });
   }
+  emitCronChanged(deps.statusBus, sessionId);
   // id 用 job.id（canonical decoded），与 GET list summary.id 一致
   return json(200, { id: job.id, deleted: true });
 }

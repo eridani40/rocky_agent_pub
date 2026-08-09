@@ -53,6 +53,10 @@ asar: true
 asarUnpack:
   - '**/*.node'
   - '**/*.dylib'
+  # builtin skills references：需 cp/bash 直接访问（asar 内 ENOTDIR）
+  # 同时写两种 glob 确保 asarUnpack 生效（不确定匹配 src 还是 mapped dest）：
+  - 'node_modules/@app/plugins/builtins/skills/webapp-dev-squad-setup/references/**/*'
+  - '../plugins/dist/builtins/skills/webapp-dev-squad-setup/references/**/*'
 
 # computer-native 的 .node 已由 build-native.sh 对 Electron ABI 预编译。禁止 electron-builder
 # 重跑 @electron/rebuild：其 node-gyp 只做 C++ 链接（缺 swift/.build dylib → 'library

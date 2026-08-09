@@ -3,7 +3,7 @@ type: interface
 title: Squad 数据模型 + 存储布局 + 建队事务
 priority: P1
 status: active
-updated: 2026-08-04
+updated: 2026-08-06
 since: v0.0.33.1
 ---
 
@@ -28,6 +28,8 @@ interface Squad {
   // ── 默认模型（v0.0.155：ModelRef 复合 = {modelId, providerId?}；[v0.0.158] 删「独立 summary 模型」层）──
   modelDefault: string;      // modelId 部分（required）——chat/compact/T1 记忆整理同链读此字段（studio 场景，见 ../agent/providers_and_models/[P0]model_resolve.md §3 第 2 行）
   modelDefaultProviderId?: string;    // [v0.0.155 复合 ModelRef] modelDefault 的配对 providerId（optional back-compat；与 modelDefault 同存同缺：providerId 非空但 modelDefault 空 → 400）
+  // [v0.0.279 新增] 团队默认推理强度（canonical 语义键 4 档 'default'|'low'|'high'|'max'）。schema `required:false`（存量 squad 无字段=default）+ 读取 `?? 'default'` 兜底（UI 下拉恒有值）；PATCH `!== undefined` 才写、显式 'default' 也落盘不清空；覆盖链（成员显式 > 团队默认 > 厂商默认）见 ../agent/providers_and_models/[P0]llm_protocol_interface.md §3.8
+  effortDefault?: 'default' | 'low' | 'high' | 'max';
   // [v0.0.158] summaryModelDefault + summaryModelDefaultProviderId 两字段整删（存量数据由 migration handler clean-squad-summary-model-default 幂等清理）
   // ── 双向关联（应用层 service 维护）──
   leaderId: string;          // → member.id（建队回填）
@@ -35,6 +37,7 @@ interface Squad {
   squadChatSessionId: string;// → session.id（建队回填）
   // ── 自主性 infra（v0.0.33.4 实跑；[v0.0.116] 心跳升级 squad 级统一调度）──
   enableHeartBeat: boolean;  // 总开关（默认 false；替代旧 autonomyEnabled）。off → 停调度、下面配置全收起（UI）
+  enableGroupChat: boolean;  // [v0.0.270 新增] 群聊可见性（默认 true=开）。schema `required:false`（容忍旧 record 无字段）+ 读取 `?? true` 兜底（缺省=开）；false → agents 注入 SquadChat（squad_agents_status 不渲染 SquadChat 行）+ UI 群聊入口隐藏 + send_message('squadchat') 门控返 null（全私聊语义）；squad 实体/session 恒存在，仅控可见性
   budget: { limit: number; window: "daily"; scope: "team" } | null;
                              // 预算控制（[v0.0.116] off/on 语义显式化）：
                              //   null = **off = 不限量**（gate 放行；现有 null 语义天然对齐 req）

@@ -99,6 +99,24 @@ export async function unwatchWorkspaceDir(
 }
 
 /**
+ * [v0.0.271] POST /session/:id/workspace/watch-set —— 声明式 watch 集合替换（§2.6.5）。
+ * 为该 tab（clientId）全量声明关注目录集合（paths = 相对 workspaceDir 的目录列表，含 '' 根）；
+ * 后端与上次集合 diff：新增的建 watcher、不在新集合的一律 close（防泄漏对账）。
+ * 新前端只用 watch-set（不用 watch/unwatch 增量，同 tab 混用会不一致）。
+ */
+export async function watchWorkspaceSet(
+  sessionId: string,
+  body: { clientId: string; paths: string[] },
+  base?: string,
+): Promise<{ ok: true }> {
+  return req<{ ok: true }>(
+    `/session/${encodeURIComponent(sessionId)}/workspace/watch-set`,
+    { method: 'POST', body: JSON.stringify(body) },
+    base,
+  );
+}
+
+/**
  * [v0.0.177] POST /session/:id/workspace/save-image —— 粘贴图片落盘 ws/images（§2.6.6）。
  * client 只传 mediaType + base64，server 单一权威生成 filename（image-<ulid>.<ext>）。
  * 返 { path: 'images/<filename>' }（相对 workspaceDir 的 POSIX 路径）。
@@ -128,6 +146,25 @@ export async function readWorkspaceFile(
   base?: string,
 ): Promise<{ content: string }> {
   const q = new URLSearchParams({ path: body.path }).toString();
+  return req<{ content: string }>(
+    `/session/${encodeURIComponent(sessionId)}/workspace/file?${q}`,
+    undefined,
+    base,
+  );
+}
+
+/**
+ * [v0.0.269] GET /session/:id/workspace/file?binary=1 —— 读工作区内文件二进制内容（§2.6.7）。
+ * path 语义与 readWorkspaceFile 相同（同 whitelistResolve 安全面）。
+ * 返 { content: string }（base64 编码；image viewer 拼 `data:image/{ext};base64,`）。
+ * 失败 throw（路径越界 400 / 不存在 404 / 读失败 500，与既有 ws API 一致）。
+ */
+export async function readWorkspaceFileBinary(
+  sessionId: string,
+  body: { path: string },
+  base?: string,
+): Promise<{ content: string }> {
+  const q = new URLSearchParams({ path: body.path, binary: '1' }).toString();
   return req<{ content: string }>(
     `/session/${encodeURIComponent(sessionId)}/workspace/file?${q}`,
     undefined,

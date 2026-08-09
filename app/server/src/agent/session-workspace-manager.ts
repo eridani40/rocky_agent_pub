@@ -137,6 +137,35 @@ export class SessionWorkspaceManager {
   }
 
   /**
+   * 声明式替换该 tab 关注集合（watch-set 端点，v0.0.271 裁决 R1/R3/R4）。
+   * relDirs 逐个 resolve（越界/不存在跳过）→ registry.setTabSet 得 diff →
+   * added 逐个 openIfFirstRef（首引用建 watcher）/ removed 逐个 closeIfZeroRef（归零才关）。
+   * **不在新集合的物理 watcher 一律 close**（refcount 归零即关 = 结构性泄漏收敛，R3）；
+   * 多 tab 合并：removed 但其他 tab 仍持有 → refcount>0 → 不 close（R4）。
+   * 幂等：同集合再调 → diff 全空 → no-op。
+   */
+  async applyWatchSet(
+    sessionId: string,
+    clientId: string,
+    workspaceDir: string,
+    relDirs: string[],
+  ): Promise<void> {
+    if (this.stopped) return;
+    // resolve 全部 relDir → absDir；越界/不存在跳过（与 watch 单 path 语义一致）
+    const absDirs: string[] = [];
+    for (const relDir of relDirs) {
+      const absDir = this.resolveAbsDir(workspaceDir, relDir);
+      if (!absDir || !this.isValidDir(absDir)) continue;
+      absDirs.push(absDir);
+    }
+    const { added, removed } = this.registry.setTabSet(sessionId, clientId, absDirs);
+    await Promise.all([
+      ...added.map((absDir) => this.openIfFirstRef(sessionId, workspaceDir, absDir)),
+      ...removed.map((absDir) => this.closeIfZeroRef(sessionId, absDir)),
+    ]);
+  }
+
+  /**
    * 回收一个 tab 名下全部监听（ws-panel 卸载 / 切 session，spec §3/§6①）。幂等：无记录 no-op。
    */
   async releaseTab(sessionId: string, clientId: string): Promise<void> {

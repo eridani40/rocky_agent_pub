@@ -23,17 +23,35 @@
  *   - initialContent 仅在 editor 首次就绪时注入一次（ref guard 防重复）
  *   - disabled 变更 → editor 可编辑态同步（v0.0.147.flushsync 新增，异步 microtask 同步）
  */
-import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
-import { ChatComposer } from '../component-chat-composer';
+import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from 'vitest';
+import { createRef } from 'react';
+import { render, cleanup, fireEvent, act } from '@testing-library/react';
+import { ChatComposer, type ChatComposerHandle } from '../component-chat-composer';
 import { initI18n } from '../../../i18n';
+import { useChatStore } from '../../../store/chat-slice';
 
 // [v0.0.62 i18n] 启动 i18next：placeholder 走 common.composer.placeholder
+// Polyfill jsdom 缺失的布局方法（ProseMirror coordsAtPos → singleRect 在 Text 节点上调 getClientRects）
 beforeAll(async () => {
+  const fakeRects = () =>
+    [{ top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0 }] as never;
+  const fakeRect = () =>
+    ({ top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => {} }) as never;
+  const TextProto = Text.prototype as unknown as { getClientRects?: unknown; getBoundingClientRect?: unknown };
+  if (typeof TextProto.getClientRects !== 'function') TextProto.getClientRects = fakeRects;
+  if (typeof TextProto.getBoundingClientRect !== 'function') TextProto.getBoundingClientRect = fakeRect;
+  const RangeProto = Range.prototype as unknown as { getClientRects?: unknown; getBoundingClientRect?: unknown };
+  if (typeof RangeProto.getClientRects !== 'function') RangeProto.getClientRects = fakeRects;
+  if (typeof RangeProto.getBoundingClientRect !== 'function') RangeProto.getBoundingClientRect = fakeRect;
   await initI18n('zh-CN');
 });
 
 afterEach(() => cleanup());
+
+// [v0.0.267] 草稿集成用例隔离：每用例清空单例 drafts（ChatComposer 真实读写 useChatStore 单例）
+beforeEach(() => {
+  useChatStore.setState({ drafts: {} });
+});
 
 describe('ChatComposer（v0.0.86 display 字段重构）', () => {
   it('mount：enabledProviders 含 workitem/member 时不丢（PROVIDER_LABELS 扩 4 项）', () => {
@@ -345,5 +363,89 @@ describe('ChatComposer（v0.0.147.flushsync disabled 同步 editor 可编辑态�
     await flushMicrotasks();
     editorEl = container.querySelector<HTMLElement>('.ProseMirror');
     expect(editorEl!.getAttribute('contenteditable')).toBe('true');
+  });
+});
+
+describe('ChatComposer（v0.0.267 输入草稿缓存）', () => {
+  it('mount 有草稿 → 编辑器恢复内容（草稿优先于 prefill）', async () => {
+    useChatStore.getState().saveDraft('s1', '恢复的草稿文本');
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file']}
+        onSend={() => {}}
+        initialContent={[{ type: 'member', id: 'm9', icon: 'member', label: 'prefill' }]}
+      />,
+    );
+    const editorEl = await waitForEditor(container);
+    await waitForText(editorEl!, '恢复的草稿文本');
+    // 草稿优先：prefill 不注入 → 无 pill
+    expect(container.querySelectorAll('[data-mention-icon]').length).toBe(0);
+  });
+
+  it('输入 → onUpdate 实时写 drafts[sessionId]（编辑即写缓存）', async () => {
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file']}
+        onSend={() => {}}
+      />,
+    );
+    const editorEl = await waitForEditor(container);
+    expect(editorEl).not.toBeNull();
+    // 模拟 ProseMirror 输入：改 DOM 文本 + input 事件 → mutation observer 同步 doc → onUpdate → saveDraft
+    editorEl!.textContent = '输入的草稿';
+    fireEvent.input(editorEl!);
+    await flushMicrotasks();
+    expect(useChatStore.getState().drafts['s1']).toBe('输入的草稿');
+  });
+
+  it('发送 → clearDraft（草稿清除）', async () => {
+    useChatStore.getState().saveDraft('s1', '待发送草稿');
+    const onSend = vi.fn();
+    const ref = createRef<ChatComposerHandle>();
+    const { container } = render(
+      <ChatComposer
+        ref={ref}
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file']}
+        onSend={onSend}
+      />,
+    );
+    const editorEl = await waitForEditor(container);
+    await waitForText(editorEl!, '待发送草稿');
+    expect(useChatStore.getState().drafts['s1']).toBe('待发送草稿');
+    // 通过 ref send() 触发 handleSubmit（等价 Enter）
+    act(() => {
+      ref.current?.send();
+    });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().drafts['s1']).toBeUndefined();
+  });
+
+  it('无草稿 + prefill → prefill 注入（草稿语境回归）', async () => {
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file', 'skill', 'workitem', 'member']}
+        onSend={() => {}}
+        initialContent={[{ type: 'workitem', kind: 'task', id: 'T-0001', icon: 'task', label: '接口联调' }]}
+      />,
+    );
+    await waitForPills(container, 1);
+    const pill = container.querySelector('[data-mention-icon]');
+    expect(pill?.getAttribute('data-mention-icon')).toBe('task');
+    expect(pill?.getAttribute('data-mention-label')).toBe('接口联调');
+    // prefill 注入触发 onUpdate → 实时写缓存（change_plan 风险点 4：内容等价保存，预期行为）
+    // 用户切走再切回会恢复该 prefill 内容（= 草稿语义）
+    expect(useChatStore.getState().drafts['s1']).toContain('接口联调');
   });
 });

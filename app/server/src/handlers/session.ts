@@ -6,7 +6,7 @@
  *
  * 职责（CRUD + summary；messages 分页/发送在 session-messages.ts；
  *      SessionHandlerDeps + 请求体 + provider/model 校验在 session-deps.ts）：
- *   - Session CRUD：POST/GET 列 / GET:id / DELETE:id（级联，兜底 connectorManager.disconnect）
+ *   - Session CRUD：POST/GET 列 / GET:id / DELETE:id（级联，兜底 releaseSession 清理 browser instance）
  *   - summary 只读：GET /session/:id/summary → {summary: SummaryInfo|null}
  *
  * 不直接持有依赖：经 SessionHandlerDeps 注入 SessionStore / AgentManager / AppConfigService /
@@ -170,7 +170,7 @@ export async function handleSessionCollection(
 
 /**
  * 处理 /session/:id：GET 单 / PUT 部分更新 / DELETE 删（级联）。
- * DELETE 分支兜底调 connectorManager.disconnect 释放 browser attach owner（design §5）。
+ * DELETE 分支兜底调 browserInstanceManager.releaseSession 释放该 session 全部 browser instance（v0.0.264+；attach 也纳入）。
  */
 export async function handleSessionItem(
   req: Request,
@@ -252,9 +252,10 @@ export async function handleSessionItem(
     // 删除 session → recycleSession 回收全部 tab 监听（v0.0.139 懒监听；与 SSE unsubscribe
     // 路径互补，幂等）。仅针对 parent（tab/连接器是 parent 维度，子孙无独立 tab）
     if (deps.workspaceManager) await deps.workspaceManager.recycleSession(id);
-    // 兜底 disconnect：若 owner=id 则真断，否则 no-op（design §5）；异常吞掉不影响 204
-    if (deps.connectorManager?.disconnect) {
-      await deps.connectorManager.disconnect('browser', id).catch(() => {
+    // [v0.0.264] 兜底清理 browser instance：session 删除 → releaseSession（kill 该 session 全部常驻浏览器；
+    // v0.0.266 attach 纳入——releaseSession 也会 disconnect attach session，不杀 chrome）
+    if (deps.browserInstanceManager) {
+      await deps.browserInstanceManager.releaseSession(id).catch(() => {
         /* graceful，不阻断 DELETE 语义 */
       });
     }

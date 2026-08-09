@@ -44,6 +44,7 @@ UI **不发明新模型**，消费真实 `Message`（`specs/tech/agent/message`�
 | component | `component-bubble-user` | user 深底气泡 |
 | component | `component-bubble-answer` | agent accent-surface 气泡（markdown） |
 | component | **`component-chat-link-viewer`** | chat 链接只读 viewer 挂载层（12 格式本地链接 → `ComponentModalMdEditor` readOnly 强制；含 `ChatLinkHandlerProvider` 注入 onLocalViewer；Context 在 `chat-link-handler-context.ts` 纯 TS 独立文件）；独立 spec `component-chat-link-viewer.md` |
+| component | **`component-scroll-guide-bubble`** | 滚动引导气泡（v0.0.262）：用户不在消息流底部时浮动显示（生成中「新消息」/ 空闲「回到底部」），点击平滑滚底；absolute 不占文档流；独立 spec `component-scroll-guide-bubble.md` |
 
 ## 4. 各组件契约
 ### 4.1 section-conversation-list（180-400 默认 220，可拖）
@@ -65,6 +66,29 @@ UI **不发明新模型**，消费真实 `Message`（`specs/tech/agent/message`�
   - **running spinner + suspended「?」指示器（与未读红点错位共存）**：
     - 数据：派生自 `session.state`。**suspended 排除 running**（INV-2：loop 已退出等用户回填，亮「?」非 spinner）。
     - `conv-item-{id}-suspended-mark` = 「?」标记（12px accent 色），`state==='suspended'` 渲染（表「等用户回答」）。
+
+### 4.5 滚动（useMessageScrollPagination + 引导气泡）— 滚动 hook 权威章节
+
+> 滚动逻辑的权威章节（代码注释引用本节的既有锚点；v0.0.262 起成文）。实现：`app/web/src/components/chat-page/use-message-scroll-pagination.ts` + `component-message-stream.tsx` + `component-scroll-guide-bubble.tsx`。
+
+**滚动 hook（`useMessageScrollPagination`）**：ComponentMessageStream 的滚动副作用唯一 owner——onScroll（near-bottom 追踪 + loadMore 触发）、自动滚底、prepend 位置保持、sticky-bottom 门控。
+
+- **返回签名**：`{ onScroll, nearBottom, scrollToBottom }`（v0.0.262 扩展，新增字段向后兼容——既有调用方解构 `{ onScroll }` 照常）。
+  - `onScroll`：挂到滚动容器；内部 near-bottom 追踪（`scrollHeight - scrollTop - clientHeight <= NEAR_BOTTOM_THRESHOLD(120px)`）写 ref（effect 门控）+ state（气泡消费，setState 值去重防滚动事件风暴）；仅 `hasMore && !isLoadingMore && scrollTop < LOAD_MORE_THRESHOLD(120px)` 触发 loadMore。
+  - `nearBottom`：是否在底部附近（初始 true——新会话首条消息到达即滚底语义）。
+  - `scrollToBottom(behavior = 'auto')`：编程滚底（`el.scrollTo({ top: el.scrollHeight, behavior })`）+ 同步 `nearBottom=true`（点击气泡滚底后即时消失；编程 scrollTo 不触发 scroll 事件，需显式同步）。
+
+- **autoScroll 触发语义 = 内容变化（v0.0.262 跟丢修复核心）**：`autoScrollDeps` 由 caller 传内容签名 `${rows.length}:${textLenSum}`（行数 + text 长度和；tool-batch 无 text 跳过；useMemo 基于已构建 rows 纯计算）→ 新消息到达 **OR** 既有消息内容增长（流式 `text_block_delta` 更新同一条消息，rows.length 不变但 textLenSum 变）都触发滚底。旧依赖 `rows.length` 单维度只在行数变化时触发，是流式生成跟丢根因。
+- **rAF 合并节流**：hook 内 `cancelAnimationFrame + requestAnimationFrame`（每帧最多一次滚底，流式 delta 防抖），effect cleanup `cancelAnimationFrame`（组件卸载/依赖再变不留悬空回调）。
+
+**Invariants（MUST NOT 破坏）**：
+1. **自动滚底只在「消息内容变化/run 状态变化」触发**（v0.0.262 起 = 内容签名，流式 delta 同 rows.length 内容增长也触发）；loadMore 前插绝不触发（`isLoadingMore=true` 跳过）。
+2. loadMore 完成后下一帧跳过一次自动滚底（`wasLoadingMoreRef` 防滚回底）。
+3. prepend 后视觉保持原顶部条目位置（`prevHeight = scrollHeight - scrollTop` 技巧，useLayoutEffect DOM paint 前捕获+恢复）。
+4. sticky-bottom 门控：仅 `nearBottomRef.current=true`（用户在底部附近）才滚；用户向上翻看历史不强制拉回。读「上一刻用户位置」——新内容长高前 scroll 事件已把当前位置记入 ref。
+5. onScroll 始终挂载（不管 hasMore）：内部同时做 near-bottom 追踪（始终）+ loadMore 触发（仅 hasMore）。
+
+**滚动引导气泡（`component-scroll-guide-bubble.tsx`）**：用户不在底部（`nearBottom=false`）且会话非空时，消息流可视区底部浮动显示——生成中「新消息」/ 空闲「回到底部」，点击平滑滚底。显隐 = `!nearBottom && hasMessages`（runActive 只决定文案不决定显隐）；absolute 定位不占文档流（布局稳定性 MANDATORY）；visible 用 opacity/pointer-events 过渡不 unmount（动画平滑）。挂载点 = ComponentMessageStream 内部 scroll 容器外包 relative wrapper（scroll div className 原样保留，BaseChatPage 骨架零改动）。组件契约见 `component-scroll-guide-bubble.md`。
 
 ## 5. 关键交互
 1. **新建会话**：点 `conv-new-btn` → 创建空会话并选中 → chat-detail 显示 empty-state（欢迎 hero，见 `component-empty-state.md`）。**等价入口**：empty-state 内 mascot / ＋角标 / CTA 三处点击均触发同一 `onNewConversation` → page-chat `handleCreate`（与 conv-new-btn 同 handler）；active 空会话 / 无 active 会话均可触发（无 active 会话时 input-bar 不渲，empty-state 是唯一入口，避免死页）。

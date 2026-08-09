@@ -44,6 +44,9 @@ export function SeatRowView({ row, onEnter, onEdit, onBench, onDeploy, onContext
   const { member, isLeader, presence } = row;
   const statusText = useSeatStatusText(row);
   const isOffline = presence === 'offline';
+  // [v0.0.277] idle 弱化：在线但没跑（非 running 且非 offline，含 suspended）→ 行 + 名字调灰，
+  // 弱化程度轻于 offline（opacity-85 < 75 的降权差，文字 fg-2 非 fg-3）——让 running 突出、idle 退后
+  const isIdle = !row.isRunning && !isOffline;
   const isFallback = row.statusTextSource.kind === 'fallback';
 
   // 菜单机械（共享 hook：开关 + rect 定位 + flip-up + 延迟关闭监听）
@@ -71,6 +74,7 @@ export function SeatRowView({ row, onEnter, onEdit, onBench, onDeploy, onContext
       className={[
         'group flex items-center gap-3 border-b border-surface-2 px-4 py-2.5 transition-colors last:border-b-0 hover:bg-bg',
         isOffline ? 'opacity-75' : '',
+        isIdle ? 'opacity-[0.85]' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -91,7 +95,7 @@ export function SeatRowView({ row, onEnter, onEdit, onBench, onDeploy, onContext
         {/* 名字行：truncate 名 + 可选 running spinner（仅 row.isRunning 渲染）。
          * spinner shrink-0 占位防位移（INV-9）；size=sm 对齐 squad-tree/subagent 紧凑上下文。 */}
         <div className="flex items-center gap-1">
-          <span className="truncate text-[13.5px] font-semibold text-fg">{member.name}</span>
+          <span className={['truncate text-[13.5px] font-semibold', isIdle ? 'text-fg-2' : 'text-fg'].join(' ')}>{member.name}</span>
           {row.isRunning && (
             <SpinnerRing
               size="sm"

@@ -11,7 +11,7 @@
  * 无 pluginManager 或链空 → 回退 v0.0.8 行为（直接 append / 不注入 reminder）。
  *
  * [v0.0.33.3] 扩展 ReminderCtx：可选注入 squadContext service + transcriptReader，
- * 供 squad_team_status provider 读 store 动态数据 + 做去重。
+ * 供 squad_agents_status provider 读 store 动态数据 + 做去重。
  * 由 ContextEngine.ingest 构造期按 config.sessionType/squadId/sessionId 注入（生产路径）；
  * UT fixture 不注入 → provider 降级不产出（向后兼容）。
  *
@@ -68,7 +68,7 @@ interface SystemReminderProvider {
  * 单 provider 失败降级为「不贡献」，不中断整个链（system_prompt §9.4 同策略）。
  *
  * [v0.0.33.3] 注入 squadContext + transcriptReader（可选，由 caller 提供；缺省 undefined）。
- * 修前 sync 调 p.provide() 对 async provider（squad_team_status 读 store）会拿到 Promise
+ * 修前 sync 调 p.provide() 对 async provider（squad_agents_status 读 store）会拿到 Promise
  * 而非数组 → for...of 报错；async 化处理（applyIngestPipeline 整体 async）。
  *
  * [v0.0.40 D1=B] scopeId 透传到 getExtensionImpls（forked scope 可 disable reminder provider）。

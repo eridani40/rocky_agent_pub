@@ -47,6 +47,9 @@
     "tagLeader": "{{name}} · leader",
     "tagSingle": "{{name}} · 单聊"
   },
+  "squadStatus": {
+    "title": "团队状态"
+  },
   "newSquadModal": {
     "title": "新建 squad",
     "creating": "创建中…",
@@ -126,6 +129,13 @@
     "nameLabel": "squad 名称",
     "descLabel": "squad 介绍",
     "modelLabel": "默认模型 modelDefault",
+    "effortDefaultLabel": "默认推理强度",
+    "effortOptions": {
+      "default": "默认",
+      "low": "低",
+      "high": "高",
+      "max": "超高"
+    },
     "save": "保存元信息"
   },
   "deleteSquad": {
@@ -150,6 +160,14 @@
     "label": "enableHeartBeat（自主性总开关）",
     "on": "自主工作已开启，成员将按心跳节奏主动运转",
     "off": "已暂停自主工作，成员仅响应对话",
+    "toggleFail": "切换失败",
+    "errorPrefix": "切换失败："
+  },
+  "groupChat": {
+    "label": "enableGroupChat（群聊可见性）",
+    "hint": "关闭后 agents 注入无 SquadChat，群聊入口隐藏，成员仅走私聊",
+    "on": "群聊已开启，SquadChat 对全体成员可见",
+    "off": "已关闭群聊，成员仅使用私聊",
     "toggleFail": "切换失败",
     "errorPrefix": "切换失败："
   },
@@ -243,12 +261,9 @@
   "tokenWidget": {
     "title": "Token 用量",
     "viewDetail": "查看详情",
-    "todayLabel": "今日",
     "trend7d": "7 日趋势",
-    "consumedLabel": "近 60 天合计",
-    "kindInput": "输入",
-    "kindOutput": "输出",
-    "kindCache": "缓存"
+    "todayTotal": "今日",
+    "total60d": "60 天总量"
   },
   "task": {
     "statusLabels": {

@@ -29,7 +29,6 @@ function makeMockManager(state: ConnectorState) {
   const disable = vi.fn().mockResolvedValue(undefined);
   const cm: ConnectorManager = {
     isReady: () => state.switch === 'on' && state.connection === 'connected',
-    getAttachSession: () => undefined,
     getAll: () => [{ ...state }],
     getState: () => ({ ...state }),
     enable,
@@ -122,7 +121,6 @@ describe('handleConnectorToggle: PUT /config/connectors/:id', () => {
   it('cm 缺 enable 能力 → 500', async () => {
     const cm: ConnectorManager = {
       isReady: () => false,
-      getAttachSession: () => undefined,
       // 无 enable/disable
     };
     const res = await handleConnectorToggle('browser', { enable: true }, cm);

@@ -3,20 +3,20 @@ type: interface
 title: System Reminder
 priority: P0
 status: active
-updated: 2026-07-30
+updated: 2026-08-07
 since: v0.0.8
 ---
 
 # System Reminder
 
 > **workspace provider 接线**：provider 实现不变（仍读 `config.workdir`），但 loop 构造 SessionConfig 时 `workdir = session.workspaceDir`（持久化字段，见 `../session/[P0]session_workspace.md`）。零新增 provider、零破 cache、零改注入机制。下一轮 ingest 自动反映新 workspaceDir。
-> 系统动态注入的上下文（环境/时间/workspace/tool 运行错误等），**链式**，注入到**最后一条 user message** 的 content 末尾。**不进 system prompt**（保 prompt cache）。todo provider 依赖缺失时 no-op。
+> 系统动态注入的上下文（环境/时间/workspace/tool 运行错误等），**链式**，注入到**最后一条 user/tool message**（v0.0.274 起 tool_result 也注入，assistant/system 不注入）的 content 末尾。**不进 system prompt**（保 prompt cache）。todo provider 依赖缺失时 no-op。
 > system_prompt 的 timestamp/dynamic_context 已移出走 reminder（见 `[P0]system_prompt.md §4 末`）。
 > **[v0.0.223] ReminderCtx 扩展 todoStore**：仿 squadContext 模式（`[P1]squad_reminder_providers.md §1`）加可选 `ctx.todoStore`，由 ingest 构造期按 config.sessionId 注入，供 todo provider 读 session 级 todo 数据。缺省 undefined → todo provider 降级 no-op。
 
 ## 1. 定位
 
-system reminder 是**系统**（非 LLM、非用户）在运行时动态注入的上下文提醒。每个 turn 可能变（时间/环境/工具错误），故**不进 system prompt**（会破 cache），而是注入到**最后一条 user message** 的 content 末尾 —— 只影响该 message，system prompt cache 保留。
+system reminder 是**系统**（非 LLM、非用户）在运行时动态注入的上下文提醒。每个 turn 可能变（时间/环境/工具错误），故**不进 system prompt**（会破 cache），而是注入到**最后一条 user/tool message**（v0.0.274 起 user/tool/a2a 触发，assistant/system 不触发）的 content 末尾 —— 只影响该 message，system prompt cache 保留。
 
 典型 reminder：env（环境/平台/模型）、time（系统时间）、workspace（工作目录/git 状态）、tool_error（上轮工具错误）、todo（当前 session 双层待办进度）等。
 
@@ -65,7 +65,7 @@ const SystemReminderPoint = {
 | `workspace` | 3 | 工作目录、git 状态 | config.workdir（**[v0.0.17] 接线 session.workspaceDir**：loop 构造 SessionConfig 时 `workdir = session.workspaceDir`，见 `../session/[P0]session_workspace.md §1`） |
 | `tool_error` | 4 | 上一轮工具错误/警告 | 上轮 tool_result（isError） |
 | `todo` | 5 | **[v0.0.223 重定义]** 当前 session todo 进度（双层待办：主 item + 步骤） | todo store（`ctx.todoStore.listBySession(sessionId)`）；仅 parent.main session 产出（subagent/forked 不产出）；空则 no-op 返 []；**[D1.1] 旧版 task 进度 no-op 空壳已在 v0.0.223 填壳为 session todo 进度**（`[P1]todo_tools.md`） |
-| `reachable_agents` | 6 | squad/leader/mate/subagent 本轮可达对象 | `[v0.0.33.2]` 从 `SessionConfig.sessionType + studioContext` 动态派生；volatile，不进 system prompt |
+| `squad_agents_status` | 6 | squad/leader/mate/subagent 本轮可达对象 + running/idle + presence（统一全员状态块） | `[v0.0.33.2]` 从 `SessionConfig.sessionType + squadContext` 动态派生（[v0.0.273] 三合一取代 reachable_agents + squad_team_status）；volatile，不进 system prompt |
 
 > **[v0.0.64] time provider 精度修正**：旧版（v0.0.8-）只输出 `"Current date: YYYY-MM-DD"`（无时分、用 server 进程本地 tz），理由标注「保 system prompt cache」。**该权衡是误置**（§5 详述）：reminder 注入最后一条 user message，**本来就不破 system prompt cache**（system 字段独立）；user message 段每 turn 失效，时间精度日→分钟无额外 cache 损失。新版输出 `"Current date and time: YYYY-MM-DD HH:MM (TZ)"`，让 agent 能正确回答「现在几点」和跨时区时间相关问题（旧版只剩日期，agent 只能瞎猜）。**tz 来源单一为进程本地**（`Intl.DateTimeFormat().resolvedOptions().timeZone`）：Rocky 是 Electron 本地 app，server 进程跑用户机器 → server 进程 tz = client tz，`new Date()` 本地方法拿到的就是用户本地时间，**不需要 session.timezone 链路**（那是 cron schedule 持久化 job.tz 的需求，不是 reminder 当前时间的需求）。
 
@@ -81,7 +81,8 @@ handle(messages: Message[], ctx: IngestCtx): Message[] {
   reminders = systemReminderProviders.map(p => p.provide(ctx)).flat()   // 跑 provider 链
   if (!reminders.length) return messages                                // 无 reminder 不动
   last = messages[messages.length - 1]                                   // 只看最后一条
-  if (!last || last.role !== "user") return messages                     // 必须是 user message，否则不动
+  // [v0.0.274] 触发条件放宽：user/tool/a2a 触发；assistant/system 不触发（见下）
+  if (!last || !shouldTriggerReminder(last)) return messages
   // reminder block 设块级 isSystemReminder=true（前端 DEFAULT_BLOCK_FILTER 精确隐这一块）
   block = { type: "text", text: formatReminders(reminders), isSystemReminder: true }
   last.content.push(block)                                              // 追加到 content 末尾
@@ -91,9 +92,15 @@ handle(messages: Message[], ctx: IngestCtx): Message[] {
 ```
 
 **注入规则（简单）**：
-- 只看 ingest 进来的 **messages 最后一条**；且**必须是 user message**（`role === "user"`），否则不处理
+- 只看 ingest 进来的 **messages 最后一条**；触发条件 = **user message OR tool message OR a2a**（`shouldTriggerReminder(last)` = `role==='user' \|\| role==='tool' \|\| sender?.source==='agent'`），否则不处理。
+  - **user**（真用户消息，`role==='user'`）→ 触发注入
+  - **tool**（工具结果消息，`role==='tool'`，v0.0.274 新放宽）→ 触发注入——解决工具循环（tool_call → tool_result → ...）期间 reminder 缺失：tool 密集 loop 中后期 LLM 也始终看到最新团队状态/todo/reachable 等上下文
+  - **a2a**（`role==='user'` + `sender.source==='agent'`）→ 触发注入（a2a 是独立触发源语义）
+  - **assistant**（agent 自己输出）→ **不触发**（agent 输出不是输入）；**system** → **不触发**（天然排除，不匹配任何分支）
 - 加 reminder content block 到该 message 的 content 末尾（块级 `isSystemReminder=true`）
 - 经 ingest 落库 → **持久化**进 transcript；后续 assemble 透明读（已是 message 一部分）
+
+> **[v0.0.274] 触发放宽依据（老板拍板）**：tool_result 判定 = `msg.role === 'tool'`（loop-stage-context.ts ingestToolResults 构造 `role:'tool'`，MessageRole 4 类 `system/user/assistant/tool`）——与 Anthropic wire 层 tool→user 映射自洽（tool_result 属于 user 侧，user/assistant 交替结构不破坏）。assistant 显式排除（agent 输出不是输入）。wire 层 encode（cache_control.md §3.3「最末 message 保留最末 reminder」）保证 LLM 上下文不堆积——每条 tool 消息注入的 reminder 在 wire 层非最末 drop，LLM 每轮只见最末一个聚合块；transcript 仍持久化全部（不丢数据）。
 
 **注入形态**：默认**一个 TextBlock**（reminder 聚合），block 设 `isSystemReminder=true`（块级，前端精确过滤）。块级字段定义见 `../message/[P0]agent_message_interface.md §4.1`；前端过滤策略见 `specs/ui/overall/02-llm-chat.md §3`。
 
@@ -105,11 +112,11 @@ handle(messages: Message[], ctx: IngestCtx): Message[] {
 
 > **forked-reminder-injector 漂移点证伪**（v0.0.50 doc 阶段澄清）：v0.0.48 新增的 `app/server/src/agent/forked-reminder-injector.ts`（forked 场景 reminder 注入器），v0.0.50 设计阶段曾推测它也写消息级 `metadata.isSystemReminder`、需同步停写。**实际代码证伪**：`injectForkedReminder` 仅写 message 的 `id/sessionId/role/content/sender`，**从不写 metadata**。本版无需改动该文件。
 
-> 与 snapshot 视图的区别：reminder **落库持久化**（不是临时视图）；每 turn 新 ingest 的 user message 才注入新 reminder，历史 message 的 reminder 留在 transcript 里不动。
+> 与 snapshot 视图的区别：reminder **落库持久化**（不是临时视图）；每 turn 新 ingest 的 user/tool message 才注入新 reminder，历史 message 的 reminder 留在 transcript 里不动。
 
 ## 5. 为什么不进 system prompt
 
-reminder 每 turn 变（时间/环境/工具错误），进 system prompt 会**破坏整个 prompt cache**（system 变 → cache 全失效）。注入最后 user message 只影响该 message，system prompt cache 保留（见 system_prompt §4 末/§9）。
+reminder 每 turn 变（时间/环境/工具错误），进 system prompt 会**破坏整个 prompt cache**（system 变 → cache 全失效）。注入最后 user/tool message 只影响该 message，system prompt cache 保留（见 system_prompt §4 末/§9）。
 
 > **[v0.0.64] 设计澄清 — 「日期精度保 cache」是误置权衡**：
 > v0.0.8 旧版 time provider 标注「日期精度，保 cache」作为约束，限制输出仅 `"Current date: YYYY-MM-DD"`。该标注是**误置**——把「保 system prompt cache」当成了 reminder 节流的理由：
@@ -119,15 +126,15 @@ reminder 每 turn 变（时间/环境/工具错误），进 system prompt 会**�
 >
 > 故分钟级时间精度**无额外 cache 损失**，旧版约束是伪命题。新版（v0.0.64 起）time provider 输出 `"Current date and time: YYYY-MM-DD HH:MM (TZ)"`，让 agent 能回答时间相关问题（旧版只剩日期，agent 只能瞎猜）。wire 层 message 段 cache 由 cache_control breakpoint 管（与 reminder 内容精度正交），本 spec 不重复。
 
-> **wire 层 cache_control breakpoint 是 protocol 层职责**：reminder 注入最后 user message 保住 system prompt cache，但末 user message 的 reminder 每 turn 变仍会影响 message 段 cache——此问题由 protocol encode 层的显式 `cache_control` breakpoint（bp 落在最后非 reminder block）+ wire 层过滤历史 reminder 解决，见 `../providers_and_models/[P0]cache_control.md`。本 spec 只管 reminder **持久化**（context 层），不管 wire 层 breakpoint。
+> **wire 层 cache_control breakpoint 是 protocol 层职责**：reminder 注入最后 user/tool message 保住 system prompt cache，但末 user/tool message 的 reminder 每 turn 变仍会影响 message 段 cache——此问题由 protocol encode 层的显式 `cache_control` breakpoint（bp 落在最后非 reminder block）+ wire 层过滤历史 reminder 解决，见 `../providers_and_models/[P0]cache_control.md`。本 spec 只管 reminder **持久化**（context 层），不管 wire 层 breakpoint。
 
-### 5.1 reachable_agents provider `[v0.0.33.2]`
+### 5.1 squad_agents_status provider（曾名 reachable_agents，v0.0.273 统一块）
 
-- **核心概念**：`reachable_agents` 是 a2a 可达列表的动态提醒，告诉 LLM 当前能 `send_message` 到谁。
-- **设计思路**：hire/bench/spawn 会改变可达对象，放 stable system prompt 会破坏缓存；放 system_reminder 只影响本 turn，且与 workspace/time reminder 同一注入链。
-- **代码路径**：`app/plugins/builtins/rocky_context/prompt/reachable_agents.ts.provide() → app/server/src/agent/context-engine.ts.ingest() → app/server/src/agent/context-ingest-detail.ts.system_reminder_injector()`。
-- **接口签名**：`provide(ctx: ReminderCtx): SystemReminder[]` —— squad→leader/mates，leader→squad/mates，mate→squad/leader/peers/subagents，subagent→parent；user 永不在列表。
-- **版本演进**：`[v0.0.33.2]` 作为 volatile reminder 落地，支撑 Studio 4 scope 对话与 a2a 黑盒测试。
+- **核心概念**：`squad_agents_status` 是 a2a 可达列表 + 成员状态（running/idle + presence）的统一动态提醒，告诉 LLM 当前能 `send_message` 到谁、各成员在干嘛。
+- **设计思路**：hire/bench/spawn 会改变可达对象，放 stable system prompt 会破坏缓存；放 system_reminder 只影响本 turn，且与 workspace/time reminder 同一注入链。[v0.0.273] 三合一取代旧 `reachable_agents`（仅可达列表）+ `squad_team_status`（仅 leader 看 running），squad/leader/mate/subagent 全员可见。
+- **代码路径**：`app/plugins/builtins/rocky_context/prompt/squad_agents_status.ts.provide() → app/server/src/agent/context-engine.ts.ingest() → app/server/src/agent/context-ingest-detail.ts.system_reminder_injector()`。
+- **接口签名**：`provide(ctx: ReminderCtx): SystemReminder[]` —— squad→leader+全部 mate，leader→SquadChat+全部 mate，mate→SquadChat+leader+peers，subagent→parent；user 永不在列表；全员列出（idle 不消失）+ benched 过滤。
+- **版本演进**：`[v0.0.33.2]` 作为 volatile reminder 落地，支撑 Studio 4 scope 对话与 a2a 黑盒测试；`[v0.0.273]` 统一为 squad_agents_status（细节见 `../../squad/[P1]prompt_sections.md §5` + `../../squad/[P1]squad_reminder_providers.md §3`）。
 
 ## 6. 边界
 
@@ -142,4 +149,4 @@ reminder 每 turn 变（时间/环境/工具错误），进 system prompt 会**�
 
 > 变更历史见 [`log.md`](log.md)（本 KB 位置轴）+ [`specs/tech/version_logs/vX.Y/change_log.md`](../version_logs/)（跨版本发布说明）。
 
-> **squad 场景注记**：v0.0.33.2 起新增 `reachable_agents` provider（按 sessionType/studioContext 派生 squad clique 可达对象，作为 volatile system_reminder 注入，不破 system prompt cache）。本 spec §3 的 5 provider 清单为**非 squad 通用基线**；squad 场景的 provider 全集（含 reachable_agents）权威见 `../../squad/[P1]prompt_sections.md`。
+> **squad 场景注记**：v0.0.33.2 起新增 `reachable_agents` provider（按 sessionType/studioContext 派生 squad clique 可达对象，作为 volatile system_reminder 注入，不破 system prompt cache），[v0.0.273] 演进为 `squad_agents_status` 统一块（可达 + 状态三合一，数据源迁 squadContext）。本 spec §3 的 6 provider 清单为**非 squad 通用基线**；squad 场景的 provider 全集（含 squad_agents_status）权威见 `../../squad/[P1]prompt_sections.md`。

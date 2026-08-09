@@ -1,13 +1,13 @@
 /**
- * team 工具 —— squad 团队成员管理收敛工具（6 action：list/query/hire/deploy/bench/edit）
+ * team 工具 —— squad 团队成员管理收敛工具（7 action：list/query/hire/deploy/bench/edit/reset）
  * 参考: specs/tech/squad/[P1]squad_tools.md §2（team 工具 action 全表）
  *
  * 设计（squad_tools §1 收敛原则）：同概念合并为单工具 + action 分派，少占 LLM tool slot。
- * 6 action：只读 2（list/query）+ 写 4（hire/deploy/bench/edit）。
+ * 7 action：只读 2（list/query）+ 写 5（hire/deploy/bench/edit/reset）。
  *
  * 权限（squad_tools §2 表）：
  * - 只读 2 action：leader/mate 可调（mate 不能写但能读团队信息）
- * - 写 4 action：leader/user only（mate/subagent → forbidden；standalone=undefined 当 user 允许）
+ * - 写 5 action：leader/user only（mate/subagent → forbidden；standalone=undefined 当 user 允许）
  * - squad session（SquadChat 路由器）/ standalone 无 team 工具（schema 层裁剪 + selfType 校验
  *   defense-in-depth 双重门）
  *
@@ -20,13 +20,13 @@ import type { Tool, ToolCtx, ToolInput, ToolRunResult } from '../../tools/types'
 import { errorResult, textResult } from '../../tools/types';
 import { readRuntimeContext } from './runtime-context';
 import type { AgentToolRuntimeContext } from './runtime-context';
-import { TEAM_INPUT_SCHEMA, runHire, runDeploy, runBench, runEdit } from './team-write-actions';
+import { TEAM_INPUT_SCHEMA, runHire, runDeploy, runBench, runEdit, runReset } from './team-write-actions';
 
 /** 6 action 集（只读 2 + 写 4；squad_tools §2 全表） */
-const TEAM_ACTIONS = ['list', 'query', 'hire', 'deploy', 'bench', 'edit'] as const;
+const TEAM_ACTIONS = ['list', 'query', 'hire', 'deploy', 'bench', 'edit', 'reset'] as const;
 type TeamAction = (typeof TEAM_ACTIONS)[number];
 /** 写 action（leader/user only；mate/subagent/squad → forbidden） */
-const WRITE_ACTIONS: readonly TeamAction[] = ['hire', 'deploy', 'bench', 'edit'];
+const WRITE_ACTIONS: readonly TeamAction[] = ['hire', 'deploy', 'bench', 'edit', 'reset'];
 
 /**
  * team 工具（单例导出，registry defaultTools 引用）。
@@ -41,7 +41,8 @@ export const teamTool: Tool = {
       'action="hire" (mode fresh: name/intro/skillConfig; or derive: deriveFrom/overrides) creates member — leader/user only; ' +
       'action="deploy" (roleId) deploys a benched member — leader/user only; ' +
       'action="bench" (roleId, reason) benches a member — leader/user only; ' +
-      'action="edit" (roleId, patch with skillConfig/intro/name) patches member — leader/user only. ' +
+      'action="edit" (roleId, patch with skillConfig/intro/name) patches member — leader/user only; ' +
+      'action="reset" (roleId) clears mate session context (transcript+summary+presence+todo) — leader/user only; running agent will be rejected. ' +
       'Read actions available to leader/mate; write actions leader/user only; squad session has no team tool.',
     intro: 'Manage squad team members.',
     inputSchema: TEAM_INPUT_SCHEMA,
@@ -51,7 +52,7 @@ export const teamTool: Tool = {
     const action = String(input.action ?? '').trim();
     if (!isTeamAction(action)) {
       return errorResult(
-        `team: invalid action "${action}" (allows list|query|hire|deploy|bench|edit)`,
+        `team: invalid action "${action}" (allows list|query|hire|deploy|bench|edit|reset)`,
       );
     }
 
@@ -94,6 +95,7 @@ export const teamTool: Tool = {
       if (action === 'deploy') return await runDeploy(input, rtc);
       if (action === 'bench') return await runBench(input, rtc);
       if (action === 'edit') return await runEdit(input, rtc);
+      if (action === 'reset') return await runReset(input, rtc);
       return errorResult(`team: unhandled action "${action}"`);
     } catch (e) {
       return errorResult(`team.${action}: ${e instanceof Error ? e.message : String(e)}`);

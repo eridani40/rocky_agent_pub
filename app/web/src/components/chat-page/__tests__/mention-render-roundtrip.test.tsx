@@ -203,3 +203,50 @@ describe('旧 tag 降级（v0.0.86 INV：旧消息缺 display 不 crash）', () 
     expect(container.textContent).toBe('就是普通文本，没有 mention');
   });
 });
+
+describe('多行文本换行保留（v0.0.281 输入框多行 bug）', () => {
+  /** 取容器内所有带 whitespace-pre-wrap 的文本 span */
+  function textSpans(container: HTMLElement): HTMLElement[] {
+    return Array.from(container.querySelectorAll('span.whitespace-pre-wrap')) as HTMLElement[];
+  }
+
+  it('纯多行文本：所有文本 span 带 whitespace-pre-wrap（CSS 保留 \n，不折叠）', () => {
+    const { container } = render(<MentionRender text={'1. a\n2. b\n3. c'} />);
+    // 无 mention → 末尾剩余文本 span（唯一出口）
+    const spans = textSpans(container);
+    expect(spans.length).toBe(1);
+    expect(spans[0]!.textContent).toBe('1. a\n2. b\n3. c');
+  });
+
+  it('mention 混合场景：text+pill+text 的前置/末尾文本 span 都保留换行', () => {
+    const text =
+      '第1行\n第2行 <mention type="file" path="a.ts" icon="file" label="a.ts"/> 第3行\n第4行';
+    const { container } = render(<MentionRender text={text} />);
+    // pill 正常渲染（1 个）
+    expect(container.querySelectorAll('[data-mention-icon]').length).toBe(1);
+    // 前置文本 span（mention 前）带 whitespace-pre-wrap 且保留 \n
+    const spans = textSpans(container);
+    expect(spans.length).toBe(2); // 前置 + 末尾
+    expect(spans[0]!.textContent).toBe('第1行\n第2行 ');
+    expect(spans[1]!.textContent).toBe(' 第3行\n第4行');
+  });
+
+  it('旧 tag 降级 span 也保留换行（同语义：降级纯文本不折叠）', () => {
+    const oldTag = '<mention type="file" path="src/a.ts"/>';
+    const { container } = render(<MentionRender text={`前\n${oldTag}\n后`} />);
+    // 前置 + 降级 + 末尾三个文本出口全带 whitespace-pre-wrap
+    const spans = textSpans(container);
+    expect(spans.length).toBe(3);
+    expect(spans[0]!.textContent).toBe('前\n');
+    expect(spans[1]!.textContent).toBe(oldTag);
+    expect(spans[2]!.textContent).toBe('\n后');
+  });
+
+  it('mention pill 不受影响：pill 元素无 whitespace-pre-wrap（原样保留）', () => {
+    const text = '<mention type="file" path="a.ts" icon="file" label="a.ts"/>';
+    const { container } = render(<MentionRender text={text} />);
+    const pill = container.querySelector('[data-mention-icon]') as HTMLElement;
+    expect(pill).toBeTruthy();
+    expect(pill.className).not.toContain('whitespace-pre-wrap');
+  });
+});

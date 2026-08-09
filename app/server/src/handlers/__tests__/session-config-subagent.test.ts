@@ -116,8 +116,8 @@ describe('buildSessionConfigFromDeps — [v0.0.28] subAgentConfig 覆盖', () =>
     const toolNames = (config.tools as Array<{ definition: { name: string } }>).map((t) => t.definition.name);
     expect(toolNames).toContain('agent');
     expect(toolNames).toContain('bash');
-    // maxIterations 走顶层默认 DEFAULT_MAX_ITERATIONS（agent-loop-lifecycle.ts = 200）
-    expect(config.maxIterations).toBe(200);
+    // maxIterations 走顶层默认 DEFAULT_MAX_ITERATIONS（agent-loop-lifecycle.ts = 1000）
+    expect(config.maxIterations).toBe(1000);
   });
 
   it('subAgentConfig.skills 覆盖也持久化（inline spawn 带 skills）', async () => {

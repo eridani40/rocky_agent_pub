@@ -23,7 +23,8 @@ export function MentionRender({ text }: { text: string }) {
   MENTION_RE.lastIndex = 0;
   for (let m = MENTION_RE.exec(text); m !== null; m = MENTION_RE.exec(text)) {
     if (m.index > lastIndex) {
-      parts.push(<span key={`t${idx++}`}>{text.slice(lastIndex, m.index)}</span>);
+      // [v0.0.281] 文本片段 whitespace-pre-wrap：保留换行/连续空格（CSS 默认 normal 会折叠 \n）
+      parts.push(<span key={`t${idx++}`} className="whitespace-pre-wrap">{text.slice(lastIndex, m.index)}</span>);
     }
     const attrs = parseTagAttrs(m[1] ?? '');
     const { icon, label, badge } = attrs;
@@ -33,13 +34,13 @@ export function MentionRender({ text }: { text: string }) {
         <MentionPill key={`p${idx++}`} icon={icon} label={label} badge={badge} />,
       );
     } else {
-      // 旧 tag（缺 display）→ 降级纯文本，整段 tag 字符串原样显示
-      parts.push(<span key={`p${idx++}`}>{m[0]}</span>);
+      // 旧 tag（缺 display）→ 降级纯文本，整段 tag 字符串原样显示（同语义保留换行）
+      parts.push(<span key={`p${idx++}`} className="whitespace-pre-wrap">{m[0]}</span>);
     }
     lastIndex = m.index + m[0].length;
   }
   if (lastIndex < text.length) {
-    parts.push(<span key={`t${idx++}`}>{text.slice(lastIndex)}</span>);
+    parts.push(<span key={`t${idx++}`} className="whitespace-pre-wrap">{text.slice(lastIndex)}</span>);
   }
   return <>{parts}</>;
 }

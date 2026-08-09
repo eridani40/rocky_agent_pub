@@ -227,7 +227,9 @@ function SectionChatSessionLoaded({
   // 右缘 overlay：minimap/floatMenu 按 capabilities；cron=false → hideCron
   const rightOverlaySlot = (caps.minimap || caps.floatMenu) && (
     <ComponentChatRightOverlay sessionId={sessionId} hideCron={!caps.cron} bars={caps.minimap ? bars : []}>
-      {caps.floatMenu && <ComponentChatFloatMenu sessionId={sessionId} hideCron={!caps.cron} />}
+      {caps.floatMenu && (
+        <ComponentChatFloatMenu sessionId={sessionId} hideCron={!caps.cron} chrome={chrome} />
+      )}
     </ComponentChatRightOverlay>
   );
 

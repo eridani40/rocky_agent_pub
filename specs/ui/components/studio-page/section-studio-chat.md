@@ -38,9 +38,10 @@ interface SectionStudioChatProps {
 
 | 形态 | 判定 | topbarLeft | backActionKey |
 |---|---|---|---|
-| 单聊 | member 命中 | MemberAvatar(sm，纯展示不可点) + member.name + `chrome.tag` | `studio.member-chat.back` |
-| 群聊 | memberId 空 / member 缺失兜底 | 缺省 ChatSessionTopbarLeft（chrome.title=squad 名 + tag） | `studio.group-chat.back` |
+| 单聊 | member 命中 | **MemberAvatar(sm，纯展示不可点) + member.name + `chrome.tag`** | `studio.member-chat.back` |
+| 群聊 | memberId 空 / member 缺失兜底 | **缺省 ChatSessionTopbarLeft（chrome.title=squad 名 + tag）** | `studio.group-chat.back` |
 
+- **topbarLeft 恢复 268 前形态（v0.0.269）**：`SquadStatusEntry` 已删除——团队状态入口从 topbar 挪到 chat 右上浮菜单（`component-chat-float-menu.md` 第 4 项「团队状态」→ `ComponentSquadStatusModal`）。单聊 = MemberAvatar + name + tag（v0.0.216 原形态）；群聊 = 显式 `<ChatSessionTopbarLeft chrome={chrome}/>`（readOnly 缺省取 chrome.readOnly，与 SectionChatSession defaultTopbarLeft 行为等价——原 undefined 走缺省，现显式）。
 - 空态文案：`studio:chat.emptyHint`（经 emptyStateSlot 注入）。
 - rootTag='main' + fadeIn（与旧两页一致）；key={sessionId} remount 由 router 保证。
 - 发送按钮 actionKey 统一 `chat.message.send`（旧 `studio.message.send` 随壳退役）。
@@ -49,6 +50,7 @@ interface SectionStudioChatProps {
 
 无本组件新增 testid——顶栏/输入区/消息流节点全部继承 SectionChatSession 及其子组件契约
 （chat-topbar-back-btn / base-chat-input-bar / component-message-stream 各自 spec）。
+团队状态入口/弹层 testid 见 `component-squad-status-modal.md`（squad-status-modal / squad-status-row-{memberId}）。
 
 ## 复用关系
 

@@ -72,6 +72,7 @@ describe('createSquadService 成功（8 步事务 + 双向关联）', () => {
     expect(squad!.name).toBe('alpha-squad');
     expect(squad!.enableHeartBeat).toBe(false); // 占位 v4 默认 false
     expect(squad!.budget).toBeNull();
+    expect(squad!.enableGroupChat).toBe(true); // [v0.0.270] 群聊可见性默认开
 
     // leader member（role=leader, state=deployed）
     const leader = await memberStore.getMember(created.squad.id, created.leaderMember.id);
@@ -86,6 +87,14 @@ describe('createSquadService 成功（8 步事务 + 双向关联）', () => {
     }
     // 团队 workspace 简化：不再建 workspaces/{memberId}/ 个人工位
     expect(fs.existsSync(path.join(base, 'workspaces'))).toBe(false);
+  });
+
+  it('[v0.0.270] 建队默认 enableGroupChat=true（群聊可见性默认开；与 enableHeartBeat:false 模式对称，方向相反）', async () => {
+    const created = await createSquadService(deps, validInput);
+    expect(created.squad.enableGroupChat).toBe(true);
+    // 落库可读回
+    const squad = await squadStore.getSquad(created.squad.id);
+    expect(squad!.enableGroupChat).toBe(true);
   });
 
   it('[v0.0.48] leader member.tools 恒为 []（dead 字段：工具集改 static-by-type 查 tool-policy.ts，resolveTools 不读 member.tools）', async () => {

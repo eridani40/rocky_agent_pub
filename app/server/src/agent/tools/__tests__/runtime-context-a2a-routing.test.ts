@@ -17,7 +17,7 @@
  * 'parent' 别名解析到真 parent sid（而非 caller 自身 sid），锁住 a2a 路由正确性。
  */
 import { describe, it, expect } from 'vitest';
-import { resolveAgentRef, parentAgentRef, selfAgentRef } from '../runtime-context';
+import { resolveAgentRef, parentAgentRef, selfAgentRef, resolveAgentRefWithSquad } from '../runtime-context';
 import type { AgentToolRuntimeContext } from '../runtime-context';
 
 /**
@@ -117,5 +117,55 @@ describe('runtime-context: a2a target 别名解析（v0.0.28 BUG 回归锁）', 
     const fixedRtc = makeSubagentRtc({ selfSid, parentSid: 'PARENT-REAL' });
     const fixedResolved = resolveAgentRef('parent', fixedRtc.parentSessionId);
     expect(fixedResolved).toBe('PARENT-REAL');
+  });
+});
+
+describe('runtime-context: resolveSquadAlias squadchat 门控（v0.0.270 群聊开关）', () => {
+  /** 构造 squad 内 mate rtc：squadStore mock 返回含 enableGroupChat 的 squad */
+  function makeSquadRtc(opts: { enableGroupChat?: boolean; squadChatSessionId: string; leaderId?: string }): AgentToolRuntimeContext {
+    const squad = {
+      id: 'SQ-1',
+      leaderId: opts.leaderId ?? 'LEADER-1',
+      squadChatSessionId: opts.squadChatSessionId,
+      ...(opts.enableGroupChat !== undefined ? { enableGroupChat: opts.enableGroupChat } : {}),
+    };
+    const squadStore = { getSquad: async () => squad } as never;
+    return {
+      selfSquadId: 'SQ-1',
+      selfType: 'mate',
+      selfSessionId: 'MATE-SELF',
+      selfName: 'mate-self',
+      squadStore,
+      agentManager: {} as never,
+      store: {} as never,
+      sessionDeps: {} as never,
+    } as unknown as AgentToolRuntimeContext;
+  }
+
+  it('[v0.0.270] enableGroupChat=false → resolveSquadAlias("squadchat") null（send_message 报 cannot resolve target，不静默投递）', async () => {
+    const rtc = makeSquadRtc({ enableGroupChat: false, squadChatSessionId: 'SQUADCHAT-1' });
+    const resolved = await resolveAgentRefWithSquad('squadchat', rtc);
+    expect(resolved).toBeNull();
+  });
+
+  it('[v0.0.270] enableGroupChat=true → resolveSquadAlias("squadchat") squadChatSessionId', async () => {
+    const rtc = makeSquadRtc({ enableGroupChat: true, squadChatSessionId: 'SQUADCHAT-1' });
+    const resolved = await resolveAgentRefWithSquad('squadchat', rtc);
+    expect(resolved).toBe('SQUADCHAT-1');
+  });
+
+  it('[v0.0.270] enableGroupChat=undefined（老 record）→ 仍解析（缺省=开）', async () => {
+    const rtc = makeSquadRtc({ squadChatSessionId: 'SQUADCHAT-1' }); // 无 enableGroupChat 字段
+    const resolved = await resolveAgentRefWithSquad('squadchat', rtc);
+    expect(resolved).toBe('SQUADCHAT-1');
+  });
+
+  it('[v0.0.270] enableGroupChat=false 不影响 leader 私聊解析（关=全私聊语义）', async () => {
+    const rtc = makeSquadRtc({ enableGroupChat: false, squadChatSessionId: 'SQUADCHAT-1', leaderId: 'LEADER-1' });
+    (rtc as unknown as { memberStore?: unknown }).memberStore = {
+      getMember: async () => ({ id: 'LEADER-1', sessionId: 'LEADER-SID' }),
+    };
+    const resolved = await resolveAgentRefWithSquad('leader', rtc);
+    expect(resolved).toBe('LEADER-SID');
   });
 });

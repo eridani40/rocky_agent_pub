@@ -61,6 +61,9 @@ export interface TextBlock {
    * LLM 零侵入：protocol-encode.ts encodeContentBlock 对 text 只读 b.text，不读此字段。
    * [v0.0.50] 消息级 metadata.isSystemReminder 已废止，块级为唯一标记。 */
   isSystemReminder?: boolean;
+  /** [v0.0.294] 块级 sender（仅 role_merge 合并后注入；物理层 transcript block 不带此字段）。
+   * logical-view 按 block.sender 渲染 per-block 前缀，无则回退到 message.sender。 */
+  sender?: MessageSender;
 }
 
 /**

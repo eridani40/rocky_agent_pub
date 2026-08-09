@@ -276,10 +276,10 @@ describe('team 工具 definition（schema 契约）', () => {
     expect(teamTool.definition.name).toBe('team');
   });
 
-  it('action enum = 6 action（只读 2 + 写 4）', () => {
+  it('action enum = 7 action（只读 2 + 写 5；v0.0.282 加 reset）', () => {
     const actionSchema = teamTool.definition.inputSchema.properties
       ?.action as { enum?: string[] };
-    expect(actionSchema?.enum).toEqual(['list', 'query', 'hire', 'deploy', 'bench', 'edit']);
+    expect(actionSchema?.enum).toEqual(['list', 'query', 'hire', 'deploy', 'bench', 'edit', 'reset']);
   });
 
   it('description 标注写 action（hire/deploy/bench/edit）', () => {

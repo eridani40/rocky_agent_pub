@@ -204,7 +204,7 @@ export function PanoramaView({ squadId, schema, activeViewId, entityEvent }: Pan
   const editingEntityDef = editing ? schema.entities[editing.entity] : undefined;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 px-8 pb-6 pt-5">
+    <div className="flex flex-col gap-3 px-8 pb-6 pt-5">
       {/* toolbar：左 归档开关（仅 view.filter.archived 时）+ 右 +新建/刷新（h-7） */}
       <div className="flex items-center justify-between gap-2">
         {hasArchiveFilter ? (
@@ -237,8 +237,8 @@ export function PanoramaView({ squadId, schema, activeViewId, entityEvent }: Pan
         </div>
       </div>
 
-      {/* 当前 view 渲染区（三原语装配） */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* 当前 view 渲染区（三原语装配）— [v0.0.294] 去掉 min-h-0/flex-1/overflow-y-auto，内容自然撑开卡片高度，整页滚动由外层 seats-body overflow-y-auto 负责 */}
+      <div className="flex flex-col gap-3">
         {view.component === 'kanban' && (
           <PanoramaKanban
             view={view}

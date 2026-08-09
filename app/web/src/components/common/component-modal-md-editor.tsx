@@ -11,13 +11,14 @@
  * L3 modal 走 Portal + 根节点显式 pointer-events-auto（`specs/ui/components/_conventions.md` §13：
  * 脱离祖先 pointer-events/stacking 链；overlay-root 为 pointer-events:none 且可继承，漏 auto 则全穿透）。
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FileFormat, FileFormatCategory } from '../../lib/file-format';
 import { getCategory } from '../../lib/file-format';
 import { formatText, validateText } from '../../lib/file-format/index';
 import { Portal } from '../../lib/portal';
 import { PrimitiveMarkdownView } from './primitive-markdown-view';
+import { deriveBaseDir } from './primitive-markdown-image';
 import { BTN_PRIMARY, BTN_SECONDARY, ICON_BTN } from '../academy-page/academy-styles';
 
 interface Props {
@@ -38,6 +39,10 @@ interface Props {
    * （仅 structured 显示，plain/md 用 visibility:hidden 占位）。
    */
   format?: FileFormat;
+  /** [v0.0.286] 文件完整路径（derive baseDir 供 PrimitiveMarkdownView resolve relative 图片；academy 等无文件场景不传） */
+  filePath?: string;
+  /** [v0.0.286] 会话 ID（relative 图片走 readWorkspaceFileBinary HTTP；无 sessionId 时 relative 图降级 alt） */
+  sessionId?: string;
   /** 只读（process 版本）→ 隐藏编辑切换 + 保存 */
   readOnly?: boolean;
   /** 保存回调（edit 模式「保存」；成功后父级关弹层或切回 view） */
@@ -52,7 +57,7 @@ type ValidateState =
   | { kind: 'error'; msg: string };
 
 /** 统一文件弹层（mode-toggle 二段「👁 查看 / ✏️ 编辑」，激活黑底白字） */
-export function ComponentModalMdEditor({ open, fileName, subtitle, initialValue, versionLabel, hint, format, readOnly = false, onSave, onClose }: Props) {
+export function ComponentModalMdEditor({ open, fileName, subtitle, initialValue, versionLabel, hint, format, readOnly = false, onSave, onClose, filePath, sessionId }: Props) {
   const { t } = useTranslation('academy');
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [draft, setDraft] = useState(initialValue);
@@ -60,9 +65,24 @@ export function ComponentModalMdEditor({ open, fileName, subtitle, initialValue,
   const [saveError, setSaveError] = useState<string | null>(null);
   const [validateResult, setValidateResult] = useState<ValidateState>({ kind: 'idle' });
 
+  /** edit textarea ref（内容自适应高度用——scrollHeight 同步） */
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
   // 派生一次：format + category（避免多次调用 getCategory）
   const fmt: FileFormat = format ?? 'md';
   const category: FileFormatCategory = getCategory(fmt);
+
+  /**
+   * edit textarea 内容自适应高度（v0.0.283）：
+   * 每次进入 edit 模式 / draft 内容变化 → 先置 auto（重置后重测 scrollHeight）→ 再设 scrollHeight。
+   * 与 view 模式内容驱动撑高行为一致；modal shell max-h-88vh 约束内部滚动，min-h-280px 下限防抖。
+   */
+  useLayoutEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [mode, draft]);
 
   // open 变化时重置内部态（每次打开回到 view + 最新原文 + 清校验结果）
   useEffect(() => {
@@ -184,7 +204,7 @@ export function ComponentModalMdEditor({ open, fileName, subtitle, initialValue,
               category === 'md' ? (
                 // md 走 markdown 渲染（academy 不传 format 缺省 'md'，回归保护）
                 <div className="px-[22px] py-[18px] text-[13.5px] leading-[1.75] text-fg">
-                  <PrimitiveMarkdownView source={draft} />
+                  <PrimitiveMarkdownView source={draft} baseDir={deriveBaseDir(filePath)} sessionId={sessionId} />
                 </div>
               ) : (
                 // structured/plain 走 <pre> 朴素预览（无高亮/行号/折叠，PRD §2.2）
@@ -192,9 +212,10 @@ export function ComponentModalMdEditor({ open, fileName, subtitle, initialValue,
               )
             ) : (
               <textarea
+                ref={taRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                className="w-full h-full min-h-[280px] px-[22px] py-[18px] border-none outline-none resize-none font-mono text-[13px] leading-[1.7] text-fg bg-surface"
+                className="w-full min-h-[280px] px-[22px] py-[18px] border-none outline-none resize-none font-mono text-[13px] leading-[1.7] text-fg bg-surface overflow-y-auto"
               />
             )}
           </div>

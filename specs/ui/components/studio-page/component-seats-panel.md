@@ -3,6 +3,7 @@
 > 层级: section
 > 文件: app/web/src/components/studio-page/component-seats-panel.tsx
 > v0.0.244：新增 seats 视图筛选——`useState<SeatsView>('active')` 持视图 state（唯一源）；mateRows 派生 = `seats.filter(!isLeader)` → `deriveViewRows(rows, view)` 单点过滤（active → 只留 `state==='deployed'`）；SeatsBody 加 `view`/`onViewChange` 透传 roster 头 `SeatsViewSwitch`。
+> v0.0.276：seats 激活即刷新——每次进入/返回 seats（初始 mount + selectSquad + fallbackToSeats 回落 + handleChatBack chat 返回）父层 page-studio 都 reloadDetail 重拉 detail（见「数据刷新语义」节）。
 
 ## 职责
 Studio 主区「团队首页」单页中枢容器：常驻头部（squad 名 + 在线 badge + 坐席/管理/自动工作 3 tab）+ 按 activeTab 切换主体：
@@ -30,7 +31,25 @@ Studio 主区「团队首页」单页中枢容器：常驻头部（squad 名 + �
 ## 状态 / 交互
 - header tab 点击 → `setActiveTab(id)`；其他状态零副作用
 - **seats 视图筛选（v0.0.244）**：`seatsView: SeatsView = 'active' | 'all'`（默认 'active' 在岗），**view state 归本组件（唯一源）**；过滤单点 = `mateRows = deriveViewRows(seats.filter(r => !r.isLeader), seatsView)`（active → `member.state === 'deployed'`；all → 全量）；`view`/`onViewChange` 透传 SeatsBody（SeatsBody/SeatsViewSwitch 均不持状态不过滤）。leaderRow 不受过滤影响（leader 恒 deployed）；页头 onlineBadge / TokenWidget / SeatStats 口径零改（不属 roster 头计数）
+- **buildMemberChatNode 公共 helper（v0.0.268 DRY）**：本组件内部 `buildMemberChatNode` 实现改为委托 `squad-status-utils.ts` 公共 helper（成员查找 + ChatNode 组装，tag 规则 leader→`squadTree.tagLeader` / mate→`squadTree.tagSingle` + squadId）——**坐席卡「进入对话」与成员状态弹层（v0.0.269 起 `component-squad-status-modal`，268 为 SquadStatusEntry 面板）「进入对话」同源组装**（PRD §5 概念对齐）。签名保留（`(memberId) => ChatNode | null`，caller 零改动）。
 - 空成员态（`detail.members.length === 0`）：只显 leader 行（后端保证有 leader）与「+」卡；mates 段落隐藏
+
+## 数据刷新语义（seats 激活即刷新）
+
+**每次进入/返回 seats 视图都重新拉取 squad detail**（成员状态 + presence 新鲜）——由父层 `page-studio.tsx` 触发 `reloadDetail(squadId)`（GET /squad/:id → setDetail；失败 setDetail(null) → seats 走 loading 兜底），SeatsPanel 是纯函数组件，detail 变化自然全量 re-render（等效「整个重新渲染页面」）。覆盖全部进入/返回入口：
+
+| 入口 | 触发点 | reloadDetail |
+|---|---|---|
+| 初始 mount | 挂载拉 squad 列表后自动选中第一个 squad | `await reloadDetail(id)`（既有） |
+| selectSquad（切 squad） | 侧栏点 squad 行落 seats | `void reloadDetail(id)`（既有） |
+| fallbackToSeats（mutation 回落 + token-stats/member/member-create 返回） | mutation handler 簇回落首页 seats | `void reloadDetail(selectedSquadId)`（v0.0.276 新增，非空时） |
+| handleChatBack（chat 返回） | chat 页 topbar 返回键回 seats | `void reloadDetail(chatBackSquadId)`（v0.0.276 新增，非空时） |
+
+**为什么需要（bug 核心）**：running/idle 状态（presence 三态 + spinner）**已由 SSE 实时覆盖**——`useStudioUnreadMeta` 订阅 `session_meta _all` → `stateMap[sid]`，`useSeatsData` 的 `derivePresence/isRunning` 走 stateMap，SSE 一直推。但 **presence 文本（member.currentWork）无 SSE**——Member.currentWork 只在 SquadDetail.members[]（presence tool 写 member store，不推 session_meta）→ **reloadDetail 是唯一刷新途径**。member.state（deployed/benched）为 detail 静态（mutation 后 refresh 已处理），reloadDetail 兜底。
+
+**fire-and-forget（R5）**：进/返 seats 调 `void reloadDetail`（不 await 阻塞渲染）——立即渲染旧 detail，GET 返回 setDetail 新对象 → re-render 更新；本地 server GET 快，用户几乎无感。
+
+**保留与双拉接受**：selectSquad / 初始 mount / member-panel 返回（onBack 既有 reloadDetail）/ mutation 后 refresh（reloadDetail + reloadSquads 并行）全部保留不变。mutation 路径会 refresh（内部 reloadDetail）+ fallbackToSeats（又 reloadDetail）**两次 GET /squad/:id**——幂等无害（GET 轻量、频率低、setDetail 同值无害），接受不玩精细判断。
 
 ## 视觉基线
 - 布局：，主 header 底边 `--border`；主体 padding 20px 24px

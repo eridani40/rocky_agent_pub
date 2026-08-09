@@ -231,3 +231,83 @@ describe('ComponentModalMdEditor — v0.0.241 format 分流', () => {
     expect(screen.getByText('✓ 格式正确')).toBeTruthy();
   });
 });
+
+/**
+ * v0.0.283 edit textarea 内容自适应高度
+ * edit 模式 textarea 改为内容驱动撑高（ref + scrollHeight 同步），与 view 行为一致。
+ * jsdom scrollHeight 默认 0，需 mock 为模拟值验证 useLayoutEffect 设了 height。
+ */
+describe('ComponentModalMdEditor — v0.0.283 内容自适应高度', () => {
+  it('edit 模式 textarea 高度随 scrollHeight 变化（内容驱动撑高）', () => {
+    // mock scrollHeight 返回模拟值（jsdom 默认 0）
+    let mockScrollHeight = 600;
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() { return mockScrollHeight; },
+    });
+    try {
+      renderModal({ initialValue: '内容\n'.repeat(50) });
+      fireEvent.click(screen.getByRole('button', { name: '✏️ 编辑' }));
+      const ta = document.querySelector('textarea') as HTMLTextAreaElement;
+      expect(ta).toBeTruthy();
+      // useLayoutEffect 应把 height 设成 scrollHeight（600px）
+      expect(ta.style.height).toBe('600px');
+    } finally {
+      // 恢复（避免影响后续用例）
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+    }
+  });
+
+  it('内容变化 → textarea 高度重算（短内容→长内容→短内容）', () => {
+    let mockScrollHeight = 300;
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() { return mockScrollHeight; },
+    });
+    try {
+      renderModal({ initialValue: 'short' });
+      fireEvent.click(screen.getByRole('button', { name: '✏️ 编辑' }));
+      const ta = document.querySelector('textarea') as HTMLTextAreaElement;
+      expect(ta.style.height).toBe('300px');
+
+      // 模拟长内容变化 → scrollHeight 变大
+      mockScrollHeight = 800;
+      fireEvent.change(ta, { target: { value: '长内容\n'.repeat(100) } });
+      expect(ta.style.height).toBe('800px');
+
+      // 缩短回来 → scrollHeight 变小（auto 重置后再测）
+      mockScrollHeight = 250;
+      fireEvent.change(ta, { target: { value: 'short again' } });
+      expect(ta.style.height).toBe('250px');
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+    }
+  });
+
+  it('模式切换不 crash（view→edit→view→edit 连续切换 textarea 高度重算）', () => {
+    let mockScrollHeight = 500;
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() { return mockScrollHeight; },
+    });
+    try {
+      renderModal();
+      // view→edit
+      fireEvent.click(screen.getByRole('button', { name: '✏️ 编辑' }));
+      let ta = document.querySelector('textarea') as HTMLTextAreaElement;
+      expect(ta.style.height).toBe('500px');
+
+      // edit→view（textarea 卸载）
+      fireEvent.click(screen.getByRole('button', { name: '👁 查看' }));
+      expect(document.querySelector('textarea')).toBeNull();
+
+      // view→edit（textarea 重新挂载 + useLayoutEffect 重算）
+      mockScrollHeight = 700;
+      fireEvent.click(screen.getByRole('button', { name: '✏️ 编辑' }));
+      ta = document.querySelector('textarea') as HTMLTextAreaElement;
+      expect(ta.style.height).toBe('700px');
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+    }
+  });
+});

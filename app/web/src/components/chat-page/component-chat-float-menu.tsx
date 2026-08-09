@@ -2,16 +2,23 @@
  * component-chat-float-menu —— 聊天区右上悬浮菜单（v0.0.131 新建）
  * 参考: specs/ui/components/chat-page/component-chat-float-menu.md
  *
- * 竖向工具条：长期记忆 / 定时任务 / skills / 待办 四个菜单项（memory/cron/todo 带 badge；
- * skills 无计数需求不挂 badge；顺序 1=memory/cron/skills 自上而下，v0.0.223 第 4 项 todo
- * 位于 skills 下方）。恒挂载 useMemoryCrud + useCronCrud + useSkillsCatalog + useTodoCrud
+ * 竖向工具条：长期记忆 / 定时任务 / skills / 团队状态 / 待办 五个菜单项（memory/cron/todo 带 badge；
+ * skills 无计数需求不挂 badge；v0.0.269 第 4 项「团队状态」（squad 图标 + running badge，skills 下方
+ * todo 上方——todo 保持最后）。顺序 1=memory/cron/skills/squad-status/todo 自上而下）。
+ * 恒挂载 useMemoryCrud + useCronCrud + useSkillsCatalog + useTodoCrud
  * （chat 挂载即拉，badge 才有意义），badge 与弹层列表同一 hook 实例（弹层开关不重 GET；
  * skills 弹层每次打开由弹层侧 refetch，PRD UC-S7）。
  * hideCron=true（squad 群聊无主 cron）→ cron 菜单项不挂载 + cron hook enabled=false（零网络）。
  *
+ * 团队状态项（v0.0.269）：useSquadStatus() 读 SquadStatusContext（page-studio chat 分支 Provider 下传）；
+ *   无 Provider → 按钮不渲染（fail-safe，playground/academy 无 Provider 不显示）；有 Provider → 点开
+ *   ComponentSquadStatusModal（currentMemberId = chrome?.memberId，防套娃）。running badge 计数
+ *   deriveRunningCount（deployed 成员 isRunningState 计数含 leader；0 态不显示数字）。
+ *
  * 点菜单项 → openModal state 挂对应弹层（component-memory-modal / component-cron-modal /
- * component-skills-modal / component-todo-modal），memory/cron 弹层内部自持二级视图
- * （list/editor），skills 弹层为 3 tab 只读，todo 弹层为双层树只读（v0.0.223）。
+ * component-skills-modal / component-todo-modal / component-squad-status-modal），memory/cron 弹层
+ * 内部自持二级视图（list/editor），skills 弹层为 3 tab 只读，todo 弹层为双层树只读（v0.0.223），
+ * squad-status 弹层为成员状态分区只读（v0.0.269）。
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -24,12 +31,19 @@ import { ComponentMemoryModal } from './component-memory-modal';
 import { ComponentCronModal } from './component-cron-modal';
 import { ComponentSkillsModal } from './component-skills-modal';
 import { ComponentTodoModal } from './component-todo-modal';
+import { ComponentSquadStatusModal } from '../studio-page/component-squad-status-modal';
+import { useSquadStatus } from '../studio-page/squad-status-context';
+import { deriveRunningCount } from '../studio-page/squad-status-utils';
+import { Icon } from '../studio-page/studio-icons';
+import type { SessionChromeView } from '../../lib/chat-api';
 
 export interface ChatFloatMenuProps {
   /** 当前 session id（memory/cron/skills/todo 均 session 级） */
   sessionId: string;
   /** 隐藏「定时任务」项（squad 群聊 cron 无主）；缺省 false */
   hideCron?: boolean;
+  /** 已装配 chrome（studio chat 路由注入；currentMemberId 来源——防套娃判定） */
+  chrome?: SessionChromeView;
 }
 
 /** badge：绝对定位右上角角标，count<=0 不渲染（不占位，不推动图标） */
@@ -45,9 +59,9 @@ function Badge({ count }: { count: number }) {
   );
 }
 
-export function ComponentChatFloatMenu({ sessionId, hideCron = false }: ChatFloatMenuProps) {
+export function ComponentChatFloatMenu({ sessionId, hideCron = false, chrome }: ChatFloatMenuProps) {
   const { t } = useTranslation('chat');
-  const [open, setOpen] = useState<'memory' | 'cron' | 'skills' | 'todo' | null>(null);
+  const [open, setOpen] = useState<'memory' | 'cron' | 'skills' | 'squad-status' | 'todo' | null>(null);
 
   // 数据所有权单一源：恒挂载，弹层开关不重 GET，badge 与弹层列表同一实例（component-chat-float-menu.md §2）
   const memory = useMemoryCrud('session', sessionId);
@@ -55,10 +69,15 @@ export function ComponentChatFloatMenu({ sessionId, hideCron = false }: ChatFloa
   const skills = useSkillsCatalog(sessionId);
   const todo = useTodoCrud(sessionId);
 
+  // 团队状态：读 SquadStatusContext（page-studio chat 分支 Provider 下传；无 Provider → null = 按钮不渲染 fail-safe）
+  const squadCtx = useSquadStatus();
+
   const memoryCount = memory.entries.length;
   const cronCount = cron.jobs.filter((j) => j.enabled).length;
   // todo badge = 未完成主 item 数（status ∉ {done, skipped}；PRD §2.6 拍板「未完成」）
   const todoCount = todo.pendingCount;
+  // running badge = deployed 成员 isRunningState 计数含 leader（口径与 seats isRunning 一致）；0 态 Badge 不渲染
+  const runningCount = squadCtx?.detail ? deriveRunningCount(squadCtx.detail, squadCtx.memberStateMap) : 0;
 
   return (
     <>
@@ -103,7 +122,23 @@ export function ComponentChatFloatMenu({ sessionId, hideCron = false }: ChatFloa
         >
           <StarIcon size={16} />
         </button>
-        {/* todo 第 4 菜单项（v0.0.223，skills 下方）；badge=未完成主 item 数 */}
+        {/* 团队状态第 4 菜单项（v0.0.269，skills 下方 todo 上方——todo 保持最后）；
+            useSquadStatus 无 Provider（playground/academy）→ 按钮不渲染（fail-safe）；
+            running badge=deployed 成员 isRunningState 计数含 leader；0 态 Badge 不渲染（绝对定位不占位） */}
+        {squadCtx && (
+          <button
+            type="button"
+            data-action-key="chat.squad-status.open"
+            onClick={() => setOpen('squad-status')}
+            aria-label={t('floatMenu.squadStatus')}
+            title={t('floatMenu.squadStatus')}
+            className="relative flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-bg-warm hover:text-fg"
+          >
+            <Icon name="squad" size={16} />
+            <Badge count={runningCount} />
+          </button>
+        )}
+        {/* todo 第 5 菜单项（v0.0.223，skills 下方）；badge=未完成主 item 数 */}
         <button
           type="button"
           data-action-key="chat.todo.open"
@@ -125,6 +160,12 @@ export function ComponentChatFloatMenu({ sessionId, hideCron = false }: ChatFloa
       )}
       {open === 'skills' && (
         <ComponentSkillsModal catalog={skills} onClose={() => setOpen(null)} />
+      )}
+      {open === 'squad-status' && squadCtx && (
+        <ComponentSquadStatusModal
+          onClose={() => setOpen(null)}
+          currentMemberId={chrome?.memberId ?? undefined}
+        />
       )}
       {open === 'todo' && (
         <ComponentTodoModal crud={todo} onClose={() => setOpen(null)} />

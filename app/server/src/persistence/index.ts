@@ -54,6 +54,9 @@ export {
 export { FsCrudStore } from './fs-store';
 export type { FsCrudStoreOptions } from './fs-store';
 
+// fs-yield — 进程级 fs I/O 让出闸门 singleton library（v0.0.291）
+export { acquireFsSlot, trackFsTime, resetFsYield } from './fs-yield';
+
 // T4 SqliteCrudStore（接收 SqlDriver 注入，不再内部 new Database）
 export { SqliteCrudStore } from './sqlite-store';
 // createCrudSqlDriver 工厂（双产物 {store, driver}，读写分离）

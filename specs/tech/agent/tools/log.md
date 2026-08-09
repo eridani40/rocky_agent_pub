@@ -1,10 +1,30 @@
 ---
 type: log
 title: Tools KB 变更记录
-updated: 2026-08-03
+updated: 2026-08-07
 ---
 
 # Tools KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-07 · v0.0.272（Chrome 孤儿进程对账回收 — marker 白名单 + 三层判定 + 双段扫描）
+
+- **`[P1]browser_instance_manager.md`**：§3.1 总览 + §3.2 WorkerHandle 加 chromePid 字段；§4.1 launch 确认帧携带 chromePid；§4.6 兜底闭环加对账扫描；**§4.7 开机自检改「记录 + 扫描双源」**（记录源 cleanupOrphans 同步 + 扫描源构造器末尾 fire-and-forget reconcileOrphans 覆盖无记录孤儿；cleanupOrphan chromePid 优先/旧记录 workerPid 退回）；**§4.8 泄漏路径对照表补「无记录孤儿」行**（进程/目录行加 v0.0.272 对账兜底）；**新增 §4.9 对账兜底回收（全量扫描 diff）**——marker 白名单（isRockyChromeMarker：rocky-browser-worker-/rocky-browser-instance-/et<digits>-prof/CDP 18800-18899 段，白名单非黑名单，绝不用进程名匹配）/ 双段扫描（ChromeScanResult{all,candidates}）/ 三层判定（①pid∈chromePidSet ②ppid∈workerPidSet ③ppid cmdline 含 worker-entry → 活跃，否则孤儿）/ 活跃集合含 starting/closing / 回收（kill 组 + rmSync rocky userDataDir 二次验证 + unpersist + warn）/ 触发（启动 + 10min 周期 unref + close 后 isPidAlive 补 kill）/ chromePid 上报链路（worker-entry 确认帧 → launchReady 透传 → toRecord 持久化）；§9 文件级变更清单追加 T4（v0.0.272 对账兜底）行。
+- **`[P1]browser_tool.md §5`**：进程生命周期补孤儿 chrome 对账回收说明（marker 白名单 + 双段扫描 + 三层判定 + 触发时机 + 用户主 Chrome 零接触），frontmatter updated 2026-08-07。
+- **代码↔spec 偏离核实（doc-modifier 阶段 5，6 项）**：① marker 白名单不误杀用户 Chrome（attach 9222 不命中，白名单过滤非黑名单）✅ ② 活跃表含 starting/closing（instances.values() 全量 + 持久化记录）✅ ③ 三层判定（chromePidSet / workerPidSet / worker-entry ppid 反查）✅ ④ detached 进程组 kill（close 末尾 isPidAlive(chromePid) 补 killProcessGroupByPid 负 pid 杀全家；cleanupOrphan chromePid 优先旧记录退回 workerPid）✅ ⑤ ET 端口段隔离（ET API 43xxx/WEB 45xxx/CDP 46xxx，_ORPHAN_MARKERS 只在 ET 段内用）✅ ⑥ /tmp 严格模式（et-chrome-cleanup.sh `^et[0-9]+-prof 正则双验证 + return 0 防护）✅。**偏离记录**：① T2 清理函数拆 `tests/e2e/lib/et-chrome-cleanup.sh`（coversFiles 外新增——env.sh 297 基线 + 预计 312 超 300 硬约束，拆 lib 守拆分精神，MUST 约束全保持）；② close 兜底改为 close 末尾统一 isPidAlive 校验（不依赖 waitExit 超时判断，覆盖更全）；③ cleanupOrphan chromePid 精确杀组（旧记录退回 workerPid）。
+- 详情：`specs/tech/version_logs/v0.0.272/change_plan.md` + `change_log.md`；BUG `states/bugs/BUG-chrome-orphan-process-leak-[open].md`
+
+## 2026-08-06 · v0.0.264（Browser Instance Manager — 常驻实例 + 前置校验 + 泄漏防护）
+
+- **`[P1]browser_instance_manager.md`（新增）**：session 级浏览器实例管理架构文档——问题定义（一次性执行器根因 vs 用户「像人的浏览器常驻」期望）/ 概念（BrowserInstance / BrowserInstanceManager / 持久 worker / owner 门禁）/ 架构（launch/execute/close/releaseSession/releaseAll + 开机自检 + shutdown hook）/ 生命周期（launch 幂等 / action 前置校验 + idle lazy check / close 三要素清理 / session 兜底 / idle 15min / shutdown hook / 开机自检）/ API（launch/close action + 前置校验铁律）/ worker 协议（单次 → 循环）/ 错误处理（no_browser_instance / worker_crashed / cdp_timeout / idle_timeout / profile_in_use）/ 边界（attach 不动、web_fetch 不受影响、headless 也常驻、instance 纯内存 + 记录文件）/ 泄漏防护对照表（进程/目录/端口/锁四类双保险）。
+- **`[P1]browser_tool.md §1/§2/§3/§7/§10`**：mode①② 从「NodeWorkerDriver.executeOnce 一次性执行器」改为「BrowserInstanceManager 常驻实例」（v0.0.264 主路径）——§1 概述图更新为三执行路径（mode①② InstanceManager 常驻 / mode③ attach connect / executeOnce 仅 web_fetch）；§2 executeOnce 注释标「仅 web_fetch 用」；§3 方案段分双形态（常驻循环 loop:true vs 单次执行器）、§3.1 架构图加形态 A（InstanceManager 常驻循环）/形态 B（executeOnce 单次）、§3.2 设计依据改「一次性 → v0.0.264 常驻循环」、§3.3 文件级实现加 instance-manager.ts/persistent-worker.ts/instance-record.ts + worker-entry 双形态描述 + worker-actions state 参数 + node-worker-driver spawnWorker 抽取 + pick-driver 仅 web_fetch；§7 工具 API 加 launch/close action + 前置校验铁律（非 launch/close 必须经 InstanceManager 校验，无 instance → no_browser_instance 提示先 launch）+ run() 代码更新（attach 分支保留，非 attach 走 im.launch/execute/close，无 im fail-closed 报「未注册」）；§10 边界表加 BrowserInstanceManager 归属行。
+- **代码↔spec 偏离核实**：`tool.ts`（action enum 加 launch/close；attach 分支零改动；非 attach launch/close/execute 全走 im；无 im → errorResult「未注册」；screenshot 拦截保留；createBrowserTool deps 增 instanceManager?）/ `types.ts`（BrowserInstance/PersistentWorker/WorkerSessionState/PersistedInstanceRecord/BrowserLaunchOptions 类型齐全）/ `instance-manager.ts`（launch 幂等 + spawnPersistentWorker + launchConfirm 20s + persistInstance 仅确认后写；execute 前置校验 + idle lazy check + abort 竞速 withAbort + cdp_timeout/worker_crashed 分类；close/releaseSession/releaseAll 共用 closeInstance 三要素清理；cleanupOrphans 开机自检；registerShutdownHooks 模块级标记位幂等；300 行压线）/ `worker-entry.ts`（main() 按 `task.loop === true` 分流 runPersistent/runOnce；persistent 保留连接模式标记；close/stdin-end kill chrome exit）/ `worker-actions.ts`（dispatchAction 增 state 参数，lastRefs 跨 action 保持）/ `node-worker-driver.ts`（executeOnce 保留 web_fetch，spawnWorker 抽取）/ `persistent-worker.ts`（launchConfirm/waitExit/withAbort）/ `instance-record.ts`（read/persist/unpersist/isPidAlive）/ `session.ts` DELETE releaseSession 兜底 / `bootstrap-connectors-phase.ts`（new BrowserInstanceManager({dataDir}) 构造即自检 + noop fallback）/ session-deps + session-config + tools-types 注入链路——均与 change_plan/设计文档一致，无静默偏离。
+- 详情：`specs/tech/version_logs/v0.0.264/change_plan.md` + `change_log.md`
+
+## 2026-08-05 · v0.0.260（browser attach packaged Electron spawn — execPath + ELECTRON_RUN_AS_NODE）
+
+- **`[P1]browser_tool.md §4`**：`resolveChromeMcpLaunch()` 说明扩写——补 packaged Electron 分支：`process.versions.electron` 为真 → `{command:process.execPath, baseArgs:[binAbs], env:{ELECTRON_RUN_AS_NODE:'1'}}`（Electron 二进制纯 node 语义跑 MCP server，绕开 packaged 无 PATH → 裸 `node` spawn ENOENT），与 §3.1 NodeWorkerDriver `defaultSpawn` 同款护栏；dev 保持 `{command:'node'}` 不回归；npx 兜底在 packaged 不可用保持现状。同条补 env 透传链：`connect()` → `StdioTransportOptions.env`（mcp-types.ts）→ mcp-factory `createStdioTransport`（env 仅有值时传入）→ SDK `StdioClientTransport` 内部 merge。
+- **`[P1]browser_tool.md §1 表格 / §2 注释`**：两处「attach 默认 `--browserUrl` loopback」过期描述修正为「默认 `--autoConnect`」（与 §4/§4.1 及 `buildChromeMcpArgs` 一致——chrome 144+ inspect 模式不暴露 `/json/version`，`--browserUrl` 主路径必失败）。
+- **代码↔spec 偏离核实**：`chrome-mcp-driver.ts:279-298 resolveChromeMcpLaunch`（electron 分支 + npx 兜底）/ `:103-113 connect`（launch.env 透传 mcpFactory.create）/ `mcp-factory.ts:120-128 createStdioTransport`（`...(opts.env ? {env: opts.env} : {})`，dev 走 SDK 默认环境）/ `:243-258 buildChromeMcpArgs`（无 browserUrl → `--autoConnect`）与 spec 一致；无静默偏离。
 
 ## 2026-08-03 · v0.0.246（spawn D8 inherit 改用 parent resolved model + providerId 从 client.getInfo 取）
 
@@ -340,3 +360,11 @@ updated: 2026-08-03
 - **`[P1]web_fetch_tool.md`**：§2 inputSchema 加 `render?:boolean`（强制 headless 渲染，跳过静态直起 headless；用于已知 JS 页或静态内容不全时）；§2 run `forceHeadless = render===true` 透传；§3.3 LocalFetcherCtor.forceHeadless + fetchHeadlessOnly（forceHeadless=true 跳过静态直起 headless，无 renderer 优雅降级）；§3.4 FetchContentOptions.forceHeadless；§1/§3.3/§6.5 render action `waitUntil:'load'→'domcontentloaded'`（load 对持续加载页面超时，domcontentloaded 后 DOM 就绪）。
 - **`[P1]browser_tool.md`**：render action waitUntil domcontentloaded 同步。
 - 详情：`specs/tech/version_logs/v0.0.226/change_plan.md`
+
+## 2026-08-06 · v0.0.266（attach 生命周期统一）
+
+- **`[P1]browser_tool.md`**：§4 前置门禁改写——attach 由 ConnectorManager lazy connect → **纳入 BrowserInstanceManager**（launch=ChromeMcpDriver.connect / close=disconnect 不杀 chrome）；§4.1 触发方更新 + close 语义；§7 代码示例重写——action 枚举去 disconnect 统一 close、三模式统一 launch/close/execute。
+- **`[P1]browser_instance_manager.md`**：§3.3 attach 从「保持现状（ConnectorManager）」改「纳入 InstanceManager」；§4 生命周期 attach 分支（launch=connect / close=disconnect 不杀 chrome / releaseSession 覆盖 attach）。
+- **`[P1]connectors.md`**：§3.2 状态机删 lazy connect/owner/disconnect 行；§5 ConnectorManager 接口删 connectForToolRun/getAttachSession/disconnect/getOwner；§6 attach 可用性门禁改 isAttachEnabled（读 switch）注入 InstanceManager。
+- **`[P1]browser_instance_manager.md` + `[P1]browser_tool.md` + `[P1]connectors.md`（T3 registry 重构，追加）**：老板拍板 ActionExecutor registry 重构——抽象 `mode-impl.ts` protocol（BrowserHandle/ModeImpl/ModeImplEnv/SnapshotSink/InMemoryModeImplRegistry）+ WorkerModeImpl（headless/managed 注册同一实例两键）+ AttachModeImpl（失活自愈下沉 impl）；manager 收敛为句柄表 + registry 分发（197 行，零 `mode ===` 路由、不读 handle 私有字段）；**execute 变正确路由（M1「execute 拒绝 attach」防御分支下线）**——attach 操作类 action 与 headless/managed-profile 统一走 `im.execute`，tool.ts 零 attach 分叉（attach 分支 L163-181 删除）；screenshot 落盘下沉 impl 经 `ExecuteCtx.snapshot`（SnapshotSink）；attach-instance.ts 保留纯 helper（connect/disconnect/isAttachConnectionLost），删 hooks 相关。
+- 详情：`specs/tech/version_logs/v0.0.266/change_plan.md`（含 Delta 追加章节）+ `change_log.md`

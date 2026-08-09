@@ -276,6 +276,10 @@ export async function resolveAgentRefWithSquad(
   if (rtc.selfSquadId && rtc.squadStore) {
     const squadSid = await resolveSquadAlias(ref, rtc);
     if (squadSid !== null) return squadSid;
+    // [v0.0.270] 'squadchat' 别名解析失败（enableGroupChat=false 门控 / squad 不存在）→ 返 null 不 fallback 直传：
+    //   否则别名被当 sessionId 字串直传 → send_message 报「session not found」而非契约的「cannot resolve target」。
+    //   'leader'/member name 保持原 fallback（向后兼容，非本版本范围）。
+    if (ref === 'squadchat') return null;
   }
   // fallback：sessionId 字串直传（playground session / ULID / squad 未命中别名场景）
   return ref;
@@ -298,7 +302,11 @@ async function resolveSquadAlias(
   const squad = await rtc.squadStore!.getSquad(rtc.selfSquadId!);
   if (!squad) return null;
   // 优先级 3：'squadchat' → squad.squadChatSessionId
-  if (alias === 'squadchat') return squad.squadChatSessionId;
+  // [v0.0.270] 群聊可见性门控：enableGroupChat === false → 返 null（send_message 报 cannot resolve target，不静默投递）
+  if (alias === 'squadchat') {
+    if (squad.enableGroupChat === false) return null;
+    return squad.squadChatSessionId;
+  }
   // 优先级 4/5 都需 memberStore；未注入则 squadchat 之外都不可解析
   if (!rtc.memberStore) return null;
   // 优先级 4：'leader' → leader member.sessionId

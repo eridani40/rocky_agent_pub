@@ -15,10 +15,11 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { initI18n } from '../../../i18n';
 
-const { getWorkspaceTreeMock, watchMock, unwatchMock, chatApiPath } = vi.hoisted(() => ({
+const { getWorkspaceTreeMock, watchMock, unwatchMock, watchSetMock, chatApiPath } = vi.hoisted(() => ({
   getWorkspaceTreeMock: vi.fn(),
   watchMock: vi.fn(),
   unwatchMock: vi.fn(),
+  watchSetMock: vi.fn(),
   chatApiPath: require('node:path').resolve(__dirname, '../../../lib/chat-api.ts'),
 }));
 
@@ -29,6 +30,7 @@ vi.mock(chatApiPath, () => ({
   updateSession: vi.fn(async () => ({})),
   watchWorkspaceDir: (...args: unknown[]) => watchMock(...args),
   unwatchWorkspaceDir: (...args: unknown[]) => unwatchMock(...args),
+  watchWorkspaceSet: (...args: unknown[]) => watchSetMock(...args),
 }));
 
 import { SectionWorkspacePanel } from '../section-workspace-panel';
@@ -49,9 +51,11 @@ beforeEach(() => {
   getWorkspaceTreeMock.mockReset();
   watchMock.mockReset();
   unwatchMock.mockReset();
+  watchSetMock.mockReset();
   getWorkspaceTreeMock.mockResolvedValue(ROOT_TREE);
   watchMock.mockResolvedValue({ ok: true });
   unwatchMock.mockResolvedValue({ ok: true });
+  watchSetMock.mockResolvedValue({ ok: true });
   useChatStore.getState().setLastWorkspaceEvent(null);
 });
 

@@ -20,6 +20,7 @@ import type { SessionWorkspaceManager } from '../agent/session-workspace-manager
 import type { OpenKind, OpenResult } from '../platform/workspace-open';
 import type { PickResult } from '../platform/workspace-dialog';
 import type { ConnectorManager } from '../tools/browser/connector-manager';
+import type { BrowserInstanceManager } from '../tools/browser/instance-manager';
 import type { ComputerNativePort } from '../platform/computer/native-port';
 import type { SessionMetaBroadcaster } from '../agent/session-meta-broadcaster';
 import type { AutoNamingService } from '../agent/auto-naming-service';
@@ -91,12 +92,13 @@ export interface SessionHandlerDeps {
    */
   pickWorkspaceDirectory?: (currentDir: string | undefined) => PickResult;
   /**
-   * ConnectorManager —— 连接器运行时双状态机（browser tool mode=attach 读 attach session）。
+   * ConnectorManager —— 连接器开关门禁 + UI 状态（v0.0.266 瘦身）。
    * 由 router 从 bootstrap.connectorManager 注入；缺省 → session-config 走 noop（attach fail-closed）。
-   * DELETE /session/:id 时兜底调 connectorManager.disconnect('browser', id) 释放 owner
-   *          （若 owner 非当前 session 则 no-op；idempotent）。
+   * attach session 生命周期已归 BrowserInstanceManager；DELETE /session 兜底走 browserInstanceManager.releaseSession。
    */
   connectorManager?: ConnectorManager;
+  /** BrowserInstanceManager —— headless/managed-profile 常驻浏览器实例（v0.0.264）：注入 ctx.config + DELETE 兜底 releaseSession（幂等，catch 不阻塞 204） */
+  browserInstanceManager?: BrowserInstanceManager;
   /**
    * ComputerNativePort —— computer use 原生能力端口（screenshot 等 tool 读，走主进程能力）。
    * 由 router 从 bootstrap.computerNativePort 注入 → session-config 注入 ctx.config.computerNativePort。

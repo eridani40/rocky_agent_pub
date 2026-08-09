@@ -92,6 +92,7 @@ vi.mock(chatApiPath, () => ({
   // [v0.0.139] SectionWorkspacePanel 挂载即 watch 根（use-workspace-watch.ts），mock 必须补齐
   watchWorkspaceDir: vi.fn(async () => ({ ok: true })),
   unwatchWorkspaceDir: vi.fn(async () => ({ ok: true })),
+  watchWorkspaceSet: vi.fn(async () => ({ ok: true })),
 }));
 
 // —— mock sse-singleton：隔离 SSE 单例（v0.0.88 page-chat 用 getSseClient 单例） —— //

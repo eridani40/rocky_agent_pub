@@ -96,6 +96,24 @@ export interface StudioSessionContext {
 }
 
 /**
+ * [v0.0.279] effort 覆盖链纯函数（squad 团队默认推理强度）。
+ * 覆盖链（老板口径）：成员显式档（low/high/max）→ 用之；否则读团队 effortDefault（low/high/max）→ 用之；否则 undefined（厂商默认，encode 不注入）。
+ * - sessionEffort ∈ {low,high,max} → 用之（成员显式档优先；'default' 与 undefined 同语义=不覆盖）
+ * - squadEffortDefault ∈ {low,high,max} → 用之（团队默认；'default'/undefined=不覆盖）
+ * - 否则 undefined（encode 层 guard 走厂商默认，不加 output_config）
+ * MUST NOT 读 app_config / member 级 effort；返回 'low'|'high'|'max' | undefined。
+ * 参考: specs/tech/version_logs/v0.0.279/change_plan.md（PRD D1）+ llm_protocol_interface §3.8
+ */
+export function resolveEffort(
+  sessionEffort: 'default' | 'low' | 'high' | 'max' | undefined,
+  squadEffortDefault: 'default' | 'low' | 'high' | 'max' | undefined,
+): 'low' | 'high' | 'max' | undefined {
+  if (sessionEffort === 'low' || sessionEffort === 'high' || sessionEffort === 'max') return sessionEffort;
+  if (squadEffortDefault === 'low' || squadEffortDefault === 'high' || squadEffortDefault === 'max') return squadEffortDefault;
+  return undefined;
+}
+
+/**
  * 从 deps + session 持久值构造 SessionConfig（共享段，纯函数无副作用）。
  *
  * 组装顺序：
@@ -230,6 +248,17 @@ export function buildSessionConfigFromDeps(
   // 2. 组装 LlmClient
   const client = buildLlmClient(providerId, modelId, deps.appConfig, deps.pluginManager);
 
+  // [v0.0.279] effort 覆盖链解析（与 resolveModel 同处同时机——每次 run 现拉无 cache）：
+  //   成员显式档（low/high/max）→ 用之；否则读团队 effortDefault（low/high/max）→ 用之；否则 undefined（厂商默认）。
+  //   squad.effortDefault 由 schema（string, required:false）+ PATCH 校验保证合法值，cast 到联合可接受。
+  //   参考: PRD D1/D3 + llm_protocol_interface §3.8（'default' 不注入 output_config，encode guard 兜底）
+  const resolvedEffort = resolveEffort(
+    sessionPersist.effort,
+    isStudio && studioContext!.squad !== undefined
+      ? (studioContext!.squad.effortDefault as 'default' | 'low' | 'high' | 'max' | undefined)
+      : undefined,
+  );
+
   // 3. workdir 接线：优先 session.workspaceDir（spec §1）；缺省/空回退 <DATA_DIR>/workspace
   //    幂等 mkdir（已存在不报错；防外部删后 loop 启动失败）
   const workdir = workspaceDir && workspaceDir.length > 0
@@ -320,21 +349,25 @@ export function buildSessionConfigFromDeps(
     // 生效的 llm_request config + 全部 provider（stage-llm 透传 invoke）。
     llmRequestConfig,
     allProviders,
-    // effort 注入（源头唯一 = session record；undefined → encode 走 default 档）
-    ...(sessionPersist.effort !== undefined ? { effort: sessionPersist.effort } : {}),
+    // effort 注入（[v0.0.279] resolve 覆盖链后的值：成员显式档 → 团队 effortDefault → undefined 厂商默认；
+    //   源头不再直读 session record——encode 层零改动，config.effort 已是 low/high/max/undefined）
+    ...(resolvedEffort !== undefined ? { effort: resolvedEffort } : {}),
     // approvalMode 注入（源头唯一 = session record；undefined → engine 走 normal 分支）
     ...(sessionPersist.approvalMode !== undefined ? { approvalMode: sessionPersist.approvalMode } : {}),
     // 注入 pluginManager，供 web_search 等工具读 exclusive EP provider
     pluginManager: deps.pluginManager,
     // web_fetch 读 ctx.config.appConfig 取 web group（jina 配置）。
     // appConfig 字段下方统一注入（web_fetch + memory mapper 配额等多消费方共用同一服务）。
-    // 注入 connectorManager，供 browser tool mode=attach 读 attach session（门禁复用）
+    // 注入 connectorManager（v0.0.266 起 attach 走 InstanceManager；保留注入供 config/UI 消费方兼容）
     connectorManager: deps.connectorManager,
     // 注入 computerNativePort，供 screenshot tool 走主进程截图（去连接器语义）
     computerNativePort: deps.computerNativePort,
     // 注入 browserDriverRegistry（含 PlaywrightDriver），供 web_fetch headless 兜底
     // + browser tool mode=headless/managed-profile 启 driver
     browserDriverRegistry: deps.browserDriverRegistry,
+    // [v0.0.264] 注入 browserInstanceManager（headless/managed-profile 常驻实例管理器），
+    // browser tool 非 attach 前置校验读（缺省 undefined → 报「未注册」isError）
+    browserInstanceManager: deps.browserInstanceManager,
     // scope param 保留为向后兼容，运行时被忽略——
     // subagent agent 工具不可见由 profile playground-rocky:subagent:main toolBound 不含 'agent' 保证）
     // logWriter 注入（dev-logs §3.1/§3.2 hook）：llm 经 stage-llm/forked-agent

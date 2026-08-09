@@ -1,27 +1,26 @@
 /**
  * component-seats-panel —— Studio 主区团队首页单页中枢（v0.0.170 修订：页头 C 化）
  * 参考: specs/ui/components/studio-page/component-seats-panel.md v1.3
- *       reqs/[working] v0.0.170.squad_home_ui/design-c-console.html（.pagehead / .tabs，视觉契约）
  *
  * 职责：
  *   常驻头部（squad 名 + 在线 badge + 3 tab）+ 按 activeTab 切主体：
- *     - seats: SeatsBody（双列指挥台：左列队长卡/统计/团队 links + 右列 roster 行列表）
+ *     - seats: SeatsBody（v0.0.288 左竖条 token+成员 + 右全景 PanoramaRoute）
  *     - panel: ManageTab（元信息 + 危险区，复用现有）
  *     - autowork: AutoworkTab（toggle + heartbeat + budget + history，复用现有）
  *   本组件内 activeTab 切换 = 首页内联切换，不改父级 mainView。
- * 边界：seats 数据走 use-seats-data；panel/autowork 内容各自子组件管；本容器只透传 handler。
+ * 边界：seats 数据走 use-seats-data（onlineCount）；全景移入 SeatsBody 右列（v0.0.288）。
  */
 import { useCallback, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Member, PatchSquadBody, SquadDetail } from './squad-types';
 import type { SessionState } from '../chat-page/types';
 import type { ChatNode } from './chat-node';
-import { useSeatsData, deriveViewRows, type SeatsView } from './use-seats-data';
+import { useSeatsData, type SeatsView } from './use-seats-data';
+import { buildMemberChatNode as buildMemberChatNodeHelper } from './squad-status-utils';
 import { ManageTab } from './component-manage-tab';
 import { AutoworkTab } from './component-autowork-tab';
 import { SeatsBody } from './component-seats-body';
 import { StudioContextMenu } from './component-studio-context-menu';
-import { PanoramaRoute } from './component-panorama-route';
 
 /** 首页三 tab 内联标识 */
 export type SeatsPanelTab = 'seats' | 'panel' | 'autowork';
@@ -83,20 +82,9 @@ export function SeatsPanel({
   }, []);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  /** 单聊 ChatNode 组装（tag 派生规则：leader/mate 两态，与 use-board-at-mention 同源） */
-  const buildMemberChatNode = (memberId: string): ChatNode | null => {
-    const m = detail.members.find((mm) => mm.id === memberId);
-    if (!m) return null;
-    return {
-      sessionId: m.sessionId,
-      title: m.name,
-      tag:
-        m.role === 'leader'
-          ? t('studio:squadTree.tagLeader', { name: detail.name })
-          : t('studio:squadTree.tagSingle', { name: detail.name }),
-      squadId: detail.id,
-    };
-  };
+  /** 单聊 ChatNode 组装（v0.0.268 DRY：改调 squad-status-utils 公共 helper，行为逐字节一致） */
+  const buildMemberChatNode = (memberId: string): ChatNode | null =>
+    buildMemberChatNodeHelper(detail, memberId, t);
 
   /** 群聊 ChatNode */
   const buildGroupChatNode = (): ChatNode => ({
@@ -107,12 +95,8 @@ export function SeatsPanel({
   });
 
   const onlineCount = stats.onlineCount;
-  const leaderRow = seats.find((r) => r.isLeader) ?? null;
-  // seats 视图筛选：view state 归 panel（唯一源）；过滤单点 = deriveViewRows
-  // （active → 只留 deployed；all → 全量）。SeatsBody/SeatsViewSwitch 受控不持状态不过滤。
-  // leaderRow 不受过滤影响（leader 恒 deployed）；页头 onlineBadge/TokenWidget 口径零改。
+  // [v0.0.288] 视图 state 仍归 panel（唯一源）；过滤移到 SeatsBody 的 derivePanelRows + showBenched=view==='all'
   const [seatsView, setSeatsView] = useState<SeatsView>('active');
-  const mateRows = deriveViewRows(seats.filter((r) => !r.isLeader), seatsView);
 
   return (
     <main
@@ -166,34 +150,18 @@ export function SeatsPanel({
         <>
           <SeatsBody
             detail={detail}
-            seats={seats}
-            leaderRow={leaderRow}
-            mateRows={mateRows}
-            stats={stats}
+            memberStateMap={stateMap}
             view={seatsView}
             onViewChange={setSeatsView}
             onEnterChat={onEnterChat}
             onOpenGroupChat={onOpenGroupChat}
             onOpenTokenStats={onOpenTokenStats}
-            onEditMember={onEditMember}
-            onBenchMember={onBenchMember}
-            onDeployMember={onDeployMember}
             onHire={onHire}
             buildMemberChatNode={buildMemberChatNode}
             buildGroupChatNode={buildGroupChatNode}
+            onAtLeader={onAtLeader}
             onContextMenu={openContextMenu}
           />
-          {/* v0.0.240 第二栏：项目全景内嵌（PanoramaRoute 无 onBack；task tab 恒在 + DSL 动态 views） */}
-          <section data-action-key="studio.squad.panorama-section" className="border-t border-border px-6 pb-6 pt-6">
-            <div className="mb-1.5 flex items-center gap-2">
-              <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                {t('studio:seats.sectionPanorama')}
-              </span>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-border bg-surface">
-              <PanoramaRoute squadId={squadId} onAtLeader={onAtLeader} />
-            </div>
-          </section>
         </>
       )}
       {activeTab === 'panel' && (

@@ -1,9 +1,10 @@
 /**
- * team 工具写 action 子模块 —— schema 常量 + 4 写 action
+ * team 工具写 action 子模块 —— schema 常量 + 5 写 action
  * 参考: specs/tech/squad/[P1]squad_tools.md §0 + §2（inputSchema + action 入参权威）
  *       specs/tech/squad/[P1]data_model.md §5（createMemberService hire 流程）
+ *       specs/tech/agent/session/[P0]session_clear.md §2/§3（reset 复用 clearSession 清理范围）
  *
- * 收纳 4 写 action + 完整 inputSchema + roleId 解析 helper。team-tool.ts import 本文件 run*，不反向 import。
+ * 收纳 5 写 action + 完整 inputSchema + roleId 解析 helper。team-tool.ts import 本文件 run*，不反向 import。
  */
 import type { ToolInput, ToolRunResult, JSONSchemaLike } from '../../tools/types';
 import { errorResult, textResult } from '../../tools/types';
@@ -32,8 +33,8 @@ export const TEAM_INPUT_SCHEMA: JSONSchemaLike = {
   properties: {
     action: {
       type: 'string',
-      enum: ['list', 'query', 'hire', 'deploy', 'bench', 'edit'],
-      description: 'action: list | query | hire | deploy | bench | edit',
+      enum: ['list', 'query', 'hire', 'deploy', 'bench', 'edit', 'reset'],
+      description: 'action: list | query | hire | deploy | bench | edit | reset',
     },
     query: {
       type: 'object',
@@ -226,4 +227,72 @@ export async function runEdit(input: ToolInput, rtc: AgentToolRuntimeContext): P
     if (e instanceof MemberNameConflictError) return errorResult('team.edit: member_name_conflict');
     return errorResult(`team.edit: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/**
+ * reset 写 action — 清空 mate 会话上下文 + presence + todo。
+ * 1. running 保护（state∈{running,interrupting}→拒绝，不 abort）
+ * 2. clearSession 清 transcript/summary/runs/usage（同「清理上下文」按钮链路）
+ * 3. putMember currentWork=null 清 presence（presence 清失败→warning 不阻塞）
+ * 4. todoStore.removeAll 清 todo（缺省→skip）。不动 memory/agent md。
+ * 参考: session_clear §2/§3；squad_tools §2
+ */
+export async function runReset(input: ToolInput, rtc: AgentToolRuntimeContext): Promise<ToolRunResult> {
+  const roleId = typeof input.roleId === 'string' ? input.roleId.trim() : '';
+  if (!roleId) return errorResult('team.reset: roleId required');
+
+  let memberId: string;
+  let sessionId: string | undefined;
+  try {
+    memberId = await resolveMemberId(rtc.memberStore!, rtc.selfSquadId!, roleId);
+    sessionId = (await rtc.memberStore!.getMember(rtc.selfSquadId!, memberId))?.sessionId;
+  } catch (e) {
+    if (e instanceof MemberNotFoundError) return errorResult('team.reset: member not found');
+    return errorResult(`team.reset: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  if (!sessionId) return errorResult('team.reset: member has no session (sessionId missing)');
+
+  // 1. running 保护（不 abort，让 leader 等跑完）
+  const session = await rtc.store.getSession(sessionId);
+  if (session && (session.state === 'running' || session.state === 'interrupting')) {
+    return errorResult(`team.reset: agent is running (state=${session.state}), wait for it to finish or abort first`);
+  }
+
+  // 2. 清 transcript+summary+runs+usage（复用 store.clearSession）
+  try {
+    await rtc.store.clearSession(sessionId);
+  } catch (e) {
+    return errorResult(`team.reset: clearSession failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // 3. 清 presence（read-modify-write 剥信封，对齐 presence-tool.ts 模式；清失败→warning 不阻塞）
+  let presenceWarning: string | undefined;
+  try {
+    const member = await rtc.memberStore!.getMember(rtc.selfSquadId!, memberId);
+    if (member) {
+      const { createdAt: _ca, updatedAt: _ua, version: _v, ...rest } = member as unknown as Record<string, unknown>;
+      void _ca; void _ua; void _v;
+      await rtc.memberStore!.putMember({ ...(rest as object), currentWork: null } as never);
+    }
+  } catch (e) {
+    presenceWarning = `presence clear failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  // 4. 清 todo：todoStore.removeAll(sid)（类型 unknown 需 cast；缺省→skip）
+  let todoWarning: string | undefined;
+  const rawTodoStore = rtc.sessionDeps?.todoStore as { removeAll?: (sid: string) => Promise<void> } | undefined;
+  if (rawTodoStore && typeof rawTodoStore.removeAll === 'function') {
+    try {
+      await rawTodoStore.removeAll(sessionId);
+    } catch (e) {
+      todoWarning = `todo clear failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  // 汇总结果（核心 cleared:true + 附 warnings 如有）
+  const warnings = [presenceWarning, todoWarning].filter(Boolean);
+  const result: Record<string, unknown> = { memberId, sessionId, cleared: true };
+  if (warnings.length > 0) result.warnings = warnings;
+  return textResult(JSON.stringify(result));
 }

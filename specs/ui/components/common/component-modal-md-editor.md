@@ -25,6 +25,8 @@ interface Props {
   hint?: string;          // 覆盖默认 hint 文案；不传走默认模板「直接编辑 · 保存后版本号不变（{{versionLabel}} 仍是 {{versionLabel}}）」
   format?: FileFormat;    // [v0.0.241 新增] 文件格式（缺省 'md'）：决定 view 分流 + edit 是否显示「格式化」「校验」按钮。academy 不传 → 'md' 行为不变
   readOnly?: boolean;     // 只读（process 版本 / chat 链接 viewer）→ 隐藏 mode-toggle 与「保存」按钮，仅 view + 关闭
+  filePath?: string;      // 文件完整路径（derive baseDir 供 PrimitiveMarkdownView resolve 相对图片；academy 等无文件场景不传 → 相对图片降级 alt）
+  sessionId?: string;     // 会话 ID（相对图片走 readWorkspaceFileBinary HTTP；无 sessionId 时相对图降级 alt）
   onSave?: (newValue: string) => Promise<void> | void;  // 落盘纯回调；throw 则组件显 saveError、textarea 内容保留供重试
   onClose: () => void;
 }
@@ -39,7 +41,7 @@ interface Props {
 - **md-head**（p-13/18 + bottom border）：icon 📝（17px）+ `md-file` mono 13.5px/600 fileName + `md-sub` 11px muted subtitle + 右 `mode-toggle`（二段「👁 查看 / ✏️ 编辑」sm，激活 `--color-accent` 黑底白字）+ ✕ 关闭按钮。
 - **md-body**（flex-1 overflow-y-auto，min-h 280px）：
   - **view 模式**（默认）按 `category` 分流（v0.0.241）：
-    - `category === 'md'` → `md-view` markdown 渲染（p-18/22 + 13.5px/1.75 行高；h1 17px/600 mb-8；ul pl-20；li m-3/0；code mono 12px + surface-2 bg + 4px radius + p-1/5）。academy 调用不传 format 走此分支（回归保护）。
+    - `category === 'md'` → `md-view` markdown 渲染（p-18/22 + 13.5px/1.75 行高；h1 17px/600 mb-8；ul pl-20；li m-3/0；code mono 12px + surface-2 bg + 4px radius + p-1/5）。academy 调用不传 format 走此分支（回归保护）。**`md` 走 `PrimitiveMarkdownView` 渲染内核，v0.0.286 起新增 block 级 `![alt](url)` 图片渲染**：`filePath` prop derive `baseDir` → 传给 `PrimitiveMarkdownView` → 相对路径图片 resolve 到 md 文件目录 → workspace 相对走 `readWorkspaceFileBinary` HTTP / 绝对走 `readFileBinary` IPC → base64 → data URL → `<img>`；网络图片 `http(s)://` 直渲。**`filePath` 不传**（academy 场景）→ 无 baseDir → 相对图片降级 alt 文本（网络/绝对路径不受影响）。
     - `category === 'structured' | 'plain'` → `<pre>` 朴素预览（p-18/22 + mono 13px/1.7 + `whitespace-pre-wrap break-words`；保留缩进/换行，**无**语法高亮 / 行号 / 折叠——PRD §2.2 极简风格）。
   - **edit 模式**：`md-edit` textarea 全宽全高（p-18/22 mono 13px/1.7）；所有 format 统一用 textarea（不引入 CodeMirror/Monaco）。
 - **md-foot**（p-12/18 + top border）：

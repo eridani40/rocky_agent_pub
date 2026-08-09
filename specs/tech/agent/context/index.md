@@ -2,7 +2,7 @@
 type: index
 title: Context 子系统总起
 priority: P0
-updated: 2026-08-04
+updated: 2026-08-07
 ---
 
 # Context 子系统总起
@@ -113,7 +113,7 @@ updated: 2026-08-04
 | **内容构建** | | |
 | `system_prompt.md` | system prompt 构建：map→reduce→build 三阶段 + PromptFragment/tier + budget_truncate | [link]([P0]system_prompt.md) |
 | `agent_profile.md` | 「定义你的 agent」section mapper（统一 mapper 按 kind 分支渲染 a/b/c 路径说明，v0.0.232） | [link]([P1]agent_profile.md) |
-| `system_reminder.md` | system reminder：6 内置 provider 链（env/time/workspace/tool_error/todo/reachable_agents）+ 注入最后一条 user message 末尾（保 cache）；squad 系 provider 见 squad KB | [link]([P0]system_reminder.md) |
+| `system_reminder.md` | system reminder：6 内置 provider 链（env/time/workspace/tool_error/todo/squad_agents_status）+ 注入最后一条 user message 末尾（保 cache）；squad 系 provider 见 squad KB | [link]([P0]system_reminder.md) |
 | `prompt_content_files.md` | prompt 正文文件读取层（PromptHandler 抽象基类 + 派生 handler + content 文件） | [link]([P0]prompt_content_files.md) |
 
 > 变更历史见 `log.md`；跨版本发布说明见 `specs/tech/version_logs/vX.Y/change_log.md`。

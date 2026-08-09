@@ -159,6 +159,42 @@ describe('SeatRowView — offline 降级', () => {
   });
 });
 
+describe('SeatRowView — [v0.0.277] idle 弱化（running 突出 + idle 退后）', () => {
+  it('idle（online 没跑）→ 根 opacity-[0.85] + 名字 text-fg-2（弱化轻于 offline 的 opacity-75）', () => {
+    const { container } = render(<SeatRowView row={mkRow({ presence: 'online', isRunning: false })} onEnter={() => {}} />);
+    const row = rowRoot(container);
+    expect(row.className).toContain('opacity-[0.85]');
+    expect(row.className).not.toContain('opacity-75'); // idle ≠ offline
+    // 名字文字调灰（text-fg → text-fg-2）
+    const nameSpan = row.querySelector('span.truncate');
+    expect(nameSpan?.textContent).toBe('张三');
+    expect(nameSpan?.className).toContain('text-fg-2');
+  });
+
+  it('idle（busy 但没跑 = suspended）→ 也弱化（loop 已退出，非 running）', () => {
+    const { container } = render(<SeatRowView row={mkRow({ presence: 'busy', isRunning: false })} onEnter={() => {}} />);
+    expect(rowRoot(container).className).toContain('opacity-[0.85]');
+  });
+
+  it('running（isRunning=true）→ 无 idle 弱化：根无 opacity-[0.85] + 名字 text-fg 全亮 + spinner 在', () => {
+    const { container } = render(<SeatRowView row={mkRow({ presence: 'busy', isRunning: true })} onEnter={() => {}} />);
+    const row = rowRoot(container);
+    expect(row.className).not.toContain('opacity-[0.85]');
+    expect(row.className).not.toContain('opacity-75');
+    const nameSpan = row.querySelector('span.truncate');
+    expect(nameSpan?.className).toContain('text-fg');
+    expect(nameSpan?.className).not.toContain('text-fg-2');
+    expect(spinner(container)).toBeTruthy(); // running 动态标识保留
+  });
+
+  it('offline → idle 弱化不叠加（只有 opacity-75，无 opacity-[0.85]）', () => {
+    const { container } = render(<SeatRowView row={mkRow({ presence: 'offline', isRunning: false })} onEnter={() => {}} />);
+    const row = rowRoot(container);
+    expect(row.className).toContain('opacity-75');
+    expect(row.className).not.toContain('opacity-[0.85]');
+  });
+});
+
 describe('SeatRowView — 回调 + 菜单', () => {
   it('点 enter → onEnter 回调', () => {
     const onEnter = vi.fn();

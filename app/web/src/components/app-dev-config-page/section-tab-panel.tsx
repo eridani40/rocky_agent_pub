@@ -27,6 +27,7 @@ import { SectionObservability } from './observability-config/section-observabili
 import { SectionWebSearchConfig } from './section-web-search-config';
 import { SectionWebFetchConfig } from './section-web-fetch-config';
 import { SectionSeeImageConfig } from './section-see-image-config';
+import { SectionBashConfig } from './section-bash-config';
 import { SectionUserMemory } from './section-user-memory';
 import { PagePluginConfig } from '../plugin-config-page/page-plugin-config';
 import type { GroupInfo } from './section-config-layout';
@@ -124,6 +125,11 @@ export function SectionTabPanel({
           <div className="mt-8">
             <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.see_image.label')}</h3>
             <SectionSeeImageConfig />
+          </div>
+          {/* Bash 工具 section（v0.0.296 新增，沙箱开关） */}
+          <div className="mt-8">
+            <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.bash.label')}</h3>
+            <SectionBashConfig />
           </div>
         </>
       );

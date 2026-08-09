@@ -14,7 +14,7 @@
  * sticky-bottom case 见 use-message-scroll-pagination.test.tsx。
  */
 import { describe, it, expect, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useMessageScrollPagination, LOAD_MORE_THRESHOLD } from '../use-message-scroll-pagination';
 import { makeScrollRef } from './scroll-ref-helper';
 
@@ -54,8 +54,8 @@ describe('useMessageScrollPagination pagination baseline', () => {
     );
     // onScroll 始终定义（sticky-bottom 追踪不依赖 hasMore）
     expect(typeof result.current.onScroll).toBe('function');
-    // 但 hasMore=false 时调用不应触发 loadMore
-    result.current.onScroll();
+    // 但 hasMore=false 时调用不应触发 loadMore（v0.0.262：onScroll 内部同时 setNearBottom → act 包裹）
+    act(() => result.current.onScroll());
     expect(onLoadMore).not.toHaveBeenCalled();
   });
 
@@ -72,7 +72,7 @@ describe('useMessageScrollPagination pagination baseline', () => {
         autoScrollDeps: [50],
       }),
     );
-    result.current.onScroll();
+    act(() => result.current.onScroll());
     expect(onLoadMore).toHaveBeenCalledTimes(1);
   });
 
@@ -89,7 +89,7 @@ describe('useMessageScrollPagination pagination baseline', () => {
         autoScrollDeps: [50],
       }),
     );
-    result.current.onScroll();
+    act(() => result.current.onScroll());
     expect(onLoadMore).not.toHaveBeenCalled();
   });
 
@@ -106,7 +106,7 @@ describe('useMessageScrollPagination pagination baseline', () => {
         autoScrollDeps: [50],
       }),
     );
-    result.current.onScroll();
+    act(() => result.current.onScroll());
     expect(onLoadMore).not.toHaveBeenCalled();
   });
 
@@ -122,6 +122,6 @@ describe('useMessageScrollPagination pagination baseline', () => {
         autoScrollDeps: [50],
       }),
     );
-    expect(() => result.current.onScroll()).not.toThrow();
+    expect(() => act(() => result.current.onScroll())).not.toThrow();
   });
 });

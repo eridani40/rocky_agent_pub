@@ -71,6 +71,9 @@ describe('AutoworkTab（v0.0.57 新建容器）', () => {
     expect(within(autonomyRoot()).queryByText('自主工作已开启，成员将按心跳节奏主动运转')).toBeNull();
   });
 
+  // [v0.0.292] GroupChatToggle 迁出到 manage-tab，autowork-tab 不再渲染群聊开关
+  // —— 原「v0.0.270 群聊开关」两个 case 已删除
+
   it('点击 toggle switch → 上抛 PATCH enableHeartBeat（透传 onSaveMeta）', async () => {
     const onSaveMeta = vi.fn().mockResolvedValue(undefined);
     render(<AutoworkTab detail={mkDetail()} onSaveMeta={onSaveMeta} />);

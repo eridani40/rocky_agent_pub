@@ -63,27 +63,47 @@ export function renderSenderPrefix(sender: MessageSender | undefined): string {
 /**
  * 把前缀注入 message.content（返回新 content blocks，不改原 message）。
  *
- * 注入策略（§3.3）：
- *   - 前缀为空 → 原样返回 content 引用（无拷贝，caller 不修改则安全）
- *   - 首个 block 是 TextBlock → 前缀拼到其 text 前（返回新 TextBlock，不污染原 block）
- *   - 首个 block 非 TextBlock 或空 content → prepend 一个新 TextBlock 承载前缀
+ * [v0.0.294] per-block 前缀注入策略：
+ *   - 遍历每个 block，独立计算前缀来源：
+ *     1. block 有 sender 字段 → 用 block.sender
+ *     2. block 无 sender 但 message 有 sender → 回退到 message.sender（向后兼容未合并的 message）
+ *     3. 都没有 → 无前缀
+ *   - text block：前缀拼到其 text 前（返回新 TextBlock，不 mutate 原 block）
+ *   - 非 text block：prepend 一个新 TextBlock 承载前缀
+ *   - 无前缀的 block 原样保留（不注入空前缀）
  *
  * @param message 业务 Message（读 sender + content）
- * @returns 渲染后的 content blocks（无前缀时 === 原 content 引用）
+ * @returns 渲染后的 content blocks（所有 block 无前缀时 === 原 content 引用）
  */
 export function renderMessageContentWithPrefix(message: Message): ContentBlock[] {
-  const prefix = renderSenderPrefix(message.sender);
-  if (!prefix) return message.content;
+  const result: ContentBlock[] = [];
 
-  const [first, ...rest] = message.content;
-  if (first && first.type === 'text') {
-    // 首个是 text：前缀拼前（新对象，不改原 block）
-    const merged: TextBlock = { type: 'text', text: prefix + first.text };
-    return [merged, ...rest];
+  for (const block of message.content) {
+    // 前缀来源：block.sender 优先，回退到 message.sender
+    const sender = (block as TextBlock).sender ?? message.sender;
+    const prefix = renderSenderPrefix(sender);
+    if (!prefix) {
+      // 无前缀：原样保留
+      result.push(block);
+      continue;
+    }
+    if (block.type === 'text') {
+      // text block：前缀拼前（新对象，不 mutate 原 block）
+      const merged: TextBlock = { type: 'text', text: prefix + block.text };
+      result.push(merged);
+    } else {
+      // 非 text block：prepend 新 TextBlock 承载前缀 + 原 block
+      const prefixBlock: TextBlock = { type: 'text', text: prefix };
+      result.push(prefixBlock, block);
+    }
   }
-  // 首个非 text 或空 content：prepend 新 TextBlock 承载前缀
-  const prefixBlock: TextBlock = { type: 'text', text: prefix };
-  return first ? [prefixBlock, first, ...rest] : [prefixBlock];
+
+  // 所有 block 都无前缀 → 返回原 content 引用（向后兼容无 sender 场景）
+  if (result.length === message.content.length) {
+    const allSame = result.every((b, i) => b === message.content[i]);
+    if (allSame) return message.content;
+  }
+  return result;
 }
 
 /**

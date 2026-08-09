@@ -1,0 +1,60 @@
+{
+  "case_id": "items_crud_tc1",
+  "module": "items",
+  "description": "POST {{BASE}}/items 创建一个 item，校验响应字段，然后 DELETE 清理",
+  "steps": [
+    {
+      "id": 1,
+      "description": "创建一个 item",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE}}/items",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "sample-item",
+          "kind": "demo"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "checks": [
+          {
+            "path": ".data.id",
+            "op": "regex",
+            "value": "^[0-9a-zA-Z_-]{1,64}$"
+          },
+          {
+            "path": ".data.name",
+            "op": "eq",
+            "value": "sample-item"
+          },
+          {
+            "path": ".data.kind",
+            "op": "eq",
+            "value": "demo"
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "description": "清理：删除创建的 item（跨 step 引用 step1.data.id）",
+      "request": {
+        "method": "DELETE",
+        "url": "{{BASE}}/items/{step1.data.id}"
+      },
+      "expect": {
+        "status": 200,
+        "checks": [
+          {
+            "path": ".data",
+            "op": "eq",
+            "value": null
+          }
+        ]
+      }
+    }
+  ]
+}

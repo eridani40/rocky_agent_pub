@@ -50,6 +50,33 @@ function toTextPreview(content: unknown): string {
   return '';
 }
 
+/**
+ * [v0.0.294] 收起态预览截断：取前 maxLen 个字符，英文保留到单词结尾，末尾加 …。
+ * 中文直接截 maxLen 字；英文单词结尾不截断；原文 ≤maxLen 则原样返回（不加 …）。
+ * @param text 原始预览文本
+ * @param maxLen 最大字符数（默认 10）
+ * @returns 截断后的预览（末尾可能带 …）
+ */
+export function truncatePreview(text: string, maxLen = 10): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  // 截取前 maxLen 字符
+  let cut = trimmed.slice(0, maxLen);
+  // 如果截断处后面还有字符，且当前末尾是英文字母/数字，往后扩展到单词结尾
+  if (/[a-zA-Z0-9]/.test(cut.slice(-1))) {
+    for (let i = maxLen; i < trimmed.length; i++) {
+      if (/[a-zA-Z0-9]/.test(trimmed[i]!)) {
+        cut += trimmed[i];
+      } else {
+        break;
+      }
+    }
+  }
+  // 扩展后等于原文（末尾单词本身延伸到结尾）→ 原文就是最佳预览，不加 …
+  if (cut.length >= trimmed.length) return trimmed;
+  return cut + '…';
+}
+
 interface EnqueueViewProps {
   /** 排队项（按 enqueue 顺序） */
   items: EnqueueItem[];
@@ -67,8 +94,8 @@ interface EnqueueViewProps {
  *   切 session unmount 后 fire setCanceling 会 React warn，故 timersRef 跟踪 setTimeout + unmount 清理。
  */
 export function ComponentEnqueueView({ items, running, onCancel }: EnqueueViewProps) {
-  // 本地展开态：enqueueId → open（折叠默认，单条点开看全文）
-  const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
+  // 本地展开态：当前展开的 enqueueId（单值互斥——展开一个自动收起其他，v0.0.285）
+  const [openId, setOpenId] = useState<string | null>(null);
   // cancel 转圈态：转圈中的 enqueueId 集合（纯本地，1s 后回 x）
   const [canceling, setCanceling] = useState<Set<string>>(new Set());
   // cancel 1s 回 x 的 setTimeout 句柄（unmount 时清理防 React warn）
@@ -106,12 +133,14 @@ export function ComponentEnqueueView({ items, running, onCancel }: EnqueueViewPr
   }
 
   return (
+    // [v0.0.285] 对齐修正：外层 w-full + 内层 ml-auto 确保 flex 父容器下右对齐
+    //   原 margin:auto 在非 block 父容器（flex column）下被当居中 → 截图实锤水平居中怪异
+    <div className="w-full flex flex-col items-end mb-2">
     <div
 
       style={{
         width: 'fit-content',
         maxWidth: '460px',
-        margin: '0 0 8px auto',
         display: 'flex',
         flexDirection: 'column',
         gap: '5px',
@@ -128,9 +157,13 @@ export function ComponentEnqueueView({ items, running, onCancel }: EnqueueViewPr
         <span>{head}</span>
       </div>
       {items.map((it, i) => {
-        const open = !!openMap[it.enqueueId];
+        const open = openId === it.enqueueId;
         // BUG-007：强制字符串化，兜底任何意外 ContentBlock[]/{type,text} 流入
         const preview = toTextPreview(it.content);
+        // [v0.0.294] 收起态：取首行 → truncatePreview 截断到 10 字符 + …（永远一行）
+        //   原 v0.0.285 取 firstLine 全部可能很长；现截断到 10 字符 + CSS nowrap ellipsis 确保一行
+        const firstLine = preview.split('\n')[0]!.trim();
+        const collapsedText = truncatePreview(firstLine, 10);
         // 该项是否转圈中（cancel 已点等 SSE 移项）
         const isCanceling = canceling.has(it.enqueueId);
         return (
@@ -142,32 +175,39 @@ export function ComponentEnqueueView({ items, running, onCancel }: EnqueueViewPr
               'group flex items-center gap-2 bg-surface rounded-[10px] pl-2.5 pr-1.5 ' +
               'border border-dashed border-[var(--color-border-strong)] hover:border-[var(--color-accent)] ' +
               'transition-all overflow-hidden ' +
-              (open ? 'py-1.5 items-start' : 'h-8')
+              (open ? 'py-1.5' : 'h-8')
             }
           >
             {/* 序号 pill */}
             <span className="text-[10px] font-mono text-accent bg-accent-light rounded-full px-[7px] py-px shrink-0 leading-tight">
               #{i + 1}
             </span>
-            {/* 内容（折叠态单行截断；展开态 wrap） */}
+            {/* 内容（折叠态单行截断首行；展开态 wrap + max-h 滚动）
+                [v0.0.285] 半行坍塌修复：折叠态去 leading-[32px]（与 h-8 + items-start 冲突导致内容溢出裁切），
+                  改用 leading-tight 让外层 h-8 + items-start 垂直顶部对齐正确撑开
+                [v0.0.293] 顶部对齐：折叠/展开统一 items-start（原折叠 items-center → 序号与按钮两态跳变）
+                [v0.0.293] 长行软折行：展开态加 wordBreak break-word（MentionRender 内部 whitespace-pre-wrap
+                  对无空格长文本不自动断词 → 溢出不折行） */}
             <span
 
               className={
                 'flex-1 min-w-0 text-[12.5px] text-fg-2 ' +
                 (open
-                  ? 'whitespace-normal overflow-visible break-words leading-[1.55]'
-                  : 'whitespace-nowrap overflow-hidden text-ellipsis leading-[32px]')
+                  ? 'whitespace-normal break-words leading-[1.55] max-h-[160px] overflow-y-auto'
+                  : 'whitespace-nowrap overflow-hidden text-ellipsis leading-tight')
               }
+              style={open ? { wordBreak: 'break-word', overflowWrap: 'anywhere' } : undefined}
             >
-              {/* MentionRender 解析 <mention/> tag → pill；无 mention 时降级纯文本（preview 由 toTextPreview 产） */}
-              <MentionRender text={preview} />
+              {/* MentionRender 解析 <mention/> tag → pill；无 mention 时降级纯文本。
+                  [v0.0.294] 折叠态喂 collapsedText（10 字符截断 + …，永远一行）；展开态喂全文 */}
+              <MentionRender text={open ? preview : collapsedText} />
             </span>
-            {/* 展开按钮 */}
+            {/* 展开按钮（互斥：点同一个收起，点另一个切换——openId 单值自动收起其他） */}
             <button
               type="button"
               aria-label={open ? tCommon('action.collapse') : t('enqueue.expandFull')}
               title={open ? tCommon('action.collapse') : t('enqueue.expandFull')}
-              onClick={() => setOpenMap((m) => ({ ...m, [it.enqueueId]: !open }))}
+              onClick={() => setOpenId(open ? null : it.enqueueId)}
               className="w-[22px] h-[22px] rounded-md flex items-center justify-center text-muted cursor-pointer shrink-0 hover:bg-bg-warm hover:text-fg-2 transition-colors"
             >
               <ChevronIcon
@@ -201,6 +241,7 @@ export function ComponentEnqueueView({ items, running, onCancel }: EnqueueViewPr
       })}
       {/* qpulse keyframes（enqueue 脉冲 dot 动画，对照设计稿） */}
       <style>{`@keyframes qpulse {0%,100%{opacity:1}50%{opacity:.3}}`}</style>
+    </div>
     </div>
   );
 }

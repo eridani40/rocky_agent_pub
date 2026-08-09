@@ -1,10 +1,37 @@
 ---
 type: log
 title: Squad KB 变更记录
-updated: 2026-08-05
+updated: 2026-08-07
 ---
 
 # Squad KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-07 · v0.0.282（team.reset — mate 上下文重置）
+
+- **`[P1]squad_tools.md`**：team 工具 6→7 action——§1 收敛原则枚举加 reset / §2 标题改 7 action + action 全表加 `reset` 行（`roleId`，leader/user only：清 transcript+summary+runs+usage 复用 `store.clearSession` 同聊天页链路 + presence currentWork=null + todo removeAll；running 保护 state∈{running,interrupting} 拒绝不 abort；不动 memory/agent md）/ member 只读段补 reset 拒 / 写 action 单源段补 reset（落 team-write-actions.ts runReset，不走 member-mutations，直接调底层 store）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① runReset 清理链路 L259-262 `rtc.store.clearSession(sid)` → clearSessionStoreOp == 同 POST /session/:id/clear 链路 ✅；② running 保护 L252-255 state∈{running,interrupting}→errorResult 不调 abort ✅；③ presence L264-270 read-modify-write 剥信封 putMember currentWork=null + todo L276-282 removeAll cast 探测缺省 skip ✅；④ memory/agent md grep 0 命中 ✅；⑤ 工具 schema 7 action（enum L36 / TEAM_ACTIONS L26 / WRITE_ACTIONS L29 / dispatch L98 / description L45）四处同步 ✅。
+
+## 2026-08-07 · v0.0.279（squad 团队默认推理强度 effortDefault）
+
+- **`[P1]data_model.md §1.1`**：Squad interface 加 `effortDefault?: 'default'|'low'|'high'|'max'`（[v0.0.279 新增]）——schema `required:false`（存量 squad 无字段=default）+ 读取 `?? 'default'` 兜底（UI 下拉恒有值）+ PATCH `!== undefined` 才写、显式 'default' 也落盘不清空；覆盖链（成员显式 > 团队默认 > 厂商默认）指针 llm_protocol_interface §3.8。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① schema `squad.ts:50` `{ type: 'string', required: false }` ✅；② handler `squad.ts:396-397` 字段级校验 400 先于 404 + `L430` `!== undefined` 落盘（显式 default 也落盘）+ `L269` toDetail 回显 `?? 'default'` ✅；③ session-config `resolveEffort` 纯函数 L107-114（成员 low/high/max → 用之；否则团队 low/high/max → 用之；否则 undefined）+ 调用 L255-260（与 resolveModel 同区，每次 run 现拉无 cache）+ 注入点 L354 ✅；④ 零改动边界（encode / model-resolver / 成员级 picker / createSquad / playground+academy / subagent）git diff 空 ✅。
+- 详情：`specs/tech/version_logs/v0.0.279/change_plan.md`（12 行 method 级表）+ `change_log.md`
+
+## 2026-08-07 · v0.0.273（squad_agents_status 统一全员状态块取代 squad_team_status + reachable_agents + mate 退出通知 hook）
+
+- **`[P1]squad_reminder_providers.md`**：§3 `squad_team_status`（leader-only，只列 running）→ `squad_agents_status`（统一全员状态块 `[squad:agents]`，squad/leader/mate/subagent 分派）——三合一（agent 列表 + running/idle + presence）+ **全员列出**（不按 running 过滤，idle 不消失）+ benched 过滤 + 270 门控保留 + 数据源迁移（studioContext → squadContext）；§0 定位 2→3 provider、§1 ReminderCtx 扩展、§5 角色矩阵、§8 边界表同步。
+- **`[P1]prompt_sections.md`**：§1 贡献点总表 + §4 system_reminder sections + §5 `reachable_agents` 段 → `squad_agents_status`（统一块派生表 + 全员列出 + bench 过滤 + 270 门控 + 格式）+ §6 生命周期 + §9 plugin.json 注册 + §10 边界表同步。
+- **`[P1]data_model.md`**（关联）：`member.currentWork`（presence 数据源）语义不变——`[squad:agents]` 成员行 presence 列读它。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `squad_agents_status.ts` readSessionType 5 种分派 ✅；② 全员列出（旧 squad_team_status L66 `if (!running) continue` 已删，running+idle 都保留）✅；③ 270 门控 `enableGroupChat !== false` + benched 过滤 ✅；④ 成员行格式与 R8 一致 ✅；⑤ 旧 provider 文件 + 旧测试已删 + plugin.json 删二加一 + 生产代码零残留 ✅。
+- 详情：`specs/tech/version_logs/v0.0.273/change_plan.md`（8 裁决 R1-R8）+ `change_log.md`
+
+## 2026-08-06 · v0.0.270（群聊开关 enableGroupChat — schema + 注入门控 + 协作规则段删除）
+
+- **`[P1]data_model.md §1.1`**：Squad interface 加 `enableGroupChat: boolean`（[v0.0.270 新增]，默认 true=开）——schema `required:false`（容忍旧 record 无字段）+ 读取 `?? true` 兜底（缺省=开）；false → agents 注入 SquadChat（reachable_agents squadChatRef 不构造）+ UI 群聊入口隐藏 + send_message('squadchat') 门控返 null（全私聊语义）；squad 实体/session 恒存在，仅控可见性。建队 `squad-service.ts:214` 显式写 `true`（对齐 enableHeartBeat:false 相邻，方向相反默认开）。
+- **`[P1]prompt_sections.md §3.1`**：**协作规则（群聊）段无条件删除裁决**（老板 v0.0.270 拍板）——leader.md / mate.md 的「## 协作规则（在群聊里讲话）」段直接删除 + 其他「群聊 @」广播指引改 `send_message` 直连口径；squad_role.ts map() 逻辑不动（handlers 纯 readContent() 文件读取，删文件段即生效——开/关态均不注入，非两态切换）；纪律留团队 AGENTS.md；保留 user 沟通类表述（「user 在群聊提需求」「会话或群聊和 user 对齐」）。
+- **api `specs/api/overall/11a-squad-endpoints.md` v1.11**：§1.3 SquadDetail + §1.4 PatchSquadBody 加 `enableGroupChat`（Detail 回显 `?? true` / Patch `!== undefined` 才改，对齐 enableHeartBeat 模式）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① schema `squad.ts:82` `{ type: 'boolean', required: false }` ✅；② 建队 `squad-service.ts:214` `enableGroupChat: true` ✅；③ handlers 三类型（PatchSquadBody `?: boolean` L111 / SquadSummary L128 / SquadDetail L148 `: boolean`）+ toSummary L168 / toDetail L263 `?? true` + PATCH L411 `!== undefined` ✅；④ reachable_agents L106 `squadChatSid && squad.enableGroupChat !== false ? {...} : null`（一处管 system prompt + system_reminder 两头）✅；⑤ runtime-context resolveSquadAlias 'squadchat' `=== false` 返 null + resolveAgentRefWithSquad fallback 拦截（'squadchat' 解析失败返 null 不直传，coder3 偏离 ① 合理）✅；⑥ leader.md/mate.md 协作规则段删除 + 群聊广播指引改 send_message 直连（保留 user 沟通类 L7/L11/L49）✅；⑦ web squad-types 三类型加字段 + seats-body `detail.enableGroupChat !== false` 才传 onOpenGroupChat/onGroupChatContextMenu（关时不传 → SeatCard 缺省隐藏，零新增分支）+ group-chat-toggle（data-action-key=studio.squad.toggle-group-chat + role=switch + 无本地态切换 + 防双击）✅。
+- 详情：`specs/tech/version_logs/v0.0.270/change_plan.md`（method 级契约）+ `specs/tech/version_logs/v0.0.270/change_log.md`；PRD `specs/prd/version_logs/v0.0.270.group_chat_switch/prd.md`
 
 ## 2026-08-05 · v0.0.259 panorama_dx（实例写前 coerce + 语义层认 system entity 恒在可引用 + create 幂等）
 

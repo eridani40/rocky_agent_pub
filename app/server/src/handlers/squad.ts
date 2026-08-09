@@ -9,6 +9,7 @@
 import { SquadStore, MemberStore } from '../stores/squad-store';
 import type { SquadEntity, MemberEntity } from '../stores/squad-store';
 import { createSquadService, type CreateSquadInput } from '../services/squad-service';
+import { applyTemplate, TemplateNotFoundError, type MemberSpec } from '../services/squad-template-service';
 import { dissolveSquad } from '../squad/squad-dissolve';
 import type { SessionStore } from '../agent/session-store';
 import type { BudgetUsage } from '../squad/budget/budget-aggregator';
@@ -77,6 +78,8 @@ interface CreateSquadBody {
   /** [v0.0.155] modelDefault 的配对 providerId（复合 ModelRef；optional back-compat） */
   modelDefaultProviderId?: string;
   leader?: { name?: string };
+  /** 模板 slug；有值时按模板批量 hire mate + 复制配置文件（§⑤） */
+  templateSlug?: string;
   charter?: {
     goals?: string;
     workingStyle?: string;
@@ -105,11 +108,23 @@ interface PatchSquadBody {
   modelDefault?: string;
   /** [v0.0.155] modelDefault 配对 providerId；undefined=不修改；""=清空 */
   modelDefaultProviderId?: string;
+  /**
+   * [v0.0.279] 团队默认推理强度（canonical 语义键 4 档）。
+   * undefined=不修改（对齐 modelDefaultProviderId L107 模式）；显式 'default' 也落盘（不清空）。
+   */
+  effortDefault?: 'default' | 'low' | 'high' | 'max';
   budget?: unknown;
   enableHeartBeat?: boolean;
+  /** [v0.0.270] 群聊可见性开关（true/false；undefined=不修改）；缺省=开（存量 squad 无字段读取 ?? true） */
+  enableGroupChat?: boolean;
   timezone?: string;
   /** [v0.0.116] squad 级心跳配置；null=清空回默认；undefined=不修改 */
   heartbeatConfig?: SquadHeartbeatConfig | null;
+}
+
+/** [v0.0.279] effortDefault 合法值校验（canonical 语义键 4 档） */
+function isValidEffortDefault(v: unknown): v is 'default' | 'low' | 'high' | 'max' {
+  return v === 'default' || v === 'low' || v === 'high' || v === 'max';
 }
 
 /** SquadSummary（11a §1.2 GET /squad 响应项） */
@@ -122,6 +137,8 @@ export interface SquadSummary {
   memberCount: number;
   squadChatSessionId: string;
   enableHeartBeat: boolean;
+  /** [v0.0.270] 群聊可见性开关（回显；存量无字段 ?? true=开） */
+  enableGroupChat: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -134,12 +151,16 @@ export interface SquadDetail {
   modelDefault: string;
   /** [v0.0.155] modelDefault 配对 providerId（复合 ModelRef；optional back-compat） */
   modelDefaultProviderId?: string;
+  /** [v0.0.279] 团队默认推理强度（回显；存量无字段 ?? 'default'——UI 下拉恒有值） */
+  effortDefault: 'default' | 'low' | 'high' | 'max';
   leaderId: string;
   memberIds: string[];
   members: MemberEntity[];
   squadChatSessionId: string;
   budget: unknown;
   enableHeartBeat: boolean;
+  /** [v0.0.270] 群聊可见性开关（回显；存量无字段 ?? true=开） */
+  enableGroupChat: boolean;
   timezone: string;
   /** [v0.0.116] squad 级心跳配置（null=未配=默认 interval15/全天/all） */
   heartbeatConfig: SquadHeartbeatConfig | null;
@@ -159,6 +180,7 @@ function toSummary(s: SquadEntity): SquadSummary {
     memberCount: Array.isArray(s.memberIds) ? s.memberIds.length : 0,
     squadChatSessionId: s.squadChatSessionId,
     enableHeartBeat: s.enableHeartBeat,
+    enableGroupChat: s.enableGroupChat ?? true, // [v0.0.270] 存量无字段兜底=开
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
   };
@@ -247,12 +269,14 @@ function toDetail(s: SquadEntity, members: MemberEntity[]): SquadDetail {
     description: s.description ?? '',
     modelDefault: s.modelDefault,
     modelDefaultProviderId: s.modelDefaultProviderId,
+    effortDefault: (s.effortDefault as 'default' | 'low' | 'high' | 'max' | undefined) ?? 'default', // [v0.0.279] 存量无字段兜底 'default'
     leaderId: s.leaderId,
     memberIds: Array.isArray(s.memberIds) ? s.memberIds : [],
     members,
     squadChatSessionId: s.squadChatSessionId,
     budget: s.budget ?? null,
     enableHeartBeat: s.enableHeartBeat,
+    enableGroupChat: s.enableGroupChat ?? true, // [v0.0.270] 存量无字段兜底=开
     timezone: squadTimezone(s),
     heartbeatConfig: (s.heartbeatConfig as SquadHeartbeatConfig | null | undefined) ?? null,
     version: s.version,
@@ -319,7 +343,26 @@ async function handleCreateSquad(req: Request, deps: SquadHandlerDeps): Promise<
       { sessionStore: deps.sessionStore, squadStore, memberStore, dataDir: deps.dataDir, appConfig: deps.appConfig },
       body as CreateSquadInput,
     );
-    // 201 + SquadDetail（11a §1.1；fetch members 给 detail）
+    // 从模板创建：建 squad 成功后批量 hire mate + 复制配置（§⑤）
+    if (body.templateSlug) {
+      try {
+        await applyTemplate(deps.dataDir, created.squad.id, body.templateSlug, {
+          sessionStore: deps.sessionStore,
+          squadStore,
+          memberStore,
+          dataDir: deps.dataDir,
+          ...(deps.appConfig ? { appConfig: deps.appConfig } : {}),
+        });
+      } catch (e) {
+        if (e instanceof TemplateNotFoundError) {
+          return json(400, { error: 'template_not_found' });
+        }
+        // manifest 格式错误或其他 → 400 invalid_template（squad 已建好，不回滚）
+        console.warn('[handleCreateSquad] applyTemplate failed (best-effort):', e);
+        return json(400, { error: 'invalid_template' });
+      }
+    }
+    // 201 + SquadDetail（11a §1.1；fetch members 给 detail，含模板 hire 的 mate）
     const members = await memberStore.listMembers(created.squad.id);
     return json(201, toDetail(created.squad, members));
   } catch (e) {
@@ -371,6 +414,10 @@ async function handlePatchSquad(req: Request, id: string, deps: SquadHandlerDeps
     const hbErr = validateHeartbeatConfig(body.heartbeatConfig);
     if (hbErr) return json(400, { error: hbErr });
   }
+  // [v0.0.279] effortDefault 校验（字段级，400 优先于 404，先于查 squad）
+  if (body.effortDefault !== undefined && !isValidEffortDefault(body.effortDefault)) {
+    return json(400, { error: 'effortDefault must be one of default, low, high, max' });
+  }
   // [v0.0.155] 复合 ModelRef 字段级校验（v0.0.158 起 summary 单路已删）：
   //   - 若 PATCH 把 modelDefault 置空但留下 modelDefaultProviderId → 400（不能有 providerId 而无 modelId）
   //   注意：PATCH 单改 providerId（不动 modelDefault）允许——给已配 modelDefault 的 squad 补 providerId
@@ -400,6 +447,9 @@ async function handlePatchSquad(req: Request, id: string, deps: SquadHandlerDeps
   }
   if (body.budget !== undefined) patch.budget = body.budget;
   if (body.enableHeartBeat !== undefined) patch.enableHeartBeat = body.enableHeartBeat;
+  if (body.enableGroupChat !== undefined) patch.enableGroupChat = body.enableGroupChat; // [v0.0.270] undefined=不修改
+  // [v0.0.279] effortDefault：undefined=不修改；显式 'default' 也落盘（不清空，与 enableGroupChat 模式对称）
+  if (body.effortDefault !== undefined) patch.effortDefault = body.effortDefault;
   if (body.timezone !== undefined) patch.timezone = body.timezone;
   // [v0.0.116] heartbeatConfig：undefined=不修改；null=清空；合法 object=写入
   if (body.heartbeatConfig !== undefined) patch.heartbeatConfig = body.heartbeatConfig ?? null;

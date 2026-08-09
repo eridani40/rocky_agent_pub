@@ -3,39 +3,46 @@ type: interface
 title: Session Workspace Manager（懒监听 fs watch + watcher 生命周期）
 priority: P0
 status: active
-updated: 2026-07-14
+updated: 2026-08-06
 since: v0.0.17
 ---
 
 # Session Workspace Manager（懒监听 fs watch + watcher 生命周期 + event 发射）
 
 > 关联：`[P0]session_workspace.md`（workspaceDir 字段 + 切目录）+ `[P0]session_event.md`（`session_workspace_file_changed`）+ `[P0]session_store.md`（session 删除触发回收）。
-> 本文是后端 `SessionWorkspaceManager` 的**概念权威源**：**懒监听模型**（目录级非递归 watcher + tab 监听列表 + 目录引用计数）+ watch/unwatch 生命周期 + 文件变化 → emit event。
+> 本文是后端 `SessionWorkspaceManager` 的**概念权威源**：**懒监听模型**（目录级非递归 watcher + tab 关注集合 + 目录引用计数）+ watch-set 声明式生命周期 + 文件变化 → emit event。
 >
 > **[v0.0.139 结构性重写]** 监听模型从「每前台 session 一个**递归** watcher（watch 整个 workspaceDir）」→「**懒监听**：workspace 根一层 + 当前所有展开目录各一层（非递归）；展开=watch / 收起=unwatch / tab 消失回收」。旧「watch 不按子目录动态管理」正文作废，被本文取代。
+>
+> **[v0.0.271 关注集合升级]** 修 BUG-fs-watch-empty-folder-no-expand（空文件夹新增文件无感知）：懒监听只 watch 展开节点自身（depth:0），漏了「一级子文件夹」。升级为**声明式 watch-set 模型**：关注集合 = 所有打开节点自身 + 各自一级子文件夹（含空文件夹）；前端 `computeWatchSet` 全量重算 + 每次变化 diff 增删（不在新集合一律 close = 防泄漏对账）；watch/unwatch 增量端点保留向后兼容（release-all 仍用），新前端不再调单 path。
 
 ## 1. 定位
 
 **为什么必须后端 watch**：本应用是 web app（vite + 后端 server），**非 Electron**（grep `ipcRenderer`/`ipcMain` → 0 命中）。浏览器无法直接 `fs.watch` 任意路径，必须「后端 watch → event → SSE → 前端」。前端复用 `session_panel` SSE topic 接收 `session_workspace_file_changed` event。
 
-**懒监听模型（lazy watch，v0.0.139 核心）**：
+**懒监听模型（lazy watch，v0.0.139 核心 / v0.0.271 关注集合升级）**：
 
 ```
-监听集合 = workspace 根（一层，非递归）+ 当前所有展开的文件夹（各一层，非递归）
+监听集合（关注集合）= 所有打开节点自身 + 各自一级子文件夹（含空文件夹）
 
-打开 session tab   → watch(根)          文件树顶层可用
-展开文件夹          → watch(该目录一层)    一次显式操作（acquire）
-收起文件夹          → unwatch(该目录)      一次显式操作（release）
-tab 消失（关/断连）→ 回收该 tab 名下全部监听  主人死亡自动清算
+计算 = 前端全量重算（computeWatchSet）+ 每次变化 diff 增删（不在新集合一律 close = 防泄漏对账）
+
+打开 session tab   → 关注集合 {根, 根一级子文件夹}    文件树顶层 + 一级子文件夹增量可见
+展开文件夹          → 关注集合新增 {该节点自身, 其一级子文件夹}（含空文件夹——空文件夹也 watch，新增文件有事件）
+收起文件夹          → 关注集合移除 {该节点自身, 其一级子文件夹}（除非被其他打开节点覆盖）
+tab 消失（关/断连）→ 回收该 tab 名下全部监听（release-all） 主人死亡自动清算
 ```
 
-**收益（与树大小彻底解耦）**：监听数 = 展开目录数（通常 <50），**不再等于 workspace 文件总数**；`.venv` / `node_modules` 只要不展开就零成本（不再依赖 ignore 名单兜性能）；打开 session tab 零全树扫描（「扫描风暴」概念结构性消失）；收起目录不再产生无效 SSE 事件。
+**v0.0.271 模型升级动机（BUG-fs-watch-empty-folder-no-expand）**：旧模型「监听集合 = workspace 根 + 当前所有展开的文件夹」只 watch 展开节点自身（depth:0），**空文件夹从未展开 → 无 watcher → 新增文件无事件 → 永远显示「空文件夹」**。升级为「关注集合 = 打开节点自身 + 一级子文件夹」后，空文件夹即使未展开也被其父级 watch（父级展开时其一级子文件夹进集合），新增文件有事件 → 可展开。
+
+**收益（与树大小彻底解耦）**：监听数 = 关注集合大小（打开节点 + 一级子文件夹，典型 <100），**不再等于 workspace 文件总数**；`.venv` / `node_modules` 只要不展开就零成本（不再依赖 ignore 名单兜性能）；打开 session tab 零全树扫描（「扫描风暴」概念结构性消失）；收起目录不再产生无效 SSE 事件。
 
 **Manager 定位**（单例，bootstrap 构造，注入 `statusBus`）：
 - 持**目录级** watcher（每个被监听目录一个非递归 chokidar watcher），不是每 session 一个递归 watcher。
-- 持**tab 监听列表**（`clientId` → 该 tab 展开的目录集）+ **目录引用计数**（多 tab 展开同一目录 → 计数 N，只 1 个物理 watcher）。
+- 持**tab 目录集**（`clientId` → 该 tab 关注集合）+ **目录引用计数**（多 tab 展开同一目录 → 计数 N，只 1 个物理 watcher）。
 - watcher 生命周期与「有无 tab 引用」绑定：某目录首个引用 → 建 watcher；末个引用回收 → close。
 - **收起→展开的兜底**：收起期间无 watcher 接增量，重新展开时前端 GET tree 重拉即最新（同「切回兜底」思路）。
+- **泄漏对账 = 每次变化全量 diff（结构性收敛）**：`applyWatchSet` 全量 diff，不在新集合的物理 watcher 一律 close（refcount 归零即关）；不做周期对账（后端一致性由 opQueues 串行化 + close 幂等保证）。
 
 ## 2. 选型：chokidar depth:0（非递归一层）
 
@@ -61,8 +68,17 @@ interface SessionWorkspaceManager {
 
   /** 收起目录时调用：为 (sid, clientId) 注销对 relDir 的监听（workspaceDir 同 watch，用于 resolve absDir）。
    *  - 幂等（MANDATORY）：该 tab 未持有 relDir → 静默 no-op。
-   *  - 引用计数：refcount--；归零 → 串行 close watcher（§7）。 */
+   *  - 引用计数：refcount--；归零 → 串行 close watcher（§7）。
+   *  - ⚠️ 增量端点保留向后兼容（新前端不再调单 path watch/unwatch——见 applyWatchSet）；不建议与 watch-set 混用同一 tab（状态不一致）。 */
   unwatch(sessionId: string, clientId: string, workspaceDir: string, relDir: string): Promise<void>;
+
+  /** 声明式替换该 tab 关注集合（watch-set 端点，v0.0.271 裁决 R1/R3/R4）。
+   *  - relDirs 逐个 resolve（越界/不存在跳过，与 watch 单 path 语义一致）→ registry.setTabSet 得 diff →
+   *    added 逐个 openIfFirstRef（首引用建 watcher）/ removed 逐个 closeIfZeroRef（归零才关）。
+   *  - **不在新集合的物理 watcher 一律 close**（refcount 归零即关 = 结构性泄漏收敛，R3）。
+   *  - **多 tab 合并**（R4）：removed 但其他 tab 仍持有 → refcount>0 → 不 close。
+   *  - 幂等：同集合再调 → diff 全空 → no-op。走 opQueues 串行化防重入（§7）。返回 Promise<void> fire-and-forget。 */
+  applyWatchSet(sessionId: string, clientId: string, workspaceDir: string, relDirs: string[]): Promise<void>;
 
   /** 回收一个 tab 名下全部监听（tab 优雅卸载 / 切 session）：遍历该 (sid,clientId) 目录集逐个 refcount--，归零者 close。
    *  - 幂等：该 tab 无监听 → no-op。前端在 ws-panel 卸载 / 切 session 时经 unwatch(无 relDir 语义) 触发（见 api §2.6.5）。 */
@@ -118,6 +134,11 @@ const WATCH_OPTIONS = {
 > **chokidar v4 `ignored` 是函数匹配目录段**（字符串=全路径精确相等、**无 glob**——旧 glob 数组静默失效即事故根因，hotfix `1ef2d61c`）。懒监听下 `depth:0` 已让扫描风暴结构性消失，`ignored` 降级为**事件噪声过滤**（不再是性能关键路径），保留即可。
 > **`ignoreInitial:true` + await ready**：ignoreInitial 仅在初始扫描窗口生效；await ready 保证 caller 拿到的 watcher 已过窗口，增量事件不被吞。
 
+**[v0.0.263] watch symlink 目录策略**：
+- **放行（不 400）**：`watch` 的 `relDir` 含 symlink 段时，`resolveWatchTarget` 走 `whitelistResolve` 链式授权解析（`session-workspace-path.ts`）放行——workspace 内存在的 symlink = 用户放置 = 授权（api §2.6.5 安全段）。manager 侧 `watch()` 的 absDir 校验（在 workspaceDir 内 + 存在 + 是目录）在链式解析结果上继续。
+- **chokidar 跟随**：`WATCH_OPTIONS` 未显式设 `followSymlinks`——chokidar v4 **默认 `followSymlinks: true`**（实测确认），直接 watch symlink 路径会跟随目标目录监听增量；配合 tree 的 `statSync` 跟随 isDirectory 判定，symlink→dir 展开后 watch 行为可用。
+- **v1 最低保证**：即使某环境增量监听不达（如目标目录超大/权限异常），tree 是 readdir 实时读——**手动刷新 / 重新展开可拉到最新**（PRD §2.4：浏览 symlink 内容是「查看快照」，实时性不承诺）。
+
 ## 5. tab 身份 + 监听列表 + 引用计数
 
 **tab 身份 = `clientId`（前端生成 ULID，一个 ws-panel 实例一个，跨展开/收起稳定）**。前端在每个 watch/unwatch 请求携带 `clientId`（api §2.6.5）。后端按 `(sessionId, clientId)` 键一份**目录集**（该 tab 展开的目录）。
@@ -126,18 +147,20 @@ const WATCH_OPTIONS = {
 
 **引用计数合并（同 session 多 tab）**：目录 refcount = 持有该目录的 tab 数。同一目录被 N 个 tab 展开 → refcount=N，**只 1 个物理 watcher**；任一 tab 收起/回收只 refcount--；归零才真正 close（对齐用户裁决「任一 tab 死只减它那份」）。
 
-**幂等（增量，非声明式全量）**：tab 目录集是 Set——同 (sid,clientId,relDir) 重复 watch 是 Set.add 幂等（不叠加 refcount）；unwatch 不在集内 = 静默 no-op。快速连点展开/收起、重试天然安全，**不做全量对账**。
+**幂等（声明式全量，v0.0.271 起）**：`applyWatchSet` 走 registry.setTabSet 全量 diff——同集合再调 → added/removed 全空 → no-op（前端时序安全：初始 rootTree 两次 applyWatchSet、展开后 childrenCache 补发两次，均幂等）。`watch`/`unwatch` 增量端点保留（Set 幂等），但新前端不再调单 path（见 §11）；两者不建议混用同一 tab（增量改集合，声明式 diff 基于旧集合 → 状态不一致）。
 
 ## 6. tab 回收：两层触发（主人死亡自动清算）
 
-监听列表随 tab 生命周期回收，**两层触发互补，都不泄漏**：
+监听列表随 tab 生命周期回收，**两层触发互补，都不泄漏**。v0.0.271 diff 模型下 4 条回收路径都是「清集合 → refcount 归零 → close」语义（R4：实现基本不变）：
 
 | 层 | 触发 | 动作 | 覆盖场景 |
 |---|---|---|---|
-| **① 优雅（per-tab，主）** | ws-panel 卸载 / 切 session → 前端显式 `unwatch(clientId, 无 relDir)`（api §2.6.5 release-all-for-tab） | `releaseTab(sid, clientId)` | SPA 切 session、app 内正常关面板（最常见路径）。逐目录 refcount--，归零者 close |
-| **② 兜底（session 级）** | 现有 `session_panel` unsubscribe 钩子（group 订阅 **1→0**，已存在计数） | `recycleSession(sid)` | 异常死亡：浏览器直接关 tab / 网络断 / OS kill（① 未跑）。1→0 = 该 session 已无 viewer → 回收全部 clientId 名下监听 |
+| **① 优雅（per-tab，主）** | ws-panel 卸载 / 切 session → 前端显式 `unwatch(clientId, 无 relDir)`（api §2.6.5 release-all-for-tab） | `releaseTab(sid, clientId)`（registry.takeTabDirs → 逐个 closeIfZeroRef） | SPA 切 session、app 内正常关面板（最常见路径）。逐目录 refcount--，归零者 close |
+| **② 兜底（session 级）** | 现有 `session_panel` unsubscribe 钩子（group 订阅 **1→0**，已存在计数） | `recycleSession(sid)`（registry.takeSessionTabs → 逐个 closeIfZeroRef + emitter.clear） | 异常死亡：浏览器直接关 tab / 网络断 / OS kill（① 未跑）。1→0 = 该 session 已无 viewer → 回收全部 clientId 名下监听 |
 
-> **兜底挂现有钩子**（用户裁决红线 #2）：`bootstrap.ts` 的 `onUnsubscribe(session_panel, group)` 由「startWatch/stopWatch」改为「`recycleSession(sid)`」；`onSubscribe` **不再** startWatch（懒监听下 watch 全由前端显式 watch API 驱动，subscribe 不再隐式建监听）。
+> 另两条：`switchDir`（切目录）= recycleSession 旧目录 + setDirCb（§9）；`stopAll`（app shutdown）= 逐 session recycleSession + 兜底清空残留（§10）。**结构性收敛兜底**：即使某条增量回收路径漏执行，下次 `applyWatchSet` 的全量 diff 也会把不在新集合的 watcher close（R3——泄漏不累积）。
+
+> **兜底挂现有钩子**（用户裁决红线 #2）：`bootstrap.ts` 的 `onUnsubscribe(session_panel, group)` 由「startWatch/stopWatch」改为「`recycleSession(sid)`」；`onSubscribe` **不再** startWatch（懒监听下 watch 全由前端显式 watch-set 驱动，subscribe 不再隐式建监听）。
 
 **有界瑕疵（明确记录，可接受）**：同 session 的**非末位** tab 异常死亡（浏览器崩溃）且尚有兄弟 tab 存活时，其监听因 group 未归零而**滞留**（refcount 仍被计），直到该 session group 1→0 才由 ② 兜底回收。此瑕疵**有界**（必在 1→0 清算，无永久泄漏）、**廉价**（监听=展开目录，个位数）、**无害**（存活 tab 只对这些目录变化标 stale）。这是「clientId 不绑定 SSE subId」的取舍代价；多浏览器 tab 同 session + 其一崩溃是极端边角，接受。
 
@@ -166,42 +189,46 @@ chokidar `'all'` 事件（含 absDir + absPath）→ 归属 sid（watcher 创建
 2. setDirCb(sid, newDir)           // SessionStore.setWorkspaceDir（更新字段 + 持久化 + emit dir_changed）
 ```
 
-> 不重启 watch（旧模型的 stop→set→**start** 的 start 步骤取消）：切目录后相对路径基准变了，旧监听无意义；前端收 `session_workspace_dir_changed` → 重置 tree + 重新 GET 顶层 + **重新 watch 新目录根**（同新 tab 打开路径）。顺序 recycle→set MANDATORY（避免旧 watcher 在 set 窗口继续推旧目录变化）。
+> 不重启 watch（旧模型的 stop→set→**start** 的 start 步骤取消）：切目录后相对路径基准变了，旧监听无意义；前端收 `session_workspace_dir_changed` → 重置 tree（**清 expanded**——旧相对路径相对新基准无效）+ 重新 GET 顶层 + **watch-set 重算 effect 自动发新关注集合**（根 + 新根一级子文件夹，同新 tab 打开路径）。顺序 recycle→set MANDATORY（避免旧 watcher 在 set 窗口继续推旧目录变化）。
 
 ## 10. 生命周期
 
 | 时机 | 动作 |
 |------|------|
 | bootstrap | 构造 Manager 单例，注入 statusBus。不主动启动任何 watcher。 |
-| `POST /session`（create） | 不 watch（懒：等前端 ws-panel 挂载显式 watch 根）。 |
-| 前端 ws-panel 挂载 → `POST watch{clientId, path:''}` | watch 根一层（refcount 0→1 建 watcher）。 |
-| 前端展开目录 → `POST watch{clientId, path:relDir}` | watch 该目录一层（幂等 + refcount）。 |
-| 前端收起目录 → `POST unwatch{clientId, path:relDir}` | unwatch（refcount--，归零 close）。 |
+| `POST /session`（create） | 不 watch（懒：等前端 ws-panel 挂载发 watch-set）。 |
+| 前端 ws-panel 挂载 → `POST watch-set{clientId, paths:[根, 根一级子文件夹]}` | 关注集合首引用建 watcher（refcount 0→1）。初始 rootTree 异步：tree 未到先发 {根}，到后补 {根一级}（两次 applyWatchSet 幂等）。 |
+| 前端展开目录 | 只改 state（toggle-expand）→ watch-set 重算 effect 发新集合（含该节点自身 + 其一级子文件夹；childrenCache 未到先发自身、GET 成功后补子一级，幂等）。 |
+| 前端收起目录 | 只改 state（toggle-expand force:false）→ watch-set 重算 effect 发新集合（移出该节点及其子一级，除非被其他打开节点覆盖）。 |
 | 前端 ws-panel 卸载 / 切 session → `POST unwatch{clientId}`（无 path） | `releaseTab`（回收该 tab 全部）。 |
 | `session_panel` 订阅 1→0（关 tab/断连/崩溃兜底） | `recycleSession(sid)`（回收该 session 全部 tab 监听）。 |
-| `PUT /session/:id`（切目录） | `switchDir`（recycle 旧 + setDir；前端重新 watch 新根）。 |
+| `PUT /session/:id`（切目录） | `switchDir`（recycle 旧 + setDir；前端 watch-set 重算 effect 发新根集合）。 |
 | `DELETE /session/:id`（删 session） | `recycleSession(sid)`（幂等）。 |
 | app shutdown | `stopAll()`（close 全部 + 清列表/refcount）。 |
-| reconcileOnStartup | 不主动恢复（懒天然不需：前端 ws-panel 挂载重新 watch）。 |
+| reconcileOnStartup | 不主动恢复（懒天然不需：前端 ws-panel 挂载重新发 watch-set）。 |
 
 ## 11. 前端接线协调（显式控制，GET tree 绝不隐式 watch）
 
-**用户裁决 #1 红线**：`GET /session/:id/workspace/tree` **只取数据、绝不建立监听**。旧模型「GET tree handler 兜底 startWatch」**移除**。watch 全由前端在展开/收起触点显式调用 watch/unwatch API。
+**用户裁决 #1 红线**：`GET /session/:id/workspace/tree` **只取数据、绝不建立监听**。旧模型「GET tree handler 兜底 startWatch」**移除**。watch 全由前端**声明式 watch-set** 驱动：展开/收起只改 state → 重算 effect 全量重算关注集合 → applyWatchSet（v0.0.271 起；不再在展开/收起触点直接调 watch/unwatch API——防双发）。
 
 ```
 前端 ws-panel 挂载 session A（clientId=C）：
   1. GET /session/A/workspace/tree                 // 顶层数据（不 watch）
-  2. POST /session/A/workspace/watch {C, path:''}  // 显式 watch 根一层
+  2. 重算 effect：computeWatchSet({tree, expanded:{}, childrenCache:{}}) → {根}
+     （rootTree 加载后 → {根, 根一级子文件夹}，两次 POST watch-set 幂等）
   3. subscribe(session_panel, session_id:A)        // 接 SSE 增量（既有，独立于 watch）
 
-展开目录 src：
-  1. GET tree?parent=src                           // 子项数据
-  2. POST watch {C, path:'src'}                    // 显式 watch src 一层
+展开目录 src（toggle-expand force:true → childrenCache 更新）：
+  → 重算 effect：集合新增 {src, src 一级子文件夹} → POST watch-set（完整集合）
+     childrenCache 未到先发 {src}、GET tree?parent=src 成功后补 {src 一级}（幂等）
 
-收起目录 src：POST unwatch {C, path:'src'}          // 停 src 监听（其内变化不再推）
-重新展开 src：GET tree?parent=src（拉回收起期间变化，兜底）+ POST watch {C, path:'src'}
+收起目录 src（toggle-expand force:false）：
+  → 重算 effect：集合移除 {src, src 一级子文件夹}（除非被其他打开节点覆盖）→ POST watch-set
+
 卸载/切走：POST unwatch {C}（release-all）；兜底靠 session_panel 1→0 → recycleSession
 ```
+
+> **前端关注集合计算（computeWatchSet）**：输入 `{ tree, expanded, childrenCache }` → 集合 = 根 `''` 恒含 + 根一级子文件夹（tree 筛 `type==='dir'`）+ 每个打开节点自身（expandedPathsByDepth）+ 各自一级子文件夹（childrenCache[path] 筛 `type==='dir'`）；路径去重 + 字典序排序（可预测性 + diff 稳定性）。打开节点用 `expandedPathsByDepth`（既有纯函数）；子文件夹判定用 `node.type === 'dir'`（PRD 说 folder，实际类型是 dir）。纯函数零副作用，可 UT 直测。
 
 ## 12. 边界 + 依赖
 

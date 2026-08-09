@@ -48,7 +48,10 @@ export function validateCallerWorkspaceDir(dir: string): string | null {
 }
 
 /**
- * 路径白名单校验 (与 session-workspace.ts whitelistResolve 等价语义, ET seed 用).
+ * 路径白名单校验 (旧版与 session-workspace.ts whitelistResolve 等价语义; ET seed 用).
+ * 注: v0.0.263 起主 whitelistResolve 改「链式授权解析」(workspace 内 symlink = 授权) 迁到
+ *   session-workspace-path.ts; 本 seed 端点保留旧语义 (symlink 指向外部仍 traversal)——
+ *   seed 是 ET 测试工具 (创建普通文件树), 不含 symlink 浏览场景, 维持原行为.
  * step 1: 字符串前缀 (resolve(realRoot, absOrRelPath) 必须在 realRoot 内, 挡 ../)
  * step 2: realpath (防 symlink 穿越外部; target 不存在用 abs 兜底, seed 端点允许新建)
  *

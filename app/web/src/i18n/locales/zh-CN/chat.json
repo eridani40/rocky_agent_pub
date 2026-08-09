@@ -76,7 +76,8 @@
     "memory": "长期记忆",
     "cron": "定时任务",
     "skills": "技能",
-    "todo": "待办"
+    "todo": "待办",
+    "squadStatus": "团队状态"
   },
   "todoModal": {
     "title": "待办清单",
@@ -163,7 +164,8 @@
     "tree": {
       "loading": "加载中",
       "openFolder": "打开文件夹",
-      "openFile": "打开文件"
+      "openFile": "打开文件",
+      "symlinkTooltip": "→ {{target}}"
     },
     "tab": {
       "workspace": "工作区",
@@ -176,7 +178,14 @@
       "loading": "读取中…",
       "loadFail": "读取失败",
       "saved": "已保存",
-      "hint": "直接编辑 · 保存后生效"
+      "hint": "直接编辑 · 保存后生效",
+      "binaryUnsupported": "二进制文件无法预览"
+    },
+    "wsImageViewer": {
+      "title": "图片预览",
+      "loading": "读取中…",
+      "loadFail": "图片加载失败",
+      "close": "关闭"
     }
   },
   "usage": {
@@ -329,6 +338,16 @@
   },
   "linkViewer": {
     "fileNotFound": "文件未找到：{{path}}",
-    "loadFail": "打开失败"
+    "loadFail": "打开失败",
+    "saved": "已保存",
+    "writeFail": "保存失败"
+  },
+  "scrollGuide": {
+    "newMessage": "新消息",
+    "backToBottom": "回到底部",
+    "ariaLabel": {
+      "newMessage": "查看新消息",
+      "backToBottom": "回到底部"
+    }
   }
 }

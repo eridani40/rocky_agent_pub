@@ -43,6 +43,7 @@ import type { PluginManager } from '../plugin/plugin-manager';
 import { registerConsolidationJob } from './consolidation-boot';
 import type { ConsolidationPersistenceAdapter } from './persistence/consolidation-adapter';
 import type { AppTaskLock } from '../agent/app-task-lock';
+import type { ReplayableEventBus } from '../agent/event-bus';
 
 /** createEngine 返回（bootScheduler 入参 + BootstrapResult 字段） */
 export interface CreateEngineResult {
@@ -89,6 +90,11 @@ export interface BootSchedulerDeps {
    * 缺省时 registerConsolidationJob 跳过 lock 接入（既有测试兼容）。
    */
   appTaskLock?: AppTaskLock;
+  /**
+   * session_panel topic 的 bus（来自 bus-phase）。
+   * 透传到 cronToolDeps.statusBus，cron 写操作后 emit session_cron_changed。
+   */
+  sessionStatusBus?: ReplayableEventBus;
 }
 
 /**
@@ -308,6 +314,8 @@ export async function bootScheduler(deps: BootSchedulerDeps): Promise<BootSchedu
       engine,
       sessionStore,
       squadStore,
+      // sessionStatusBus 透传到 cronToolDeps.statusBus（cron 写操作后 emit session_cron_changed）
+      ...(deps.sessionStatusBus ? { statusBus: deps.sessionStatusBus } : {}),
     },
     shutdown,
     ...(consolidationAdapter ? { consolidationAdapter } : {}),

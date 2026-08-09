@@ -15,7 +15,7 @@
  *   - close：只清 emulation 不杀用户 chrome（no-op，不抛）
  *   - disconnect：清缓存 + close transport
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ChromeMcpDriver,
   buildChromeMcpArgs,
@@ -34,9 +34,9 @@ import type {
   McpCallToolResult,
 } from '../mcp-types';
 
-// ---- mock McpFactory：记录 create 入参（含 args）+ 可控行为 ----
+// ---- mock McpFactory：记录 create 入参（含 args/env）+ 可控行为 ----
 interface MockState {
-  createCalls: { command: string; args: string[] }[];
+  createCalls: { command: string; args: string[]; env?: Record<string, string> }[];
   listToolsNames: string[];
   connectShouldFail?: Error;
   callToolCalls: { name: string; arguments?: Record<string, unknown> }[];
@@ -46,7 +46,7 @@ interface MockState {
 function makeMockFactory(state: MockState): McpFactory {
   return {
     create(opts) {
-      state.createCalls.push({ command: opts.command, args: opts.args });
+      state.createCalls.push({ command: opts.command, args: opts.args, env: opts.env });
       const client: McpClient = {
         listTools: async () => ({ tools: state.listToolsNames.map((n) => ({ name: n })) }),
         callTool: async (req) => {
@@ -146,6 +146,64 @@ describe('resolveChromeMcpLaunch（v0.0.29 BUG-003：node 直连本地 bin）', 
     expect(Array.isArray(launch.baseArgs)).toBe(true);
     expect(launch.baseArgs.length).toBeGreaterThanOrEqual(1);
     expect(launch.baseArgs.every((a) => typeof a === 'string')).toBe(true);
+  });
+
+  // packaged Electron 适配：mock process.versions.electron，afterEach 还原（防污染同文件其他用例）
+  // （对齐 node-worker-driver.test.ts 的 defaultSpawn packaged 用例模式）
+  let savedElectron: string | undefined;
+  beforeEach(() => {
+    savedElectron = process.versions.electron;
+  });
+  afterEach(() => {
+    const versions = process.versions as { electron?: string };
+    if (savedElectron === undefined) delete versions.electron;
+    else versions.electron = savedElectron;
+  });
+
+  it('[packaged] process.versions.electron 有值 → command=process.execPath + env.ELECTRON_RUN_AS_NODE=1，baseArgs 仍本地 bin', () => {
+    (process.versions as { electron?: string }).electron = '99.0.0';
+    const launch = resolveChromeMcpLaunch();
+    expect(launch.command).toBe(process.execPath);
+    expect(launch.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' });
+    expect(launch.baseArgs).toHaveLength(1);
+    expect(launch.baseArgs[0]!.endsWith('chrome-devtools-mcp.js')).toBe(true);
+  });
+
+  it('[dev 不回归] process.versions.electron undefined → command=node 且无 env', () => {
+    delete (process.versions as { electron?: string }).electron;
+    const launch = resolveChromeMcpLaunch();
+    expect(launch.command).toBe('node');
+    expect(launch.env).toBeUndefined();
+  });
+
+  it('[packaged] connect 把 launch.env 透传给 mcpFactory.create（ELECTRON_RUN_AS_NODE=1 到达 transport）', async () => {
+    (process.versions as { electron?: string }).electron = '99.0.0';
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: { content: [] },
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
+    await driver.connect({ profileName: 'p-electron' });
+    expect(state.createCalls).toHaveLength(1);
+    expect(state.createCalls[0]!.command).toBe(process.execPath);
+    expect(state.createCalls[0]!.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' });
+  });
+
+  it('[dev 不回归] connect 无 env 传给 mcpFactory.create（command=node）', async () => {
+    delete (process.versions as { electron?: string }).electron;
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: { content: [] },
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
+    await driver.connect({ profileName: 'p-dev' });
+    expect(state.createCalls).toHaveLength(1);
+    expect(state.createCalls[0]!.command).toBe('node');
+    expect(state.createCalls[0]!.env).toBeUndefined();
   });
 });
 

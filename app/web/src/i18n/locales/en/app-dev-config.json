@@ -27,6 +27,7 @@
     "web_search": { "label": "Web Search" },
     "web_fetch": { "label": "Web Fetch" },
     "see_image": { "label": "See Image" },
+    "bash": { "label": "Bash Tool" },
     "locale": { "label": "Language" },
     "user_memory": { "label": "Long-term Memory" },
     "llm_request": { "label": "LLM Request" },
@@ -98,6 +99,14 @@
     "save": "Save",
     "reset": "Reset",
     "saving": "Saving…"
+  },
+  "bash": {
+    "sectionDesc": "Sandbox (seatbelt) protection — disable in nested sandbox environments (e.g. when Rocky agent itself runs inside a sandbox) to avoid exit 71",
+    "toggleLabel": "Use sandbox",
+    "save": "Save",
+    "reset": "Reset",
+    "saving": "Saving…",
+    "restartNotice": "Changes take effect immediately after saving"
   },
   "observability": {
     "sectionTitle": "Observability configuration",

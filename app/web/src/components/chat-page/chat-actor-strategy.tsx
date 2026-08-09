@@ -49,17 +49,18 @@ export function groupMessageFilter(msg: Message): boolean {
   return isUser(msg) || isA2aInbox(msg);
 }
 
-/** 从 a2a inbox message 取 sender.agent.ref（type/name）；非 a2a 返 null */
-export function a2aRefOf(msg: Message): { type: string; name: string } | null {
+/** 从 a2a inbox message 取 sender.agent.ref（type/name/sessionId）；非 a2a 返 null */
+export function a2aRefOf(msg: Message): { type: string; name: string; sessionId: string } | null {
   const s = msg.sender;
   if (!s || s.source !== 'agent' || !s.agent?.ref) return null;
-  return { type: s.agent.ref.type, name: s.agent.ref.name };
+  return { type: s.agent.ref.type, name: s.agent.ref.name, sessionId: s.agent.ref.sessionId };
 }
 
 /**
  * 群聊 actor 解析（resolveActor）：
  *   - human user → MemberAvatar(role='user', name='you')，右侧
- *   - a2a inbox → MemberAvatar(role=ref.type, name=ref.name, showNameAsPrefix=true)，左侧 + 名字前缀行
+ *   - a2a inbox → 原 MemberAvatar 对象 invisible（[v0.0.301] 外层 w-9 shrink-0 invisible 包裹，保真布局、信封位置不动），
+ *     name=ref.name + showNameAsPrefix=true 保留
  *   - 兜底（理论不达：白名单已滤）→ user 头像
  */
 export function resolveGroupActor(msg: Message): { avatar: ReactNode; name?: string; showNameAsPrefix?: boolean } {
@@ -67,7 +68,12 @@ export function resolveGroupActor(msg: Message): { avatar: ReactNode; name?: str
     const ref = a2aRefOf(msg)!;
     const role = ref.type === 'leader' ? 'leader' : ref.type === 'mate' ? 'mate' : 'mate';
     return {
-      avatar: <MemberAvatar name={ref.name} role={role} />,
+      // [v0.0.301] 原 MemberAvatar 对象 invisible（保留原对象，位置 100% 保真 + 未来恢复容易）；外层 w-9 列同 MemberAvatar md 尺寸
+      avatar: (
+        <div className="w-9 shrink-0 invisible">
+          <MemberAvatar name={ref.name} role={role} id={ref.sessionId} />
+        </div>
+      ),
       name: ref.name,
       showNameAsPrefix: true,
     };
@@ -79,44 +85,54 @@ export function resolveGroupActor(msg: Message): { avatar: ReactNode; name?: str
 export interface PeerActorInfo {
   name: string;
   role: string;
+  /** 稳定 id（member.id），传给 MemberAvatar 保证同 member 恒同色 */
+  id: string;
 }
 
 /**
  * 单聊 actor 解析（resolveActor）：
  *   - human user → MemberAvatar(role='user', name='you')，右侧
- *   - a2a inbox → MemberAvatar(role=ref.type 映射, name=ref.name)，左侧
- *     （发送方是另一 agent，用 sender.agent.ref 的 name/type，**非** peer——与 resolveGroupActor 一致）
+ *   - a2a inbox → 原 MemberAvatar 对象 invisible（[v0.0.301] 外层 w-9 shrink-0 invisible 包裹，保真布局、信封位置不动），
+ *     name=ref.name + showNameAsPrefix=true 保留（发送方是另一 agent，名字取 sender.agent.ref，**非** peer）
  *   - 其他（assistant answer/tool）→ MemberAvatar(role=peer.role, name=peer.name)，左侧
- * 单聊对端固定一个 member，非 user 非 a2a 消息统一用该 member 头像；
- * 保持单聊无 showNameAsPrefix（对端唯一，无需前缀行；与群聊 a2a 前缀行区别）。
+ * 单聊对端固定一个 member，非 user 非 a2a 消息统一用该 member 头像。
  */
-export function resolveMemberActorFactory(peer: PeerActorInfo): (msg: Message) => { avatar: ReactNode; name?: string } {
+export function resolveMemberActorFactory(peer: PeerActorInfo): (msg: Message) => { avatar: ReactNode; name?: string; showNameAsPrefix?: boolean } {
   const role: 'leader' | 'mate' = peer.role === 'leader' ? 'leader' : 'mate';
   const name = peer.name;
+  const peerId = peer.id;
   return (msg: Message) => {
     if (isUser(msg) && !isA2aInbox(msg)) {
       return { avatar: <MemberAvatar name="you" role="user" /> };
     }
-    // a2a inbox：发送方是另一 agent，头像/名字取 sender.agent.ref（非 peer），
-    // 角色映射 ref.type→leader/mate（subagent 等 non-leader 一律按 mate 配色）。
+    // a2a inbox：发送方是另一 agent，名字取 sender.agent.ref（非 peer）。
+    // [v0.0.295] showNameAsPrefix=true 供信封组件显示发送方名字
+    // [v0.0.301] 原 MemberAvatar 对象 invisible（保真布局，恢复容易）
     if (isA2aInbox(msg)) {
       const ref = a2aRefOf(msg)!;
       const refRole: 'leader' | 'mate' = ref.type === 'leader' ? 'leader' : 'mate';
-      return { avatar: <MemberAvatar name={ref.name} role={refRole} /> };
+      return {
+        avatar: (
+          <div className="w-9 shrink-0 invisible">
+            <MemberAvatar name={ref.name} role={refRole} id={ref.sessionId} />
+          </div>
+        ),
+        name: ref.name,
+        showNameAsPrefix: true,
+      };
     }
-    return { avatar: <MemberAvatar name={name} role={role} /> };
+    return { avatar: <MemberAvatar name={name} role={role} id={peerId} /> };
   };
 }
 
 /**
  * 单聊 sideResolver（消息 → 左右侧判定）：
- *   - a2a inbox 消息 → 'user' 侧（右，与 human user 同侧——PRD 拍板，区别于群聊 a2a→左）
- *   - 其他 → 走内核默认 sideOfMessage（human user→右；assistant answer + tool→左）
- * 单一职责：只控「左右侧」；头像/名字仍由 resolveMemberActorFactory 决定（解耦）。
+ *   - 全部走内核默认 sideOfMessage（a2a→assistant 左侧，与群聊一致）
+ *   - 单一职责：只控「左右侧」；头像/名字仍由 resolveMemberActorFactory 决定（解耦）。
  * 群聊不传 sideResolver —— 沿用内核默认 a2a→左。
+ * [v0.0.295] a2a 消息从右侧（user）改回左侧（assistant），与群聊行为对齐。
  */
 export function memberSideResolver(msg: Message): 'user' | 'assistant' {
-  if (isA2aInbox(msg)) return 'user';
   return sideOfMessage(msg);
 }
 
@@ -142,7 +158,7 @@ export function deriveRenderStrategy(chrome: SessionChromeView): RenderStrategy 
     const peer = chrome.members.find((m) => m.id === chrome.memberId);
     if (peer) {
       return {
-        resolveActor: resolveMemberActorFactory({ name: peer.name, role: peer.role }),
+        resolveActor: resolveMemberActorFactory({ name: peer.name, role: peer.role, id: peer.id }),
         sideResolver: memberSideResolver,
       };
     }

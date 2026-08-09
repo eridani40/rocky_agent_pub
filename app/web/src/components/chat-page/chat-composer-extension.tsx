@@ -128,7 +128,8 @@ function serializeMention(attrs: MentionAttrs): string {
 
 /**
  * 将 Tiptap editor document 序列化为纯字符串。
- * text 段 → 原样；mention node → flat 全属性 tag（XML 转义、空 badge 省略）。
+ * text 段 → 原样；mention node → flat 全属性 tag（XML 转义、空 badge 省略）；
+ * hardBreak node → '\n'（手动回车 Shift/Cmd+Enter 产生，v0.0.284 修复换行丢失）。
  * 段落之间用 `\n` 分隔（编辑器通常单段落，这里兼容多段）。
  */
 export function serializeEditorContent(
@@ -139,7 +140,10 @@ export function serializeEditorContent(
     if (block.type !== 'paragraph') continue;
     let line = '';
     for (const node of block.content ?? []) {
-      if (node.type === 'text' && node.text) {
+      if (node.type === 'hardBreak') {
+        // 手动回车（Shift/Cmd/Ctrl+Enter）→ setHardBreak 产生的节点，序列化为 \n
+        line += '\n';
+      } else if (node.type === 'text' && node.text) {
         line += node.text;
       } else if (node.type === 'mention' && node.attrs) {
         line += serializeMention(node.attrs);

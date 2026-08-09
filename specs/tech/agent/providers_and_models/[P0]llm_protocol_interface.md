@@ -283,6 +283,8 @@ type StreamEvent =
 **透传链（源头 → wire）**：
 `session.effort`（持久化字段）→ `buildSessionConfigFromDeps`（handlers/session-config.ts）读 → `config.effort`（SessionConfig，agent 上下文）→ `callLLMForSpec`（loop-stage-llm.ts main+forked 唯一活跃 stage）+ `callLLM legacy client.stream 路径`（agent-loop-base.ts，同步加防 drift）透传 → `CallLLMInput.effort` → `callLLMViaInvoker baseReq.params.effort` → `encodeAnthropicMessages` 注入 wire body。`undefined` 一路透传，encode 兜底走 default 档（不加 output_config）。
 
+**studio 覆盖链（[v0.0.279] squad 团队默认推理强度）**：`buildSessionConfigFromDeps` 在 resolveModel 同区（session-config.ts L255-260）调 `resolveEffort(sessionPersist.effort, isStudio && squad !== undefined ? squad.effortDefault : undefined)`（纯函数，session-config.ts L107-114）——**成员显式档（low/high/max）→ 用之；否则团队 `squad.effortDefault`（low/high/max）→ 用之；否则 `undefined`（厂商默认，encode 不注入）**。成员 `'default'` 与 `undefined` 同语义（不覆盖 → 落团队/厂商默认）。resolve 时机与 model 一致：每次 `resolveConfigBySid` 现拉（无 cache）——团队改设置下一次 run 立即生效；playground/academy/standalone 无 squad → 只 session 一层；subagent 继承父 resolve 结果不重复 resolve。`squad.effortDefault` 由 squad schema（`required:false`，存量无字段=default）+ PATCH 校验（非法 400）双保证合法值。数据契约见 `specs/api/overall/11a-squad-endpoints.md §1.3/§1.4`。
+
 **理由**：effort 是新概念（v0.0.148 net-new），厂商（Claude/OpenAI）已离散化为 4 档；canonical 统一键 + encode 映射模式与既有 protocol 字段（maxTokens / stop / temperature）一致——语义在 canonical 层稳定（换 provider 不改调用方），映射差异封在 encode 内部（换 provider 只改 encode 常量表）。
 **反例**：若把 Anthropic wire 字面 `'max'` 直接塞进 RequestParams.effort，调用方需按 provider 切换值（OpenAI 用 `'xhigh'`），破坏 canonical 协议层屏蔽差异的职责；调用方要 import 厂商专属常量，与 provider 强耦合。
 

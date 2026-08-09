@@ -1,18 +1,17 @@
 // @vitest-environment jsdom
 /**
- * section-workspace-panel 懒监听接线单测（v0.0.139 T3）
- * 参考: specs/api/overall/04-agent-session.md §2.6.5（watch/unwatch 请求契约）
- *       specs/ui/components/chat-page/component-workspace-panel.md §4.3.1（展开=watch/收起=unwatch/卸载=release-all）
+ * section-workspace-panel 懒监听接线单测（v0.0.271 重构：watch-set 声明式）
+ * 参考: specs/api/overall/04-agent-session.md §2.6.5（watch-set 请求契约）
+ *       specs/ui/components/chat-page/component-workspace-panel.md §4.3.1（接线小节）
+ *       specs/tech/version_logs/v0.0.271/change_plan.md（R1：前端算完整集合推送，后端 diff 兜底）
  *
- * 覆盖 acceptanceCriteria：
- *   - 挂载 → 根 watch(path:'') 被调（sid 正确 + clientId 为字符串）
- *   - clientId 跨展开/收起稳定（同一 clientId 出现在根 watch + 展开 watch + 收起 unwatch）
- *   - 展开文件夹 → watchWorkspaceDir(path) 被调
- *   - 收起文件夹 → unwatchWorkspaceDir(path) 被调
+ * 覆盖 acceptanceCriteria（v0.0.271 新语义）：
+ *   - 挂载 → applyWatchSet(['']) 被调（根；初始 rootTree 未到只有根）
+ *   - rootTree 到后 → applyWatchSet 含根一级子文件夹（['', 'src']）
+ *   - 展开文件夹 → applyWatchSet 集合含节点自身 + 一级子文件夹（childrenCache 筛 dir）
+ *   - 收起文件夹 → applyWatchSet 集合移出该节点（除非被根一级覆盖）
  *   - 卸载组件 → unwatchWorkspaceDir release-all 被调（不带 path，clientId 与挂载时一致）
- *   - GET tree（多次刷新）不触发额外 watch 调用（红线③：GET tree 绝不隐式 watch）
- *   - [review 补丁] session_workspace_dir_changed 事件 → 重新 watch(path:'') 新根
- *     （api §2.5：后端 recycleSession 切目录清光旧监听不自动重启，前端须重新 POST watch）
+ *   - refresh 后 applyWatchSet 重算（幂等，集合内容与展开态一致）
  *
  * mock 策略（MEMORY test-vitest-mock-absolute-path）：vi.hoisted + __dirname 派生绝对路径 mock chat-api，
  * 严禁相对/硬编码绝对路径（bun+jsdom 全量并发下相对路径 mock 会静默失效）。
@@ -21,10 +20,11 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { initI18n } from '../../../i18n';
 
-const { getWorkspaceTreeMock, watchMock, unwatchMock, chatApiPath } = vi.hoisted(() => ({
+const { getWorkspaceTreeMock, watchMock, unwatchMock, watchSetMock, chatApiPath } = vi.hoisted(() => ({
   getWorkspaceTreeMock: vi.fn(),
   watchMock: vi.fn(),
   unwatchMock: vi.fn(),
+  watchSetMock: vi.fn(),
   chatApiPath: require('node:path').resolve(__dirname, '../../../lib/chat-api.ts'),
 }));
 
@@ -35,6 +35,7 @@ vi.mock(chatApiPath, () => ({
   updateSession: vi.fn(async () => ({})),
   watchWorkspaceDir: (...args: unknown[]) => watchMock(...args),
   unwatchWorkspaceDir: (...args: unknown[]) => unwatchMock(...args),
+  watchWorkspaceSet: (...args: unknown[]) => watchSetMock(...args),
 }));
 
 import { SectionWorkspacePanel } from '../section-workspace-panel';
@@ -49,7 +50,10 @@ const ROOT_TREE = {
 };
 const SRC_CHILDREN = {
   workspaceDir: '/tmp/ws',
-  tree: [{ name: 'main.ts', path: 'src/main.ts', type: 'file' as const, hasChildren: false }],
+  tree: [
+    { name: 'utils', path: 'src/utils', type: 'dir' as const, hasChildren: true },
+    { name: 'main.ts', path: 'src/main.ts', type: 'file' as const, hasChildren: false },
+  ],
 };
 
 beforeAll(async () => {
@@ -60,12 +64,14 @@ beforeEach(() => {
   getWorkspaceTreeMock.mockReset();
   watchMock.mockReset();
   unwatchMock.mockReset();
+  watchSetMock.mockReset();
   getWorkspaceTreeMock.mockImplementation(async (_sid: string, opts?: { parent?: string }) => {
     if (opts?.parent === 'src') return SRC_CHILDREN;
     return ROOT_TREE;
   });
   watchMock.mockResolvedValue({ ok: true });
   unwatchMock.mockResolvedValue({ ok: true });
+  watchSetMock.mockResolvedValue({ ok: true });
   // store 单例跨 test 复用：清掉上个 test 遗留的 lastWorkspaceEvent，避免误触发
   useChatStore.getState().setLastWorkspaceEvent(null);
 });
@@ -74,67 +80,79 @@ afterEach(() => {
   cleanup();
 });
 
+/** 取最近一次 applyWatchSet 的 paths 数组 */
+function lastWatchSetPaths(): string[] | null {
+  const calls = watchSetMock.mock.calls.filter((c) => c[1]?.paths);
+  if (calls.length === 0) return null;
+  const last = calls[calls.length - 1] as [string, { paths?: string[] }] | undefined;
+  return last?.[1]?.paths ?? null;
+}
+
 /** src 树项的 twisty（role=button span；展开/收起 label 随态切换，故按结构定位） */
 function getSrcTwisty(): HTMLElement {
   const item = screen.getByText('src').closest('.ws-item')!;
   return item.querySelector('[role="button"]') as HTMLElement;
 }
 
-describe('SectionWorkspacePanel 懒监听接线（v0.0.139）', () => {
-  it('挂载 → 根 watch(clientId, path:"") 被调一次（sid 正确）', async () => {
+describe('SectionWorkspacePanel 懒监听接线（v0.0.271 watch-set）', () => {
+  it('挂载 → applyWatchSet 被调（初始只有根；rootTree 到后含根一级子文件夹）', async () => {
     render(<SectionWorkspacePanel sessionId="sess-1" />);
     await screen.findByLabelText('拖动调节工作区宽度');
-    await vi.waitFor(() => expect(watchMock).toHaveBeenCalledTimes(1));
-    const [sid, body] = watchMock.mock.calls[0]!;
-    expect(sid).toBe('sess-1');
-    expect(body.path).toBe('');
-    expect(typeof body.clientId).toBe('string');
-    expect(body.clientId.length).toBeGreaterThan(0);
+    // 初始（tree 未到）→ ['']；rootTree 到后 → ['', 'src']（根一级 dir）
+    await vi.waitFor(() => {
+      const paths = lastWatchSetPaths();
+      expect(paths).toBeTruthy();
+      expect(paths).toContain('');
+      expect(paths).toContain('src');
+    });
+    // clientId 稳定为字符串
+    const call = watchSetMock.mock.calls.find((c) => c[1]?.paths)?.[0];
+    expect(call).toBe('sess-1');
+    expect(typeof watchSetMock.mock.calls[0]![1].clientId).toBe('string');
   });
 
-  it('展开文件夹 → watchWorkspaceDir(path) 被调，clientId 与根 watch 一致', async () => {
+  it('展开文件夹 → applyWatchSet 集合含节点自身 + 一级子文件夹（childrenCache 筛 dir）', async () => {
     render(<SectionWorkspacePanel sessionId="sess-1" />);
     await screen.findByText('src');
-    await vi.waitFor(() => expect(watchMock).toHaveBeenCalledTimes(1));
-    const rootClientId = watchMock.mock.calls[0]![1].clientId;
+    await vi.waitFor(() => expect(lastWatchSetPaths()).toContain('src'));
 
     fireEvent.click(getSrcTwisty());
+    // 展开 → toggle-expand + GET children → childrenCache 含 src/utils dir → 集合 ['', 'src', 'src/utils']
     await vi.waitFor(() => {
-      const call = watchMock.mock.calls.find((c) => c[1]?.path === 'src');
-      expect(call).toBeTruthy();
+      const paths = lastWatchSetPaths();
+      expect(paths).toContain('src');
+      expect(paths).toContain('src/utils');
     });
-    const expandCall = watchMock.mock.calls.find((c) => c[1]?.path === 'src')!;
-    expect(expandCall[0]).toBe('sess-1');
+    // clientId 跨展开稳定（与挂载时一致）
+    const rootClientId = watchSetMock.mock.calls[0]![1].clientId;
+    const expandCall = watchSetMock.mock.calls[watchSetMock.mock.calls.length - 1]!;
     expect(expandCall[1].clientId).toBe(rootClientId);
   });
 
-  it('收起文件夹 → unwatchWorkspaceDir(path) 被调，clientId 与根 watch 一致', async () => {
+  it('收起文件夹 → applyWatchSet 集合移出该节点自身 + 一级子文件夹（根一级 dir 仍保留）', async () => {
     render(<SectionWorkspacePanel sessionId="sess-1" />);
     await screen.findByText('src');
-    await vi.waitFor(() => expect(watchMock).toHaveBeenCalledTimes(1));
-    const rootClientId = watchMock.mock.calls[0]![1].clientId;
+    await vi.waitFor(() => expect(lastWatchSetPaths()).toContain('src'));
 
-    // 先展开
+    // 先展开（src 一级子文件夹 src/utils 进集合）
+    fireEvent.click(getSrcTwisty());
+    await vi.waitFor(() => expect(lastWatchSetPaths()).toContain('src/utils'));
+
+    // 再收起（同一按钮 toggle）→ src 自身 + src/utils 移出；但 src 是根一级 dir → 仍在集合
     fireEvent.click(getSrcTwisty());
     await vi.waitFor(() => {
-      expect(watchMock.mock.calls.some((c) => c[1]?.path === 'src')).toBe(true);
+      const paths = lastWatchSetPaths();
+      expect(paths).not.toContain('src/utils');
     });
-    // 再收起（同一按钮 toggle）
-    fireEvent.click(getSrcTwisty());
-    await vi.waitFor(() => {
-      const call = unwatchMock.mock.calls.find((c) => c[1]?.path === 'src');
-      expect(call).toBeTruthy();
-    });
-    const collapseCall = unwatchMock.mock.calls.find((c) => c[1]?.path === 'src')!;
-    expect(collapseCall[0]).toBe('sess-1');
-    expect(collapseCall[1].clientId).toBe(rootClientId);
+    expect(lastWatchSetPaths()).toContain('src'); // 根一级 dir 仍 watch（R4 覆盖语义）
+    expect(lastWatchSetPaths()).toContain('');
   });
 
   it('卸载组件 → unwatchWorkspaceDir release-all 被调（不带 path，clientId 与挂载时一致）', async () => {
     const { unmount } = render(<SectionWorkspacePanel sessionId="sess-1" />);
     await screen.findByLabelText('拖动调节工作区宽度');
-    await vi.waitFor(() => expect(watchMock).toHaveBeenCalledTimes(1));
-    const rootClientId = watchMock.mock.calls[0]![1].clientId;
+    await vi.waitFor(() => expect(watchSetMock).toHaveBeenCalled());
+    const rootClientId = watchSetMock.mock.calls[0]![1].clientId;
 
     unmount();
     await vi.waitFor(() => {
@@ -148,14 +166,10 @@ describe('SectionWorkspacePanel 懒监听接线（v0.0.139）', () => {
     expect('path' in releaseCall[1]).toBe(false);
   });
 
-  it('GET tree（多次刷新）不触发额外 watch 调用（红线③：GET tree 绝不隐式 watch）', async () => {
+  it('refresh 后 applyWatchSet 重算（幂等：集合内容与展开态一致，后端 diff 无增删）', async () => {
     render(<SectionWorkspacePanel sessionId="sess-1" />);
     await screen.findByLabelText('拖动调节工作区宽度');
-    await vi.waitFor(() => expect(watchMock).toHaveBeenCalledTimes(1));
-    // [v0.0.139 T4 修复] ws-refresh-btn 的 disabled=state.loading（component-ws-tab-bar.tsx）；
-    // 挂载后的初始 GET tree 是异步的，全量 suite 高并发调度延迟下点击时 loading 可能仍 true
-    // → 按钮 disabled → fireEvent.click 在 jsdom 对 disabled 元素是 no-op → 断言必然 fail
-    // （非随机噪音，是真实竞态）。须等按钮变为可点击（初始加载完成）才点。
+    // 初始加载完成（refresh 按钮可用）
     await vi.waitFor(() => {
       expect((screen.getByRole('button', { name: '刷新工作区' }) as HTMLButtonElement).disabled).toBe(false);
     });
@@ -165,32 +179,56 @@ describe('SectionWorkspacePanel 懒监听接线（v0.0.139）', () => {
     await vi.waitFor(() => {
       expect(getWorkspaceTreeMock.mock.calls.length).toBeGreaterThan(callsBeforeRefresh);
     });
-    // 刷新多次触发了额外 GET tree，但 watch 调用数仍只有挂载时的根 watch 一次
-    expect(watchMock).toHaveBeenCalledTimes(1);
+    // refresh 后重算集合仍含根 + 根一级 dir（内容稳定，幂等）
+    await vi.waitFor(() => {
+      const paths = lastWatchSetPaths();
+      expect(paths).toContain('');
+      expect(paths).toContain('src');
+    });
   });
 
-  it('session_workspace_dir_changed 事件 → 重新 watch(path:"") 新根（review 补丁：切目录后端清光旧监听不自动重启）', async () => {
+  it('[v0.0.275] 结构刷新：t1 里建 t2（addDir）→ 50ms 防抖 → refetch parentOf(t1)=root tree（t1 twisty 出现）', async () => {
+    // 复现场景：root 展开（无 t1）→ 建 t1（addDir root）→ t1 里建 t2（addDir t1/t2 → structural('t1') → refetch '' root tree）
+    let rootTreeCalls = 0;
+    getWorkspaceTreeMock.mockImplementation(async (_sid: string, opts?: { parent?: string }) => {
+      rootTreeCalls += 1;
+      if (opts?.parent === 'src') return SRC_CHILDREN;
+      // 后续 root tree 返回含 t1（hasChildren=true，t2 已建）
+      return {
+        workspaceDir: '/tmp/ws',
+        tree: [
+          { name: 'src', path: 'src', type: 'dir' as const, hasChildren: true },
+          { name: 't1', path: 't1', type: 'dir' as const, hasChildren: true },
+          { name: 'readme.md', path: 'readme.md', type: 'file' as const, hasChildren: false },
+        ],
+      };
+    });
+
     render(<SectionWorkspacePanel sessionId="sess-1" />);
-    await screen.findByLabelText('拖动调节工作区宽度');
-    await vi.waitFor(() => expect(watchMock).toHaveBeenCalledTimes(1));
-    const rootClientId = watchMock.mock.calls[0]![1].clientId;
-    watchMock.mockClear();
+    await screen.findByText('src');
+    await vi.waitFor(() => expect(lastWatchSetPaths()).toContain('src'));
+    const rootCallsBefore = rootTreeCalls;
 
-    // 模拟 chat-slice fan-out 收到 dir_changed（覆盖「别的 tab 切了目录」场景：本 tab 未调用 handleSwitchDir）
+    // 模拟 SSE file_changed(addDir t1/t2) → reducer 标 structural('t1')
     useChatStore.getState().setLastWorkspaceEvent({
-      type: 'session_workspace_dir_changed',
+      type: 'session_workspace_file_changed',
       sessionId: 'sess-1',
-      createdAt: '2026-07-14T10:00:00.000Z',
-      data: { workspaceDir: '/tmp/ws-new', prevDir: '/tmp/ws' },
+      createdAt: new Date().toISOString(),
+      data: { path: 't1/t2', kind: 'addDir', isDir: true },
     });
 
+    // 50ms 防抖后 → refetch parentOf('t1')=''（root tree，无 parent 参数）
     await vi.waitFor(() => {
-      const call = watchMock.mock.calls.find((c) => c[1]?.path === '');
-      expect(call).toBeTruthy();
+      expect(rootTreeCalls).toBeGreaterThan(rootCallsBefore);
     });
-    const rewatchCall = watchMock.mock.calls.find((c) => c[1]?.path === '')!;
-    expect(rewatchCall[0]).toBe('sess-1');
-    // clientId 未因切目录变化（同一 tab 身份）
-    expect(rewatchCall[1].clientId).toBe(rootClientId);
+    // 刷新后 t1 出现（twisty 有 role=button）
+    await screen.findByText('t1');
+    const t1Item = screen.getByText('t1').closest('.ws-item')!;
+    expect(t1Item.querySelector('[role="button"]')).toBeTruthy();
+
+    // 触发后 structural 已清：不再重复 refetch（等 80ms 确认无新请求）
+    const callsAfterFirst = rootTreeCalls;
+    await new Promise((r) => setTimeout(r, 80));
+    expect(rootTreeCalls).toBe(callsAfterFirst);
   });
 });

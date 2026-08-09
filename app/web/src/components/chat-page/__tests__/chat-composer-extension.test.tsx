@@ -135,3 +135,49 @@ describe('serializeEditorContent（v0.0.86 flat 全属性）', () => {
     expect(serializeEditorContent({ content: [{ type: 'paragraph' }] })).toBe('');
   });
 });
+
+/**
+ * v0.0.284 hardBreak 序列化（手动回车换行保留）
+ * Shift/Cmd/Ctrl+Enter → setHardBreak → hardBreak 节点 → 序列化为 '\n'
+ */
+describe('serializeEditorContent — v0.0.284 hardBreak 换行保留', () => {
+  it('单个 hardBreak → 段内 \n', () => {
+    const doc = makeDoc([
+      { type: 'text', text: '第一行' },
+      { type: 'hardBreak' },
+      { type: 'text', text: '第二行' },
+    ]);
+    expect(serializeEditorContent(doc)).toBe('第一行\n第二行');
+  });
+
+  it('多个连续 hardBreak → 多个 \n', () => {
+    const doc = makeDoc([
+      { type: 'text', text: 'A' },
+      { type: 'hardBreak' },
+      { type: 'hardBreak' },
+      { type: 'text', text: 'B' },
+    ]);
+    expect(serializeEditorContent(doc)).toBe('A\n\nB');
+  });
+
+  it('hardBreak 与 mention 混合 → 顺序保留 + \n', () => {
+    const doc = makeDoc([
+      { type: 'text', text: '看看 ' },
+      { type: 'mention', attrs: { type: 'file', path: 'src/x.ts', icon: 'file', label: 'x.ts' } },
+      { type: 'hardBreak' },
+      { type: 'text', text: '这个文件' },
+    ]);
+    expect(serializeEditorContent(doc)).toBe(
+      '看看 <mention type="file" path="src/x.ts" icon="file" label="x.ts"/>\n这个文件',
+    );
+  });
+
+  it('hardBreak 在段首/段尾 → \n 保留（首尾不 trim）', () => {
+    const doc = makeDoc([
+      { type: 'hardBreak' },
+      { type: 'text', text: '内容' },
+      { type: 'hardBreak' },
+    ]);
+    expect(serializeEditorContent(doc)).toBe('\n内容\n');
+  });
+});

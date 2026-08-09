@@ -201,8 +201,10 @@ export function runShell(
   signal?: AbortSignal,
   childRegistry?: ChildProcessRegistry,
 ): Promise<ShellResult> {
-  const child = spawn(command, {
-    shell: process.env.SHELL ?? '/bin/sh',
+  // [fix] login shell (-l)：source 用户 .zprofile/.bash_profile → 继承 node/npm/homebrew 等 PATH。
+  // 非交互式 login shell（非 -li）避免 .zshrc 交互插件噪音 + 启动快（~26ms vs ~170ms）。
+  const shellBin = process.env.SHELL ?? '/bin/sh';
+  const child = spawn(shellBin, ['-l', '-c', command], {
     cwd,
     // stdout + stderr 合并到 stdout（对齐 bash_tools §2 输出语义）
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -303,7 +305,8 @@ export class SecureBashEngine implements BashEngine {
 
     // [v0.0.130.hang] detached:true 建独立进程组——sandbox-exec 派生的 shell/孙进程默认继承同组，
     // 组杀（killProcessGroup）负 pid 才能一并清理，避免 seatbelt 场景下孙进程残留悬挂 pipe。
-    const child = spawn('/usr/bin/sandbox-exec', ['-p', profile, shell, '-c', command], {
+    // [fix] login shell (-l)：同 runShell，source 用户 profile 继承 PATH。
+    const child = spawn('/usr/bin/sandbox-exec', ['-p', profile, shell, '-l', '-c', command], {
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
@@ -313,33 +316,73 @@ export class SecureBashEngine implements BashEngine {
 }
 
 // ============================================================
-// 5. getBashEngine — 进程级单例工厂
+// 4b. PassthroughBashEngine — 无沙箱直通执行引擎
 // ============================================================
 
-/** 内置策略：禁止读取 ~/.ssh 敏感目录 */
-const BUILTIN_POLICIES: BashSecurityPolicy[] = [
-  {
-    id: 'ssh-read-block',
-    description: '禁止读取 ~/.ssh（私钥/known_hosts 等敏感文件）',
-    denyRead: ['~/.ssh'],
-  },
-];
+/**
+ * 无沙箱直通执行引擎（用于嵌套沙箱环境下绕过 sandbox-exec）。
+ *
+ * 不 spawn sandbox-exec，直接走 runShell（与 SecureBashEngine 非 darwin 分支逻辑一致）。
+ * 适用场景：Rocky agent 自身运行在 seatbelt 沙箱内时，sandbox-exec 嵌套会 exit 71，
+ * 关闭 bash_seatbelt 后走此引擎避免嵌套沙箱冲突。
+ */
+export class PassthroughBashEngine implements BashEngine {
+  async exec(command: string, opts: ExecOpts): Promise<ShellResult> {
+    return runShell(command, opts.cwd, opts.timeoutMs, opts.signal, opts.childRegistry);
+  }
+}
 
-/** 进程级单例（惰性初始化） */
-let _engine: BashEngine | null = null;
+// ============================================================
+// 5. getBashEngine — 每次调用按 app config 实时决策
+// ============================================================
+
+/** 内置策略列表（空 — ssh 限制已移除，agent 可正常使用 git ssh） */
+const BUILTIN_POLICIES: BashSecurityPolicy[] = [];
+
+/** SecureBashEngine 单例（无状态，复用避免每次 new） */
+let _secureEngine: BashEngine | null = null;
+/** PassthroughBashEngine 单例（无状态，复用避免每次 new） */
+let _passthroughEngine: BashEngine | null = null;
 
 /**
- * 获取进程级 BashEngine 单例。
- * 按 process.platform 决定：
- *   - darwin → SecureBashEngine（seatbelt + 内置 ssh-read-block 策略）
- *   - 其他 → passthrough（SecureBashEngine 的非 darwin 分支）
+ * 配置读取函数（由 bootstrap 注入）。
+ * 默认 null（未注入）= 读不到 → 走 SecureBashEngine（安全默认）。
+ */
+let _configReader: (() => unknown) | null = null;
+
+/**
+ * 注入配置读取函数（供 bootstrap 调用）。
+ * bootstrap 在 AppConfigService init 后、agent 装配前调用：
+ * `setBashEngineConfigReader(() => appConfig.get('runtime', 'bash_seatbelt'))`
  *
- * 内置策略列表固定（本版一条 ssh-read-block）。
+ * 未注入时 getBashEngine() 安全回退 SecureBashEngine。
+ */
+export function setBashEngineConfigReader(reader: () => unknown): void {
+  _configReader = reader;
+}
+
+/**
+ * 获取 BashEngine（每次调用实时读配置决策，改配置立即生效无需重启）。
+ * 按 app config（group=runtime, key=bash_seatbelt）决策：
+ *   - false → PassthroughBashEngine（无沙箱，解决嵌套 seatbelt exit 71）
+ *   - true / 缺失 / 读取异常 / 未注入 configReader → SecureBashEngine（安全默认）
+ *
+ * 两个 engine 都无状态，复用单例避免每次 new；决策逻辑每次执行。
  */
 export function getBashEngine(): BashEngine {
-  if (!_engine) {
-    // SecureBashEngine 内部按 platform 决策 seatbelt/passthrough
-    _engine = new SecureBashEngine(BUILTIN_POLICIES);
+  // 每次读配置决定走哪个 engine；任何异常都安全回退 SecureBashEngine
+  let usePassthrough = false;
+  if (_configReader) {
+    try {
+      usePassthrough = _configReader() === false;
+    } catch {
+      // 配置读取异常 → 安全回退
+    }
   }
-  return _engine;
+  if (usePassthrough) {
+    if (!_passthroughEngine) _passthroughEngine = new PassthroughBashEngine();
+    return _passthroughEngine;
+  }
+  if (!_secureEngine) _secureEngine = new SecureBashEngine(BUILTIN_POLICIES);
+  return _secureEngine;
 }

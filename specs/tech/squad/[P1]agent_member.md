@@ -22,7 +22,7 @@ since: v0.0.33.2
 |---|---|
 | **identity** | member 人设（角色/专长） |
 | **rules** | 接 leader 分配、自己推进、完成汇报 leader、可与 peer 协作 + **不越权**（不擅自做重大决策、不清楚就问）+ **"消息从哪来到哪去"**（a2a_protocol §4.1：a2a→send_message 回；非 a2a→自己 session 出 final text；主动问 user 在群聊） |
-| **reachable_agents** | ★ 动态注入可达对象（`../multi_agent/[P1]a2a_protocol.md §3`）：**squadchat + leader + 同 squad 其他 member（peers）+ 自己派的 sub-agent**（不含 user——user 在 session UI 旁） |
+| **squad_agents_status** | ★ 动态注入统一全员状态块（`../multi_agent/[P1]a2a_protocol.md §3`）：**SquadChat + leader + 同 squad 其他 member（peers）+ 自己派的 sub-agent**（不含 user——user 在 session UI 旁）；全员列出 running/idle + presence |
 | **skills** | 按角色（业务技能） |
 | **tool_guidance** | send_message(全队) + spawn_agent + 业务工具 |
 | **context** | 团队花名册（peer，Q1/Q2 协作用）+ 自己 workspace |

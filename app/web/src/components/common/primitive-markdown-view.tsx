@@ -1,31 +1,32 @@
 /**
  * primitive-markdown-view —— 最小 markdown 渲染（克制风格，无依赖）
  * 参考: specs/ui/components/chat-page/_overview.md §4.7（answer markdown 最小子集）
- *       设计稿: reqs/v0.0.8/easy-opc-chat-v9a.html（克制风格）
- *       v0.0.253: `<a>` onClick 接入 link-target 分发（http→系统浏览器 / local-12 格式→内置 viewer / local-其它→系统应用）
+ *       v0.0.253: `<a>` onClick 接入 link-target 分发
+ *       v0.0.286: block 级图片独立行 `![alt](url)` 渲染（三源分流见 primitive-markdown-image.tsx）
  *
- * 支持子集：
- *   - block：段落 / 代码块(```...```) / 无序列表(- x) / 有序列表(1. x) /
- *            标题(#/##/###) / 引用块(>) / GFM 表格
- *   - inline：加粗(**x**) / 行内代码(`x`) / 链接([text](url))
- *
- * 不引入第三方库（保持克制 + 零依赖）。解析为 React 元素数组，按行扫描。
- * 行内格式（加粗/代码/链接）用正则切分替换为 <strong>/<code>/<a>。
+ * 支持 block：段落/代码块/列表/标题/引用/GFM 表格/独立行图片
+ * 支持 inline：加粗/行内代码/链接（renderInline 不改——inline 嵌图不做）
  */
 import { tryParseGfmTable, isTableStartHere } from './primitive-markdown-gfm-table';
 import { isDangerousScheme, openLinkTarget, type OpenLinkTargetOpts } from '../../lib/link-target';
 import { useChatLinkHandler } from '../chat-page/chat-link-handler-context';
+import { MarkdownImage } from './primitive-markdown-image';
+
+/** block 级独立行图片正则：整行只有 `![alt](url)`（trim 后首尾锚定） */
+const BLOCK_IMAGE_RE = /^!\[([^\]]*)\]\(([^)\s]+)\)$/;
 
 interface MarkdownViewProps {
   /** markdown 源文本 */
   source: string;
   /** 附加 className */
   className?: string;
+  /** [v0.0.286] 文件所在目录（relative 图片 resolve 基准；chat 气泡无此值 → 相对图降级 alt） */
+  baseDir?: string;
+  /** [v0.0.286] 会话 ID（relative 图片走 readWorkspaceFileBinary HTTP） */
+  sessionId?: string;
 }
 
-/** 行内格式：`code` → <code>、[text](url) → <a>、**bold** → <strong>。
- *  切分层级：代码 → 链接 → 加粗（外层优先，内层不再跨级处理）。
- *  v0.0.253: `<a>` 加 onClick → preventDefault + openLinkTarget 分发；opts 来自 useChatLinkHandler（无 Provider 系统打开降级）。 */
+/** 行内格式：`code`→<code>、[text](url)→<a>、**bold**→<strong>。外层优先，内层不跨级。 */
 function renderInline(text: string, keyBase: string, linkOpts: OpenLinkTargetOpts | null): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   // 一级切分：行内代码 `...`（代码内不再处理其他格式，保留原行为）
@@ -92,16 +93,10 @@ function renderInline(text: string, keyBase: string, linkOpts: OpenLinkTargetOpt
   return nodes;
 }
 
-// ===== GFM 表格识别（block 级别）=====
-// 实现移到 ./primitive-markdown-gfm-table（纯函数 helper，保持本文件 ≤300 行）
-
-/**
- * 最小 markdown 渲染器。按行扫描产出：代码块 / 列表项 / GFM 表格 / 段落。
- */
-export function PrimitiveMarkdownView({ source, className }: MarkdownViewProps) {
-  // v0.0.253: 取 chat 链接处理回调（无 Provider = 其它消费方 → null → 链接走系统打开降级）
+/** 最小 markdown 渲染器。按行扫描产出：代码块/列表/GFM 表格/独立行图片/段落。 */
+export function PrimitiveMarkdownView({ source, className, baseDir, sessionId }: MarkdownViewProps) {
   const handler = useChatLinkHandler();
-  const linkOpts: OpenLinkTargetOpts | null = handler ? { onLocalViewer: handler.onLocalViewer } : null;
+  const linkOpts: OpenLinkTargetOpts | null = handler ? { onLocalViewer: handler.onLocalViewer, sessionId: handler.sessionId } : null;
 
   const lines = source.replace(/\r\n/g, '\n').split('\n');
   const blocks: React.ReactNode[] = [];
@@ -265,21 +260,27 @@ export function PrimitiveMarkdownView({ source, className }: MarkdownViewProps) 
       continue;
     }
 
+    // block 级独立行图片 ![alt](url)（v0.0.286：仅独立行，inline 嵌图不做）
+    const imgMatch = line.trim().match(BLOCK_IMAGE_RE);
+    if (imgMatch) {
+      blocks.push(
+        <div key={`md-img-${keyIdx++}`} className="my-1.5">
+          <MarkdownImage src={imgMatch[2] ?? ''} alt={imgMatch[1] ?? ''} baseDir={baseDir} sessionId={sessionId} />
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
     // 段落（连续非空非特殊行）
     const para: string[] = [];
     while (i < lines.length) {
       const ln = lines[i];
       if (
-        !ln ||
-        ln.trim() === '' ||
-        ln.trim().startsWith('```') ||
-        /^\s*[-*]\s+/.test(ln) ||
-        /^\s*\d+\.\s+/.test(ln) ||
-        // 与外层 heading 判定严格对称：要求 heading 有非空内容才 break（否则 "### " 空 heading 会撞外层死循环）。
-        /^(#{1,3})\s+.+$/.test(ln) ||
-        /^\s*>\s?/.test(ln) ||
-        // 表格起始：当前行是表头 + 下一行是分隔行 → 段落 break，让表格分支接管
-        isTableStartHere(lines, i)
+        !ln || ln.trim() === '' || ln.trim().startsWith('```') ||
+        /^\s*[-*]\s+/.test(ln) || /^\s*\d+\.\s+/.test(ln) ||
+        /^(#{1,3})\s+.+$/.test(ln) || /^\s*>\s?/.test(ln) ||
+        BLOCK_IMAGE_RE.test(ln.trim()) || isTableStartHere(lines, i)
       ) {
         break;
       }

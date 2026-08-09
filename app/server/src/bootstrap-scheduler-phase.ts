@@ -26,6 +26,7 @@ import type { SchedulerEngine } from './scheduling/engine';
 import type { CronPersistenceAdapter } from './scheduling/persistence/cron-adapter';
 import type { ConsolidationPersistenceAdapter } from './scheduling/persistence/consolidation-adapter';
 import type { AppTaskLock } from './agent/app-task-lock';
+import type { ReplayableEventBus } from './agent/event-bus';
 // SquadRuntime + BudgetAggregator + BudgetState —— squad scheduler 生命周期 glue
 import { SquadRuntime, makeGetUsageTotalTokens } from './squad/squad-runtime';
 import { BudgetAggregator } from './squad/budget/budget-aggregator';
@@ -47,6 +48,11 @@ export async function bootstrapSchedulerPhase(deps: {
   appConfig: AppConfigService;
   pluginManager: PluginManager;
   /**
+   * session_panel topic 的 bus（来自 bus-phase）。
+   * 透传到 bootScheduler → cronToolDeps.statusBus，cron 写操作后 emit session_cron_changed。
+   */
+  sessionStatusBus?: ReplayableEventBus;
+  /**
    * [v0.0.164] AppTaskLock 单例（bootstrap 层构造）——透传到 ConsolidationJobHandler
    * 供 cron fire 时 gate2 acquire('tier2_consolidation') 撞车保护。
    * 缺省 undefined 时 registerConsolidationJob 会跳过 lock 接入（保持既有测试兼容）。
@@ -62,7 +68,7 @@ export async function bootstrapSchedulerPhase(deps: {
   consolidationAdapter?: ConsolidationPersistenceAdapter;
   squadStore: SquadStore;
 }> {
-  const { dataDir, store, agentManager, appConfig, pluginManager, appTaskLock } = deps;
+  const { dataDir, store, agentManager, appConfig, pluginManager, appTaskLock, sessionStatusBus } = deps;
 
   const budgetState = new BudgetState(dataDir);
   const squadStoreForRuntime = new SquadStore({ root: dataDir });
@@ -95,6 +101,8 @@ export async function bootstrapSchedulerPhase(deps: {
     sessionStore: store,
     agentManager,
     budgetAggregator,
+    // sessionStatusBus 透传到 cronToolDeps.statusBus（cron 写操作后 emit session_cron_changed）
+    ...(sessionStatusBus ? { sessionStatusBus } : {}),
     // consolidation job 装配需要——透传 bootstrap 既有单例（不新建重复的
     // AppConfigService/PluginManager 实例，见 consolidation_job.md §6）
     appConfig,

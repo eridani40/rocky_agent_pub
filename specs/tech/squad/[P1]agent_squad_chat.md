@@ -10,7 +10,7 @@ since: v0.0.33.2
 # SquadChat Agent（哑路由 / 群聊）
 
 > 定位：squad 的**群聊 agent**——纯消息**路由分拣器**。不创作内容、不做实质工作；收 user 消息→决定派给哪个角色→`send_message`→收回复（或群聊 UI 透传）→输出 `<EOS>` 结束 run。**reactive only**。
-> 参考：`squad_definition.md §6`（EOS）、`squad_autonomy.md §4`（无心跳）、`../multi_agent/[P1]a2a_protocol.md`（AgentRef/回复规则/reachable_agents）、`../multi_agent/[P1]subagent_derivation.md §5`（send_message）。
+> 参考：`squad_definition.md §6`（EOS）、`squad_autonomy.md §4`（无心跳）、`../multi_agent/[P1]a2a_protocol.md`（AgentRef/回复规则/squad_agents_status）、`../multi_agent/[P1]subagent_derivation.md §5`（send_message）。
 
 ## 1. 定位
 
@@ -25,7 +25,7 @@ since: v0.0.33.2
 | **identity** | "你是 SquadChat，消息路由器。永不创作内容，只把 user 消息派给合适角色，本轮完成则输出 `<EOS>`" |
 | **rules** | 路由规则（如何选角色）+ "不写答案/不干活" + `<EOS>` 规则（§5.1）+ **"消息从哪来到哪去"**（a2a_protocol §4.1：群聊里 user 消息由你路由，回复透传 UI；不需你创作） |
 | **tool_guidance** | `send_message` 用法（目标 = leader/member；**不含 user**——user 在群聊 UI 旁） |
-| **reachable_agents** | ★ 动态注入可达对象（`../multi_agent/[P1]a2a_protocol.md §3`）：**同 squad leader + members**（不含 user） |
+| **squad_agents_status** | ★ 动态注入统一全员状态块（`../multi_agent/[P1]a2a_protocol.md §3`）：**同 squad leader + members**（不含 user） |
 | **context_files** | 成员花名册（name + 一行角色描述）——路由要用 |
 | ~~memory~~ | 无（路由对话短，不留长记忆） |
 | ~~skills~~ | 无 |
@@ -97,7 +97,7 @@ SquadChat 把 user 消息转发给 member 时，`send_message` 的 **content tex
 | 零件 | 归属 |
 |---|---|
 | session.type=squad、`<EOS>` 语义 | `squad_definition.md §6/§7` |
-| AgentRef / reachable_agents / 回复规则 | `../multi_agent/[P1]a2a_protocol.md` |
+| AgentRef / squad_agents_status / 回复规则 | `../multi_agent/[P1]a2a_protocol.md` |
 | send_message / enqueue+activate | `../multi_agent/[P1]subagent_derivation.md §5` |
 | reactive only（无心跳） | `squad_autonomy.md §4` |
 

@@ -14,7 +14,7 @@ import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { applyAgentEventToMessages, type AgentEvent } from '../../../store/chat-slice';
 import type { RunContext } from '../../../store/chat-slice-reducer';
-import { ComponentEnqueueView } from '../component-enqueue-view';
+import { ComponentEnqueueView, truncatePreview } from '../component-enqueue-view';
 import { ComponentAbortBtn } from '../component-abort-btn';
 import type { Message } from '../types';
 import { initI18n } from '../../../i18n';
@@ -239,5 +239,271 @@ describe('BUG-006 根治（v0.0.12）—— 对话区无乐观插入', () => {
     expect(s.messages[0]!.id).toBe('01KVK5WTW75N3Z12AB');
     // 关键断言：id 不含 'local-' 前缀（无乐观插入）
     expect(s.messages[0]!.id.startsWith('local-')).toBe(false);
+  });
+});
+
+// [v0.0.285] 排队消息展示优化：折叠态第一行 / 展开态 max-h 滚动 / 多条互斥
+describe('v0.0.285 — 排队消息展示优化', () => {
+  it('折叠态显示第一行（多行内容只展示首行，不显示中段）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '第一行内容\n第二行内容\n第三行内容' }]}
+        running={true}
+      />,
+    );
+    // 折叠态：data-open=false，内容只含首行
+    const item = screen.getByText('第一行内容').closest('[data-open]');
+    expect(item?.getAttribute('data-open')).toBe('false');
+    // 第二行不应该出现在折叠态 DOM 中
+    expect(screen.queryByText('第二行内容')).toBeNull();
+    expect(screen.queryByText('第三行内容')).toBeNull();
+  });
+
+  it('展开态显示全文（含换行后的内容）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '第一行\n第二行' }]}
+        running={true}
+      />,
+    );
+    // 点展开按钮
+    fireEvent.click(screen.getByRole('button', { name: '展开全文' }));
+    // 展开后全文可见（MentionRender 把多行文本拆成 whitespace-pre-wrap span，
+    //   用 textContent 匹配全文而非 getByText 精确匹配）
+    const item = document.querySelector('[data-open="true"]');
+    expect(item).toBeTruthy();
+    expect(item?.textContent).toContain('第一行');
+    expect(item?.textContent).toContain('第二行');
+    expect(item?.getAttribute('data-open')).toBe('true');
+  });
+
+  it('展开态内容区有 max-h + overflow-y-auto（可滚动）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '短内容' }]}
+        running={true}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '展开全文' }));
+    // 展开态的内容 span 是 flex-1 min-w-0 的外层 span（含 max-h + overflow-y-auto）
+    //   closest('span') 会匹配到 MentionRender 内部 span（whitespace-pre-wrap），
+    //   改用 querySelector 找含 max-h 的 span
+    const contentSpan = document.querySelector('[data-open="true"] span.max-h-\\[160px\\]');
+    expect(contentSpan).toBeTruthy();
+    expect(contentSpan?.className).toContain('overflow-y-auto');
+  });
+
+  it('多条互斥：展开 A 后展开 B → A 自动收起', () => {
+    render(
+      <ComponentEnqueueView
+        items={[
+          { enqueueId: 'eqA', content: '内容A全文' },
+          { enqueueId: 'eqB', content: '内容B全文' },
+        ]}
+        running={true}
+      />,
+    );
+    const expandBtns = screen.getAllByRole('button', { name: '展开全文' });
+    expect(expandBtns).toHaveLength(2);
+
+    // 展开 A
+    fireEvent.click(expandBtns[0]!);
+    const itemA = screen.getByText('内容A全文').closest('[data-open]');
+    expect(itemA?.getAttribute('data-open')).toBe('true');
+
+    // 展开 B → A 应自动收起
+    const expandBtnB = screen.getAllByRole('button', { name: '展开全文' });
+    // A 展开后 A 的按钮变「收起」，B 仍是「展开全文」
+    fireEvent.click(expandBtnB[0]!);
+
+    // 现在 B 展开、A 收起
+    const itemB = screen.getByText('内容B全文').closest('[data-open]');
+    expect(itemB?.getAttribute('data-open')).toBe('true');
+    // A 折叠后只显示首行 preview（内容A全文 无 \n 所以首行=全文）
+    const itemA2 = screen.getByText('内容A全文').closest('[data-open]');
+    expect(itemA2?.getAttribute('data-open')).toBe('false');
+  });
+
+  it('再点同一个展开项 → 收起（toggle）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '内容' }]}
+        running={true}
+      />,
+    );
+    // 展开
+    fireEvent.click(screen.getByRole('button', { name: '展开全文' }));
+    let item = screen.getByText('内容').closest('[data-open]');
+    expect(item?.getAttribute('data-open')).toBe('true');
+    // 再点（按钮现在是「收起」）
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
+    item = screen.getByText('内容').closest('[data-open]');
+    expect(item?.getAttribute('data-open')).toBe('false');
+  });
+
+  it('折叠态内容 span 不含 leading-[32px]（半行坍塌修复）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '测试' }]}
+        running={true}
+      />,
+    );
+    // closest('span') 会匹配到 MentionRender 内部 span（whitespace-pre-wrap），
+    //   用 querySelector 定位折叠态卡片的外层内容 span（含 flex-1 + leading-tight）
+    const contentSpan = document.querySelector('[data-open="false"] span.flex-1');
+    expect(contentSpan?.className).not.toContain('leading-[32px]');
+    expect(contentSpan?.className).toContain('leading-tight');
+  });
+
+  it('外层容器右对齐（items-end，非水平居中）', () => {
+    const { container } = render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '测试' }]}
+        running={true}
+      />,
+    );
+    // 最外层 div 应含 items-end（右对齐）
+    const outerDiv = container.firstChild as HTMLElement;
+    expect(outerDiv.className).toContain('items-end');
+  });
+});
+
+// [v0.0.293] 排队消息展示修复：顶部对齐统一 + 长行软折行
+describe('v0.0.293 — 顶部对齐 + 长行软折行', () => {
+  it('折叠态卡片用 items-center（非 items-start，序号 pill 顶部对齐）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '测试内容' }]}
+        running={true}
+      />,
+    );
+    const card = document.querySelector('[data-open="false"]');
+    expect(card?.className).toContain('items-center');
+    // 不应含 items-center（v0.0.293 修复点）
+    expect(card?.className).toContain('items-center');
+  });
+
+  it('展开态卡片同样 items-center（折叠→展开不跳变）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '测试内容' }]}
+        running={true}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '展开全文' }));
+    const card = document.querySelector('[data-open="true"]');
+    expect(card?.className).toContain('items-center');
+  });
+
+  it('多条排队消息统一 items-center（垂直顶部对齐）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[
+          { enqueueId: 'eq1', content: '第一条' },
+          { enqueueId: 'eq2', content: '第二条' },
+          { enqueueId: 'eq3', content: '第三条' },
+        ]}
+        running={true}
+      />,
+    );
+    const cards = document.querySelectorAll('[data-open]');
+    expect(cards).toHaveLength(3);
+    cards.forEach((c) => {
+      expect(c.className).toContain('items-center');
+      expect(c.className).toContain('items-center');
+    });
+  });
+
+  it('展开态内容 span 有 wordBreak break-word（长中文软折行）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '短内容' }]}
+        running={true}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '展开全文' }));
+    const contentSpan = document.querySelector('[data-open="true"] span.flex-1') as HTMLElement;
+    expect(contentSpan).toBeTruthy();
+    // v0.0.293：展开态强制 word-break:break-word（覆盖 MentionRender 内 whitespace-pre-wrap）
+    expect(contentSpan.style.wordBreak).toBe('break-word');
+    expect(contentSpan.style.overflowWrap).toBe('anywhere');
+  });
+
+  it('折叠态内容 span 无 wordBreak style（折叠态不需要折行）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '短内容' }]}
+        running={true}
+      />,
+    );
+    const contentSpan = document.querySelector('[data-open="false"] span.flex-1') as HTMLElement;
+    expect(contentSpan).toBeTruthy();
+    // 折叠态：nowrap + ellipsis，无需 wordBreak
+    expect(contentSpan.style.wordBreak).toBe('');
+  });
+});
+
+// [v0.0.294] 收起态 10 字符截断 + …
+describe('v0.0.294 — truncatePreview 收起态截断', () => {
+  it('中文：≤10 字符不截断不加 …', () => {
+    expect(truncatePreview('短', 10)).toBe('短');
+    expect(truncatePreview('测试一条', 10)).toBe('测试一条');
+    expect(truncatePreview('测试一条排队消息', 10)).toBe('测试一条排队消息');
+  });
+
+  it('中文：>10 字符截断到 10 字 + …', () => {
+    // 11 个中文字符 → 截前 10 + …
+    expect(truncatePreview('测试一条排队消息再加字', 10)).toBe('测试一条排队消息再加…');
+  });
+
+  it('英文：保留到单词结尾（不截断单词中间）', () => {
+    // hello world foo → 前 10 字符 = 'hello worl'，末尾 'l' 是字母 → 扩展到 'world' 结尾
+    expect(truncatePreview('hello world foo', 10)).toBe('hello world…');
+  });
+
+  it('英文：单词 ≤10 字符 + 空格后继续（保留到第 10 字符位置所在单词的结尾）', () => {
+    // 'abcdefghij xxx' → 前 10 = 'abcdefghij'，末尾是字母 → 扩展但无后续字母 → 回退硬截
+    expect(truncatePreview('abcdefghij xxx', 10)).toBe('abcdefghij…');
+  });
+
+  it('英文+中文混合：末尾单词延伸到结尾 → 返回原文（不加 …）', () => {
+    // '你好hello world' = 2+11=13 字符；前 10 = '你好hello wo'，末尾 'o' 字母 → 扩展到 'world'
+    // 扩展后等于原文（world 是末尾单词）→ 原文就是最佳预览，不加 …
+    expect(truncatePreview('你好hello world', 10)).toBe('你好hello world');
+  });
+
+  it('英文+中文混合：末尾单词后有更多内容 → 截断 + …', () => {
+    // '你好hello world foo' → 前 10 = '你好hello wo'，扩展到 'world'（有空格断），后续还有 foo
+    expect(truncatePreview('你好hello world foo', 10)).toBe('你好hello world…');
+  });
+
+  it('前后空白 trim', () => {
+    expect(truncatePreview('  短文本  ', 10)).toBe('短文本');
+  });
+
+  it('收起态 DOM：渲染截断文本（含 …），不显示全文', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '这是一条很长的排队消息内容需要被截断' }]}
+        running={true}
+      />,
+    );
+    // 收起态文本含 …，不含被截断的内容
+    const item = document.querySelector('[data-open="false"]');
+    expect(item?.textContent).toContain('…');
+    expect(item?.textContent).not.toContain('需要被截断');
+  });
+
+  it('展开态渲染全文（不含 …）', () => {
+    render(
+      <ComponentEnqueueView
+        items={[{ enqueueId: 'eq1', content: '这是一条很长的排队消息内容需要被截断' }]}
+        running={true}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '展开全文' }));
+    const item = document.querySelector('[data-open="true"]');
+    expect(item?.textContent).toContain('需要被截断');
+    expect(item?.textContent).not.toContain('…');
   });
 });

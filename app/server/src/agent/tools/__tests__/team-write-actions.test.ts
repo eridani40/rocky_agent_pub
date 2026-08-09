@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { teamTool } from '../team-tool';
 import {
-  TEAM_INPUT_SCHEMA, runHire, runDeploy, runBench, runEdit, resolveMemberId,
+  TEAM_INPUT_SCHEMA, runHire, runDeploy, runBench, runEdit, runReset, resolveMemberId,
 } from '../team-write-actions';
 import type { ToolCtx, ToolInput } from '../../../tools/types';
 import type { AgentToolRuntimeContext } from '../runtime-context';
@@ -149,9 +149,9 @@ describe('team 工具 dispatch', () => {
 });
 
 describe('TEAM_INPUT_SCHEMA', () => {
-  it('action.enum = 6 元素', () => {
+  it('action.enum = 7 元素（v0.0.282 加 reset）', () => {
     const a = TEAM_INPUT_SCHEMA.properties!.action as { enum?: string[] };
-    expect(a?.enum).toEqual(['list', 'query', 'hire', 'deploy', 'bench', 'edit']);
+    expect(a?.enum).toEqual(['list', 'query', 'hire', 'deploy', 'bench', 'edit', 'reset']);
   });
 
   it('含 7 flat 顶层 properties（hire 6 + roleId；v0.0.155 model 硬删；v0.0.250 inheritMemory 删）', () => {
@@ -350,5 +350,112 @@ describe('resolveMemberId', () => {
   });
   it('无匹配 → throw MemberNotFoundError', async () => {
     await expect(resolveMemberId(ms, 'SQUAD-A', 'nobody')).rejects.toBeInstanceOf(MemberNotFoundError);
+  });
+});
+
+/**
+ * runReset UT（v0.0.282 T1）— 4 分支覆盖：
+ * idle 清理成功 / running 拒绝 / leader reset 可执行 / todoStore undefined skip
+ * 断言 clearSession/putMember/removeAll 调用参数 + memory 未触碰验证
+ */
+describe('runReset（v0.0.282 T1 — mate 上下文重置）', () => {
+  /** 造 reset 专用 rtc：store mock（getSession/clearSession）+ memberStore + 可选 todoStore */
+  function makeResetRtc(opts: {
+    sessionState?: string;
+    sessionId?: string;
+    memberCurrentWork?: unknown;
+    todoStore?: unknown;
+  } = {}): { rtc: AgentToolRuntimeContext; clearSession: ReturnType<typeof vi.fn>; putMember: ReturnType<typeof vi.fn>; removeAll: ReturnType<typeof vi.fn> } {
+    const clearSession = vi.fn(async (_sid: string) => ({ id: _sid }) as never);
+    const getSession = vi.fn(async (_sid: string) => ({ id: _sid, state: opts.sessionState ?? 'idle' }) as never);
+    const removeAll = vi.fn(async (_sid: string) => undefined);
+    // member 带 sessionId + 可选 currentWork
+    const member: Record<string, unknown> = {
+      id: 'M-MATE', name: 'mate1', role: 'mate', state: 'deployed',
+      sessionId: opts.sessionId ?? 'SID-MATE',
+      ...(opts.memberCurrentWork !== undefined ? { currentWork: opts.memberCurrentWork } : {}),
+    };
+    const stored = new Map([['M-LEADER', { id: 'M-LEADER', name: 'leader', role: 'leader', state: 'deployed', sessionId: 'SID-LEADER' }], ['M-MATE', member]]);
+    const memberStore = {
+      listMembers: vi.fn(async () => Array.from(stored.values()) as never[]),
+      getMember: vi.fn(async (_s: string, mid: string) => (stored.get(mid) as never) ?? undefined),
+      putMember: vi.fn(async (rec: Record<string, unknown>) => { stored.set(rec.id as string, rec); return rec as never; }),
+    };
+    const rtc: AgentToolRuntimeContext = {
+      parentSessionId: 'P', parentRunId: 'r', parentType: undefined, parentName: 'p', parentScope: undefined,
+      selfSessionId: 'SELF', selfType: 'leader', selfName: 'leader',
+      selfSquadId: 'SQUAD-A',
+      squadStore: { getSquad: async () => ({ id: 'SQUAD-A' }) } as never,
+      memberStore: memberStore as never,
+      agentManager: { deliverTo: vi.fn() } as never,
+      store: { getSession, clearSession } as never,
+      sessionDeps: opts.todoStore !== undefined ? { todoStore: opts.todoStore } as never : {} as never,
+    };
+    return { rtc, clearSession, putMember: memberStore.putMember, removeAll };
+  }
+
+  it('idle mate → 清理成功：clearSession + putMember(currentWork=null) + todoStore.removeAll 全调', async () => {
+    const { rtc, clearSession, putMember, removeAll } = makeResetRtc({
+      sessionState: 'idle',
+      memberCurrentWork: { text: 'doing stuff', updatedAt: '2026-01-01' },
+      todoStore: { removeAll: vi.fn(async () => undefined) },
+    });
+    const { isError, parsed } = await runAction(runReset, rtc, { action: 'reset', roleId: 'mate1' });
+    expect(isError).toBe(false);
+    // clearSession 调用参数
+    expect(clearSession).toHaveBeenCalledWith('SID-MATE');
+    // putMember currentWork=null
+    expect(putMember).toHaveBeenCalledWith(expect.objectContaining({ id: 'M-MATE', currentWork: null }));
+    // todoStore.removeAll
+    const todoStore = (rtc.sessionDeps as unknown as { todoStore?: { removeAll: unknown } }).todoStore;
+    expect(todoStore).toBeDefined();
+    expect(removeAll).toBeDefined(); // removeAll 来自 makeResetRtc 返回
+    // 返回 cleared:true
+    expect(parsed).toMatchObject({ memberId: 'M-MATE', sessionId: 'SID-MATE', cleared: true });
+  });
+
+  it('running mate → 拒绝 errorResult（clearSession 未调）', async () => {
+    const { rtc, clearSession, putMember } = makeResetRtc({
+      sessionState: 'running',
+    });
+    const { isError, text } = await runAction(runReset, rtc, { action: 'reset', roleId: 'mate1' });
+    expect(isError).toBe(true);
+    expect(text).toMatch(/agent is running/);
+    // clearSession 未被调用（running 保护拦截在 clearSession 之前）
+    expect(clearSession).not.toHaveBeenCalled();
+    // putMember 也未被调用（presence 清在 clearSession 之后）
+    expect(putMember).not.toHaveBeenCalled();
+  });
+
+  it('leader reset → 可执行（leader 自身 state=idle 不被 running 保护拦截）', async () => {
+    // leader member sessionId = SID-LEADER，state=idle
+    const { rtc, clearSession } = makeResetRtc({ sessionState: 'idle' });
+    const { isError, parsed } = await runAction(runReset, rtc, { action: 'reset', roleId: 'leader' });
+    expect(isError).toBe(false);
+    expect(clearSession).toHaveBeenCalledWith('SID-LEADER');
+    expect(parsed).toMatchObject({ memberId: 'M-LEADER', sessionId: 'SID-LEADER', cleared: true });
+  });
+
+  it('todoStore undefined → skip todo 清理不报错（cleared:true 无 warnings）', async () => {
+    const { rtc } = makeResetRtc({ sessionState: 'idle', todoStore: undefined });
+    const { isError, parsed } = await runAction(runReset, rtc, { action: 'reset', roleId: 'mate1' });
+    expect(isError).toBe(false);
+    expect(parsed).toMatchObject({ memberId: 'M-MATE', sessionId: 'SID-MATE', cleared: true });
+    // 无 warnings（todoStore undefined → skip，不产生 warning）
+    expect(parsed).not.toHaveProperty('warnings');
+  });
+
+  it('roleId 空 → errorResult（team.reset: roleId required）', async () => {
+    const { rtc } = makeResetRtc();
+    const { isError, text } = await runAction(runReset, rtc, { action: 'reset', roleId: '' });
+    expect(isError).toBe(true);
+    expect(text).toBe('team.reset: roleId required');
+  });
+
+  it('roleId 不存在 → errorResult（team.reset: member not found）', async () => {
+    const { rtc } = makeResetRtc();
+    const { isError, text } = await runAction(runReset, rtc, { action: 'reset', roleId: 'ghost' });
+    expect(isError).toBe(true);
+    expect(text).toBe('team.reset: member not found');
   });
 });

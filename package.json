@@ -1,7 +1,7 @@
 {
   "name": "rocky-agent",
+  "version": "0.0.304",
   "private": true,
-  "version": "0.0.259",
   "description": "Local-first desktop multi-agent orchestrator — run squads of LLM agents with tool use, computer control, skills and memory in one Electron app.",
   "license": "MIT",
   "author": "eridani40 <ayhon@qq.com>",

@@ -5,9 +5,13 @@
  *       specs/tech/version_logs/v0.0.227/change_plan.md（test-ut 行）
  *
  * 覆盖 test-plan §2 必覆盖清单：
- *   GET：正常读 / traversal（../ + 绝对路径 + symlink 外部）→ 400 / not_found→404 / 三类 4xx+405
+ *   GET：正常读 / traversal（../ + 绝对路径）→ 400 / symlink 外部读放行（v0.0.263 授权模型）/
+ *        not_found→404 / 三类 4xx+405
  *   POST save：正常覆盖写 / round-trip / body+path+content 三类 400 / traversal 不落盘 /
- *               symlink 不落盘到外部 / not_found→404（不新建）
+ *               symlink 外部写放行（v0.0.263 授权模型）/ not_found→404（不新建）
+ *
+ * [v0.0.263] symlink 语义变更：workspace 内存在的 symlink = 用户放置 = 授权，读/写均放行
+ *   （旧版本 400 拒绝；PRD §7 本版本行为变更）。未授权越界（非 symlink 段的 ../、绝对路径）仍 400。
  *
  * 文件系统隔离：tmpdir + mkdtemp + beforeEach/afterEach rm（no-mock fs，对齐 test-plan §2）。
  */
@@ -114,7 +118,7 @@ describe('GET /session/:id/workspace/file', () => {
     expect(res.status).toBe(400);
   });
 
-  it('symlink 穿越外部 → 400（realpath 层挡）', async () => {
+  it('[v0.0.263] symlink 文件读放行：path=escape/secret.md（指向外部）→ 200 内容正确（UC-4）', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'oobt-wsfile-out-'));
     try {
       writeFileSync(join(outside, 'secret.md'), 'topsecret');
@@ -124,8 +128,9 @@ describe('GET /session/:id/workspace/file', () => {
         new Request(`http://x/session/${sid}/workspace/file?path=escape/secret.md`),
         'GET', sid, makeDeps(),
       );
-      expect(res.status).toBe(400);
-      expect((await body(res)).error).toMatch(/traversal|out of workspace/i);
+      // 本版本行为变更：workspace 内 symlink = 授权 → 读放行（非 400）
+      expect(res.status).toBe(200);
+      expect((await body(res)).content).toBe('topsecret');
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
@@ -138,6 +143,64 @@ describe('GET /session/:id/workspace/file', () => {
       'GET', sid, makeDeps(),
     );
     expect(res.status).toBe(404);
+  });
+
+  it('[v0.0.269] binary=1 → 读 Buffer 返 base64（图片二进制通道；UTF-8 读会乱码的内容可正确取回）', async () => {
+    // 1x1 透明 PNG（含 NUL 字节，UTF-8 读会乱码）——验证 Buffer 读取而非 utf8 decode
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    mkdirSync(join(ws, 'img'), { recursive: true });
+    writeFileSync(join(ws, 'img', 'dot.png'), png);
+    const sid = await newSessionWithWorkspace(ws);
+
+    const res = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=img/dot.png&binary=1`),
+      'GET', sid, makeDeps(),
+    );
+    expect(res.status).toBe(200);
+    const parsed = await body(res);
+    expect(typeof parsed.content).toBe('string');
+    // base64 取回后还原 == 原 Buffer（确定性契约）
+    expect(Buffer.from(parsed.content, 'base64').equals(png)).toBe(true);
+  });
+
+  it('[v0.0.269] binary=1 白名单校验不变：traversal → 400 / 不存在 → 404', async () => {
+    writeFileSync(join(ws, 'a.png'), 'x');
+    const sid = await newSessionWithWorkspace(ws);
+    // traversal
+    const r1 = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=../etc/passwd&binary=1`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r1.status).toBe(400);
+    // not_found
+    const r2 = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=missing.png&binary=1`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r2.status).toBe(404);
+  });
+
+  it('[v0.0.269] binary 参数缺失/非 "1" → utf8 现状向后兼容', async () => {
+    const md = '# Notes';
+    writeFileSync(join(ws, 'a.md'), md);
+    const sid = await newSessionWithWorkspace(ws);
+    // 无 binary 参数
+    const r1 = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=a.md`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r1.status).toBe(200);
+    expect((await body(r1)).content).toBe(md);
+    // binary=0（非 '1'）
+    const r2 = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=a.md&binary=0`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r2.status).toBe(200);
+    expect((await body(r2)).content).toBe(md);
   });
 
   it('path 缺失 / session 不存在 / 非 GET → 400 / 404 / 405', async () => {
@@ -270,7 +333,7 @@ describe('POST /session/:id/workspace/file/save', () => {
     expect(res.status).toBe(400);
   });
 
-  it('symlink 穿越外部 → 400 且不覆盖外部文件', async () => {
+  it('[v0.0.263] symlink 文件写放行：save escape/secret.md（指向外部）→ 200 写入目标文件（UC-4）', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'oobt-wsfile-save-out-'));
     try {
       writeFileSync(join(outside, 'secret.md'), 'orig');
@@ -284,9 +347,11 @@ describe('POST /session/:id/workspace/file/save', () => {
         }),
         'POST', sid, makeDeps(),
       );
-      expect(res.status).toBe(400);
-      // 外部文件未被覆盖
-      expect(readFileSync(join(outside, 'secret.md'), 'utf8')).toBe('orig');
+      // 本版本行为变更：workspace 内 symlink = 授权 → 写放行（非 400）
+      expect(res.status).toBe(200);
+      expect((await body(res)).ok).toBe(true);
+      // 外部目标文件被覆盖（授权根模型：symlink 目标 = 用户放置 = 可写）
+      expect(readFileSync(join(outside, 'secret.md'), 'utf8')).toBe('pwn');
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

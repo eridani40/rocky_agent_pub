@@ -126,6 +126,8 @@ export interface BrowserExecuteResult {
   ok: boolean;
   text?: string;
   error?: { kind?: string; message: string };
+  /** launch 确认帧携带的 chrome 进程 pid（v0.0.272 孤儿对账锚点；旧 worker 无此字段=undefined） */
+  chromePid?: number;
 }
 
 /**
@@ -181,4 +183,50 @@ export class BrowserError extends Error {
     this.name = 'BrowserError';
     this.kind = kind;
   }
+}
+
+// ============================================================
+// [v0.0.264] Browser Instance Manager 类型（常驻实例 + 持久 worker）
+// [v0.0.266] attach 纳入：mode 扩展 'attach'，worker-based 字段可选 + session/cdpUrl 承载
+// [v0.0.266 T3] BrowserInstance 迁 mode-impl.ts（BrowserHandle + impl 私有扩展）
+// ============================================================
+
+/**
+ * 常驻 worker 协议（stdin 每行任务 / stdout 每行响应，requestId 路由）。
+ * 单 worker 单任务串行：pending 一次一个（对齐 executeOnce 串行语义）。
+ */
+export interface PersistentWorker {
+  child: import('node:child_process').ChildProcess;
+  nextReqId: number;
+  pending: Map<number, { resolve: (r: BrowserExecuteResult) => void; reject: (e: Error) => void }>;
+  /** 发任务 → 等对应 requestId 响应；worker exit → reject 全部 pending */
+  send(action: string, params: BrowserActionParams): Promise<BrowserExecuteResult>;
+}
+
+/** worker 内跨 action 会话状态（snapshot 的 ref 供后续 click/type 用） */
+export interface WorkerSessionState {
+  lastRefs: Record<string, RefInfo>;
+}
+
+/** browser-instances.json 记录条目（开机自检/残留清理数据锚点；不存运行时 worker/state） */
+export interface PersistedInstanceRecord {
+  key: string;
+  mode: 'headless' | 'managed-profile';
+  profileName?: string;
+  userDataDir: string;
+  cdpPort: number;
+  workerPid: number;
+  /** chrome 进程 pid（v0.0.272 起 launch 确认帧上报；旧记录无此字段=undefined，孤儿判定走 ppid 兼容） */
+  chromePid?: number;
+  createdAt: number;
+}
+
+/** launch/execute/close 的实例选择参数（对齐 tool.ts toConnectOpts 语义） */
+export interface BrowserLaunchOptions {
+  mode: 'headless' | 'managed-profile' | 'attach';
+  /** 仅 managed-profile 有意义 */
+  profileName?: string;
+  /** attach 连接端点（缺省 → DEFAULT_ATTACH_CDP_URL driver 内部兜底）；仅 attach 有意义 */
+  cdpUrl?: string;
+  executablePath?: string;
 }

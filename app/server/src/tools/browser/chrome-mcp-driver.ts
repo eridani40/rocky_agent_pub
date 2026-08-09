@@ -6,6 +6,7 @@
  * 机制：`resolveChromeMcpLaunch()` 优先用 `node <pkg bin 绝对路径>` 直连本地 chrome-devtools-mcp
  *   （避免 `npx -y chrome-devtools-mcp@latest` 每次冷下载 18M + 查 registry，慢网络/首次 > 30s
  *   handshake 超时；bundle 包 pin 版本，resolve 失败兜底 npx @<已装 version>），
+ *   packaged Electron 下改用 process.execPath+ELECTRON_RUN_AS_NODE=1（PATH 无 node，同 node-worker-driver.defaultSpawn），
  *   + flags（attach 默认走 --browserUrl(loopback 127.0.0.1:9222) 取代 --autoConnect /
  *   cdpUrl 覆盖默认 target / --experimentalStructuredContent --experimental-page-id-routing /
  *   --userDataDir 透传），经 McpFactory（默认 require @modelcontextprotocol/sdk）建
@@ -108,7 +109,7 @@ export class ChromeMcpDriver implements BrowserDriver {
     const args = [...launch.baseArgs, ...flags];
     const diagnostics: string[] = [];
     const { client, transport } = this.mcpFactory.create(
-      { command: launch.command, args, stderr: 'pipe' },
+      { command: launch.command, args, stderr: 'pipe', env: launch.env },
       (chunk) => diagnostics.push(chunk),
     );
 
@@ -265,16 +266,17 @@ export function buildChromeMcpArgs(input: {
  * 解析 chrome-devtools-mcp 启动命令。
  *
  * 主路径：`require.resolve('chrome-devtools-mcp/package.json')` 拿包目录 → 读
- *   `bin['chrome-devtools-mcp']` → 拼 `<pkgDir>/<bin>` 绝对路径 → 返回
- *   `{ command: 'node', baseArgs: [<binAbsPath>] }`。
+ *   `bin['chrome-devtools-mcp']` → 拼 `<pkgDir>/<bin>` 绝对路径。
  *   chrome-devtools-mcp `"type":"module"`、bin 是 ESM .js；`node <bin.js>` 直接跑（不加实验 flag）。
- *
- * 兜底（resolve 失败 / bin 字段缺失）：`{ command: 'npx', baseArgs: ['-y', 'chrome-devtools-mcp'] }`。
- *   注：不在此读 version——`require.resolve` 失败意味着包不可见，再 `require('chrome-devtools-mcp/package.json')`
- *   走同一解析算法也会失败，读 version 是死代码；让 npx 自行取 latest。
+ * packaged Electron 适配：主进程内 PATH 无 node，字面 'node' 必崩 ENOENT——仅当
+ *   `process.versions.electron` 为真改用 `process.execPath` + `env.ELECTRON_RUN_AS_NODE=1`
+ *   （纯 node 语义，同 node-worker-driver.defaultSpawn；memory packaged-spawn-external-binary-exec-path），
+ *   dev/bun 保持 'node' 不变。
+ * 兜底（resolve 失败 / bin 缺失）：`{ command: 'npx', baseArgs: ['-y','chrome-devtools-mcp'] }`
+ *   （resolve 失败=包不可见，读 version 必同样失败是死代码，让 npx 自取 latest；packaged 下 npx 不可用保持现状）。
  * @internal 导出仅供 UT
  */
-export function resolveChromeMcpLaunch(): { command: string; baseArgs: string[] } {
+export function resolveChromeMcpLaunch(): { command: string; baseArgs: string[]; env?: Record<string, string> } {
   try {
     const pkgPath = require.resolve('chrome-devtools-mcp/package.json');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -287,6 +289,9 @@ export function resolveChromeMcpLaunch(): { command: string; baseArgs: string[] 
     if (!binRel) throw new Error('chrome-devtools-mcp package.json 缺 bin[chrome-devtools-mcp]');
     const path = require('path');
     const binAbs = path.resolve(path.dirname(pkgPath), binRel);
+    if (process.versions.electron) {
+      return { command: process.execPath, baseArgs: [binAbs], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    }
     return { command: 'node', baseArgs: [binAbs] };
   } catch {
     return { command: 'npx', baseArgs: ['-y', 'chrome-devtools-mcp'] };

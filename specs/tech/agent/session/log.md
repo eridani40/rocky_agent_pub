@@ -1,10 +1,18 @@
 ---
 type: log
 title: Session KB 变更记录
-updated: 2026-08-01
+updated: 2026-08-06
 ---
 
 # Session KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-06 · v0.0.271（workspace fs watch 关注集合重构 — watch-set 声明式 + 全量 diff）
+
+- **`[P0]session_workspace_manager.md` 懒监听模型升级**（§1/§3/§5/§6/§9/§10/§11）：关注集合 = 所有打开节点自身 + 各自一级子文件夹（含空文件夹——修 BUG-fs-watch-empty-folder-no-expand：空文件夹从未展开 → 无 watcher → 新增文件无事件）。计算 = 前端 `computeWatchSet` 全量重算 + 每次变化 diff 增删（不在新集合一律 close = 结构性泄漏收敛 R3）；**新增 `applyWatchSet` 接口**（声明式替换该 tab 关注集合：resolve → registry.setTabSet diff → added openIfFirstRef / removed closeIfZeroRef）；幂等语义从「增量非声明式」改「声明式全量 diff」（同集合再调 → diff 全空 → no-op）；4 条回收路径（releaseTab/recycleSession/switchDir/stopAll）在 diff 模型下收敛（都是「清集合 → refcount 归零 → close」，漏增量也被下次 diff 纠正）；watch/unwatch 增量端点保留向后兼容（release-all 仍用），新前端不再调单 path。
+- **api `specs/api/overall/04-agent-session.md` v2.7**：§2.6.5 新增 `POST /session/:id/workspace/watch-set`（body `{ clientId, paths: string[] }` 完整集合非增量；paths 逐元素白名单校验，穿越 400 / 不存在静默跳过；缺 clientId 400；realRoot = realpathSync(workspaceDir) 三端点共用 symlink 基准）。
+- **前端接线**（`component-workspace-panel.md §4.3`）：展开/收起只改 state（不再触点直接调 watch API 防双发）→ 重算 effect 监听 tree/expanded/childrenCache → `computeWatchSet`（纯函数，`workspace-watch-set.ts`）→ `applyWatchSet`；切目录 `dir-changed` 语义重置（清 expanded，旧相对路径相对新基准无效）；初始 rootTree / childrenCache 时序两次 applyWatchSet 幂等。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `computeWatchSet` 根 '' 恒含 + 根一级 dir + 打开节点自身 + childrenCache 子一级 dir + 去重排序纯函数 ✅；② useWorkspaceWatch clientId useRef 稳定 + applyWatchSet 完整集合 + cleanup release-all（闭包捕获旧 sessionId）✅；③ handleExpand/handleCollapse 去 watch API + handleSwitchDir dir-changed 清 expanded + 重算 effect 依赖三件套 ✅；④ workspace-api watchWorkspaceSet POST watch-set ✅；⑤ registry.setTabSet 全量 diff + added/removed + 空集清 key + 幂等 + 纯记账 ✅；⑥ manager.applyWatchSet 泄漏收敛（closeIfZeroRef 归零即关）+ 多 tab 合并（refcount>0 不 close）+ 串行化 + 幂等 ✅；⑦ 4 条回收路径（releaseTab/recycleSession/switchDir/stopAll）✅；⑧ watch/unwatch 保留增量幂等 + release-all ✅；⑨ handler watch-set clientId 校验 + paths 数组校验 + 逐 path 白名单 + realRoot symlink 基准 + 不存在静默跳过 + 200 {ok:true} ✅；⑩ 路由落点（session-routes + router-helpers regex 补 watch-set，coder3 偏离 1 必要等价）✅；⑪ dir-watcher depth:0 零改动 + emitter 100ms 契约零改动 ✅；⑫ 前端 watchPath/unwatchPath 零残留 ✅。
+- 详情：`specs/tech/version_logs/v0.0.271/change_plan.md` + `change_log.md`；PRD `specs/prd/version_logs/v0.0.271.fs_watch_diff/prd.md`；BUG `states/bugs/BUG-fs-watch-empty-folder-no-expand-[open].md`
 
 ## 2026-08-01 · v0.0.235（forked usage 统计链路修复 — RunResult.usage 聚合 + caller 补 notify）
 

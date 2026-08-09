@@ -19,8 +19,9 @@ import { MentionNode, serializeEditorContent, PROVIDER_LABELS, addressAttrsFromI
 import type { MentionAttrs } from './chat-composer-extension';
 import { MentionPopover, type MentionItem, type MentionProviderMeta } from './component-mention-popover';
 import { resolveEnterAction } from './chat-composer-keys';
-import { detectMentionTrigger, injectInitialContent } from './chat-composer-helpers';
+import { detectMentionTrigger } from './chat-composer-helpers';
 import { processImagePaste } from './paste-image-handler';
+import { useChatDraft } from './use-chat-draft';
 
 /** ChatComposer Props */
 export interface ChatComposerProps {
@@ -154,6 +155,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     onUpdate: ({ editor: ed }) => {
       // 检测 @ 触发：检查当前光标前是否有 @ 且未被空格中断
       detectTrigger(ed);
+      // [v0.0.267] 编辑即写草稿缓存（空内容由 saveDraft 自动清除）
+      saveDraft(ed);
     },
     editable: !disabled,
   });
@@ -167,16 +170,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     });
   }, [editor, disabled]);
 
-  // 初始内容 mount-time 一次注入（ref guard 防重复）。守卫 `!initialContent || length===0`
-  //   对 string/array 两形都正确（空串命中两条件、空数组命中 length===0）；分派进 injectInitialContent。
-  //   chain.run() 推迟到 microtask（同 setEditable，避免 flushSync 警告）。
-  const initialContentInjectedRef = useRef(false);
-  useEffect(() => {
-    if (!editor || initialContentInjectedRef.current) return;
-    if (!initialContent || initialContent.length === 0) return;
-    initialContentInjectedRef.current = true;
-    queueMicrotask(() => injectInitialContent(editor, initialContent));
-  }, [editor, initialContent]);
+  // [v0.0.267] 输入草稿缓存：接管 mount 注入（草稿 > prefill）+ saveDraft/clearDraft actions。
+  // 原 initialContent effect（ref guard + empty check + queueMicrotask 注入）移入 useChatDraft。
+  const { saveDraft, clearDraft } = useChatDraft(editor, sessionId, initialContent);
 
   /** 检测 @ 触发（核心扫描抽到 detectMentionTrigger 纯函数；本处负责 setTrigger）。 */
   const detectTrigger = useCallback((ed: NonNullable<typeof editor>) => {
@@ -193,7 +189,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     onSend(content);
     editor.commands.clearContent();
     setTrigger(null);
-  }, [editor, onSend]);
+    // [v0.0.267] 发送后显式清草稿（不赌 clearContent 是否触发 onUpdate 的框架行为）
+    clearDraft();
+  }, [editor, onSend, clearDraft]);
 
   // 暴露命令式句柄：send + applyInterrupt（中断注入+焦点）+ isPopoverOpen/isFocused（焦点门控查询）
   useImperativeHandle(ref, () => ({

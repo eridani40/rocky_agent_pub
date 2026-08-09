@@ -9,7 +9,7 @@
  *   3. sub 分区 → updateUsage({usagePartition:'sub', usage})
  *   4. usage=null → 零调用（不变）
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RunLifecyclePort } from '../run-lifecycle-port';
 import type { SessionStore } from '../session-store';
 import type { SessionConfig } from '../context-types';
@@ -17,6 +17,16 @@ import type { ResolvedSessionProfile } from '../session-type-profile-loader';
 import type { Message, Usage } from '../../message/types';
 import { A2aReplyTracker } from '../a2a-reply-tracker';
 import type { LoopState } from '../loop-ports';
+import type { StopReason } from '../agent-event-types';
+
+// [v0.0.273] mock notifyMateExit（run-lifecycle-port 触发断言用；纯函数逻辑另在 mate-exit-notify.test.ts 直测）
+// 注意：bun --bun 下 vi.mock 相对路径字面量不生效（C2 修复）——须用 require('path').resolve(__dirname, ...)
+// 转绝对路径（主仓库先例：team-write-actions.test.ts / consolidation-handler.test.ts）
+vi.mock(require('path').resolve(__dirname, '../mate-exit-notify'), () => ({
+  notifyMateExit: vi.fn(async () => {}),
+}));
+import { notifyMateExit as notifyMateExitMock } from '../mate-exit-notify';
+const notifyMateExit = notifyMateExitMock as ReturnType<typeof vi.fn>;
 
 const SID = 'sid-lifecycle';
 
@@ -98,6 +108,7 @@ function mkStoreFull(): SessionStore & {
   updateUsage: ReturnType<typeof vi.fn>;
   updateRun: ReturnType<typeof vi.fn>;
   getMessages: ReturnType<typeof vi.fn>;
+  getSession: ReturnType<typeof vi.fn>;
   stateMachine: { markIdle: ReturnType<typeof vi.fn>; markError: ReturnType<typeof vi.fn>; markSuspended: ReturnType<typeof vi.fn> };
 } {
   return {
@@ -107,6 +118,7 @@ function mkStoreFull(): SessionStore & {
     getMessages: vi.fn(async () => ({
       items: [{ role: 'assistant', content: [{ type: 'text', text: 'FINAL-TEXT' }] }],
     })),
+    getSession: vi.fn(async () => ({ pendingToolCalls: [] })),
     stateMachine: {
       markIdle: vi.fn(async () => {}),
       markError: vi.fn(async () => {}),
@@ -192,6 +204,82 @@ describe('RunLifecyclePort replySettle — async subagent 回报兜底', () => {
     const deliverTo = vi.fn(async (_sid: string, _msg: Message) => Promise.reject(new Error('parent gone')));
     const { port } = mkSettlePort(store, deliverTo);
     await expect(port.onRunEnd(mkState('error', [REQ]))).resolves.toBeUndefined();
+    expect(store.stateMachine.markError).toHaveBeenCalledWith(SID, 'run-1');
+  });
+});
+
+// ── [v0.0.273] mate run 退出通知 leader hook（mateExitNotify） ──
+
+const SQUAD_ID = 'squad-1';
+
+function mkNotifyPort(store: SessionStore): RunLifecyclePort {
+  return new RunLifecyclePort({
+    config: { sessionId: SID } as SessionConfig,
+    store,
+    runId: 'run-1',
+    profile: mkProfile('current'),
+    mateExitNotify: { squadId: SQUAD_ID },
+  });
+}
+
+describe('RunLifecyclePort mateExitNotify — mate run 退出通知 leader hook', () => {
+  beforeEach(() => {
+    notifyMateExit.mockClear();
+  });
+
+  it('onRunEnd 6 种正常 stopReason → notifyMateExit 触发（stopReason 传递 + 耗时 + squadId）', async () => {
+    const reasons: StopReason[] = ['no_tool_call', 'no_new_messages', 'max_iterations', 'doom_loop', 'error', 'tool_pending'];
+    for (const reason of reasons) {
+      notifyMateExit.mockClear();
+      const store = mkStoreFull();
+      await mkNotifyPort(store).onRunEnd(mkState(reason));
+      expect(notifyMateExit).toHaveBeenCalledTimes(1);
+      const arg = notifyMateExit.mock.calls[0]![1] as { squadId: string; stopReason: StopReason; durationSec: number };
+      expect(arg.squadId).toBe(SQUAD_ID);
+      expect(arg.stopReason).toBe(reason);
+      expect(arg.durationSec).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('onInterrupted → notifyMateExit 触发（stopReason=interrupted）', async () => {
+    const store = mkStoreFull();
+    await mkNotifyPort(store).onInterrupted(mkState(undefined));
+    expect(notifyMateExit).toHaveBeenCalledTimes(1);
+    const arg = notifyMateExit.mock.calls[0]![1] as { stopReason: StopReason };
+    expect(arg.stopReason).toBe('interrupted');
+  });
+
+  it('tool_pending → 从 store.getSession 读 pendingToolCalls 传入 notify', async () => {
+    const store = mkStoreFull();
+    store.getSession = vi.fn(async () => ({
+      pendingToolCalls: [{ sessionId: SID, runId: 'run-1', toolCallId: 'pc-1', toolName: 'ask-question' }],
+    })) as never;
+    await mkNotifyPort(store).onRunEnd(mkState('tool_pending'));
+    expect(store.getSession).toHaveBeenCalledWith(SID);
+    const arg = notifyMateExit.mock.calls[0]![1] as { pendingToolCalls: unknown[] };
+    expect(arg.pendingToolCalls).toEqual([expect.objectContaining({ toolName: 'ask-question' })]);
+  });
+
+  it('非 tool_pending → 不读 getSession，pendingToolCalls undefined', async () => {
+    const store = mkStoreFull();
+    await mkNotifyPort(store).onRunEnd(mkState('no_tool_call'));
+    expect(store.getSession).not.toHaveBeenCalled();
+    const arg = notifyMateExit.mock.calls[0]![1] as { pendingToolCalls: unknown };
+    expect(arg.pendingToolCalls).toBeUndefined();
+  });
+
+  it('mateExitNotify 缺省 undefined → 零通知（纯旧行为 noop）', async () => {
+    const store = mkStoreFull();
+    const port = mkPort(mkProfile('current'), store);
+    await port.onRunEnd(mkState('no_tool_call'));
+    await port.onInterrupted(mkState(undefined));
+    expect(notifyMateExit).not.toHaveBeenCalled();
+  });
+
+  it('通知不阻断主链：notifyMateExit 抛错 → onRunEnd 正常 resolve（CAS 已完成）', async () => {
+    const store = mkStoreFull();
+    (notifyMateExit as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('leader gone'));
+    await expect(mkNotifyPort(store).onRunEnd(mkState('error'))).resolves.toBeUndefined();
     expect(store.stateMachine.markError).toHaveBeenCalledWith(SID, 'run-1');
   });
 });

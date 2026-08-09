@@ -1,280 +1,279 @@
 /**
- * browser Tool 单元测试（白盒，v0.0.46 时机重构后）
+ * browser Tool 单元测试（白盒，v0.0.266 T3 registry 重构后）
  * 参考: specs/tech/agent/tools/[P1]browser_tool.md v1.4 §7
  *       specs/api/overall/08-web-tools.md §4（isError 分支）
- *       states/v0.0.46.connector_opt/design.md §3 §7（PRD P2/P3/P6 UT 清单）
+ *       change_plan v0.0.266 Delta（T3：操作 action 统一 execute，零 mode 分叉）
  *
  * 覆盖：
- *   - [v0.0.101] needsApproval 已退役（O7），原 attach=true/headless=false 测试已移除
- *   - P2 attach lazy connect：switch=on owner=null → connectForToolRun 被调 1 次 → dispatchAction 走通
- *   - P3 attach disconnect：调 cm.disconnect(id, sessionId) 且 isError:false；不改 intent
- *   - P6 not_enabled：cm.connectForToolRun 返 not_enabled → isError + 引导文案
- *   - in_use_by_other / connect_failed 各一断言
- *   - mode !== 'attach' 且 action='disconnect' → 参数错
- *   - headless → pickDriver → connect → dispatch(snapshot) → finally close
- *   - dispatch 各 action（navigate/snapshot/click/type/listPages/evaluate）映射
- *   - 校验失败：缺 mode / 缺 action / 未知 action
+ *   - attach launch/close → im.launch/im.close（cdpUrl 透传）
+ *   - 操作类 action（attach/headless/managed-profile 三模式统一）→ im.execute 路由
+ *     （attach 失活自愈/非失活错误/未知 action 均由 impl 返回错误 → tool 透传）
+ *   - headless/managed-profile：im.launch/im.close/im.execute（v0.0.264 语义不变）
+ *   - 无 instanceManager → 未注册 isError（三模式统一 fail-closed）
+ *   - screenshot 落盘：经 execute ctx.snapshot（落盘逻辑在 impl，tool 透传路径文本）
+ *   - cdpUrl SSRF 门禁（loopback 豁免 / 私网 fail-closed）
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it, expect, vi } from 'vitest';
 import { createBrowserTool } from '../tool';
 import type { ToolCtx, ToolInput } from '../../types';
-import type { BrowserSession, BrowserDriver, SnapshotResult } from '../types';
-import type { DriverRegistry } from '../pick-driver';
-import type { ConnectorManager, ConnectForToolRunResult } from '../connector-manager';
+import type { BrowserSession, SnapshotResult } from '../types';
+import type { BrowserInstanceManager } from '../instance-manager';
+import type { ExecuteCtx } from '../mode-impl';
 
-// ---- mock ConnectorManager ----
-function makeConnectorManager(over: Partial<ConnectorManager> = {}): ConnectorManager {
+// ---- mock BrowserInstanceManager（三模式统一：launch/execute/close） ----
+function makeInstanceManager(
+  over: Partial<BrowserInstanceManager> = {},
+): BrowserInstanceManager {
   return {
-    isReady: () => false,
-    getAttachSession: () => undefined,
+    launch: vi.fn(async () => ({ ok: true, text: 'launched headless' })),
+    execute: vi.fn(async () => ({ ok: true, text: '{}' })),
+    close: vi.fn(async () => ({ ok: true, text: 'closed' })),
+    releaseSession: vi.fn(async () => {}),
+    releaseAll: vi.fn(async () => {}),
     ...over,
-  };
+  } as unknown as BrowserInstanceManager;
 }
 
-// ---- mock BrowserSession ----
-function makeSession(over: Partial<BrowserSession> = {}): BrowserSession {
-  return {
-    listPages: vi.fn(async () => [{ id: 'p1', url: 'https://x', selected: true }]),
-    selectPage: vi.fn(async () => {}),
-    navigate: vi.fn(async () => {}),
-    snapshot: vi.fn(
-      async (): Promise<SnapshotResult> => ({
-        snapshot: '- button "Go"',
-        refs: { b1: { role: 'button', name: 'Go', nth: 0 } },
-      }),
-    ),
-    click: vi.fn(async () => {}),
-    type: vi.fn(async () => {}),
-    evaluate: vi.fn(async () => 42),
-    close: vi.fn(async () => {}),
-    ...over,
-  };
-}
-
-// ---- mock DriverRegistry（headless/managed-profile → fake driver） ----
-function makeRegistry(session: BrowserSession): DriverRegistry {
-  const fakeDriver: BrowserDriver = {
-    mode: 'headless',
-    connect: vi.fn(async () => session),
-  };
-  return {
-    get: () => fakeDriver,
-  };
-}
-
-/** 生成带 sessionId 的 ctx（v0.0.46 attach 依赖 ctx.config.sessionId 传给 connectForToolRun） */
+/** 生成带 sessionId 的 ctx */
 function makeCtx(sessionId = 'sA'): ToolCtx {
   return { config: { tools: [], sessionId }, workdir: '/tmp' };
 }
 
-describe('browser Tool: attach lazy connect（v0.0.46 P2/P6）', () => {
-  it('P2 switch=on owner=null → connectForToolRun 被调 1 次；dispatchAction 走通', async () => {
-    const session = makeSession();
-    const connectForToolRun = vi.fn(
-      async (): Promise<ConnectForToolRunResult> => ({ ok: true, session }),
-    );
-    const cm = makeConnectorManager({ connectForToolRun });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action: 'navigate', url: 'https://x' }, makeCtx('sA'));
+describe('browser Tool: attach launch/close（v0.0.266 三模式统一）', () => {
+  it('attach launch → im.launch(sessionId, {mode:"attach"}) + ok 透传', async () => {
+    const launch = vi.fn(async () => ({ ok: true, text: 'launched attach' }));
+    const im = makeInstanceManager({ launch });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'attach', action: 'launch' }, makeCtx('sA'));
     expect(r.isError).toBe(false);
-    expect(connectForToolRun).toHaveBeenCalledTimes(1);
-    expect(connectForToolRun).toHaveBeenCalledWith('browser', 'sA');
-    expect(session.navigate).toHaveBeenCalledWith('https://x');
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'attach' });
+    expect((r.content[0] as { text: string }).text).toContain('launched');
   });
 
-  it('P6 not_enabled → isError 引导用户开启开关', async () => {
-    const connectForToolRun = vi.fn(
-      async (): Promise<ConnectForToolRunResult> => ({
-        ok: false,
-        error: { kind: 'not_enabled', message: 'ignored: tool 走引导文案' },
-      }),
+  it('attach launch 带 cdpUrl → im.launch 透传 cdpUrl', async () => {
+    const launch = vi.fn(async () => ({ ok: true, text: 'launched attach' }));
+    const im = makeInstanceManager({ launch });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run(
+      { mode: 'attach', action: 'launch', cdpUrl: 'http://127.0.0.1:9222' },
+      makeCtx('sA'),
     );
-    const cm = makeConnectorManager({ connectForToolRun });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action: 'listPages' }, makeCtx('sA'));
+    expect(r.isError).toBe(false);
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'attach', cdpUrl: 'http://127.0.0.1:9222' });
+  });
+
+  it('attach launch switch=off → im.launch 返 not_enabled → isError 引导开启', async () => {
+    const launch = vi.fn(async () => ({
+      ok: false,
+      error: { kind: 'not_enabled', message: 'browser attach 未启用：请在「连接器 → 浏览器」中开启开关' },
+    }));
+    const im = makeInstanceManager({ launch });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'attach', action: 'launch' }, makeCtx('sA'));
     expect(r.isError).toBe(true);
     const text = (r.content[0] as { text: string }).text;
     expect(text).toContain('未启用');
     expect(text).toContain('连接器 → 浏览器');
   });
 
-  it('in_use_by_other → isError 提示 owner sessionId', async () => {
-    const connectForToolRun = vi.fn(
-      async (): Promise<ConnectForToolRunResult> => ({
-        ok: false,
-        error: {
-          kind: 'in_use_by_other',
-          ownerSessionId: 'sX',
-          message: 'ignored',
-        },
-      }),
+  it('attach close → im.close(sessionId, {mode:"attach"}) + ok 透传', async () => {
+    const close = vi.fn(async () => ({ ok: true, text: 'closed' }));
+    const im = makeInstanceManager({ close });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'attach', action: 'close' }, makeCtx('sA'));
+    expect(r.isError).toBe(false);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith('sA', { mode: 'attach' });
+  });
+});
+
+describe('browser Tool: 操作类 action 统一 execute（v0.0.266 T3 零 mode 分叉）', () => {
+  it('attach navigate → im.execute(sessionId, {mode:"attach"}, "navigate", {url}, ctx) + ok 透传', async () => {
+    const execute = vi.fn(async () => ({ ok: true, text: 'navigated to https://x' }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'attach', action: 'navigate', url: 'https://x' }, makeCtx('sA'));
+    expect(r.isError).toBe(false);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith(
+      'sA',
+      { mode: 'attach' },
+      'navigate',
+      { url: 'https://x' },
+      expect.objectContaining({ signal: undefined, snapshot: expect.any(Object) }),
     );
-    const cm = makeConnectorManager({ connectForToolRun });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action: 'listPages' }, makeCtx('sB'));
-    expect(r.isError).toBe(true);
-    const text = (r.content[0] as { text: string }).text;
-    expect(text).toContain('sX');
-    expect(text).toContain('disconnect');
+    expect((r.content[0] as { text: string }).text).toContain('navigated');
   });
 
-  it('connect_failed → isError 附带底层 message', async () => {
-    const connectForToolRun = vi.fn(
-      async (): Promise<ConnectForToolRunResult> => ({
-        ok: false,
-        error: { kind: 'connect_failed', message: 'ECONNREFUSED 9222' },
-      }),
-    );
-    const cm = makeConnectorManager({ connectForToolRun });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action: 'snapshot' }, makeCtx('sA'));
-    expect(r.isError).toBe(true);
-    const text = (r.content[0] as { text: string }).text;
-    expect(text).toContain('连接失败');
-    expect(text).toContain('ECONNREFUSED');
-  });
-
-  it('cm 无 connectForToolRun 方法 → isError 引导（fail-closed）', async () => {
-    const cm = makeConnectorManager(); // 默认无 connectForToolRun
-    const tool = createBrowserTool({ connectorManager: cm });
+  it('未 launch → execute 返 no_browser_instance → errorResult 提示先 launch', async () => {
+    const execute = vi.fn(async () => ({
+      ok: false,
+      error: { kind: 'no_browser_instance', message: '当前会话没有 attach 浏览器实例，请先调用 browser(action="launch")' },
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
     const r = await tool.run({ mode: 'attach', action: 'listPages' }, makeCtx('sA'));
     expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('未启用');
-  });
-});
-
-describe('browser Tool: attach disconnect（v0.0.46 P3）', () => {
-  it('P3 attach action=disconnect → 调 cm.disconnect(id, sessionId)；isError:false', async () => {
-    const disconnect = vi.fn(async () => {});
-    const cm = makeConnectorManager({ disconnect });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action: 'disconnect' }, makeCtx('sA'));
-    expect(r.isError).toBe(false);
-    expect(disconnect).toHaveBeenCalledTimes(1);
-    expect(disconnect).toHaveBeenCalledWith('browser', 'sA');
     const text = (r.content[0] as { text: string }).text;
-    expect(text).toContain('已断开');
+    expect(text).toContain('attach');
+    expect(text).toContain('launch');
   });
 
-  it('cm.disconnect 未定义 → isError「不支持断开」', async () => {
-    const cm = makeConnectorManager(); // 无 disconnect
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action: 'disconnect' }, makeCtx('sA'));
+  it('attach 失活自愈（impl 内部）→ execute 返 attach_lost → tool 透传引导文案', async () => {
+    const execute = vi.fn(async () => ({
+      ok: false,
+      error: { kind: 'attach_lost', message: 'attach 浏览器连接已断开（Chrome 可能被关闭），请重新 launch' },
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'attach', action: 'listPages' }, makeCtx('sA'));
     expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('不支持断开');
+    const text = (r.content[0] as { text: string }).text;
+    expect(text).toContain('连接已断开');
+    expect(text).toContain('重新 launch');
   });
 
-  it('cm.disconnect 抛错 → 转 errorResult 不冒泡', async () => {
-    const disconnect = vi.fn(async () => {
-      throw new Error('driver kill boom');
-    });
-    const cm = makeConnectorManager({ disconnect });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action: 'disconnect' }, makeCtx('sA'));
+  it('attach 非失活错误 → 原样透传（不重写文案）', async () => {
+    const execute = vi.fn(async () => ({
+      ok: false,
+      error: { kind: 'unknown', message: 'ref not found: b9' },
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'attach', action: 'click', ref: 'b9' }, makeCtx('sA'));
     expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('driver kill boom');
+    const text = (r.content[0] as { text: string }).text;
+    expect(text).toContain('ref not found');
+    expect(text).not.toContain('连接已断开');
   });
 
-  it('mode=headless action=disconnect → 参数错误（disconnect 仅 attach）', async () => {
-    const disconnect = vi.fn(async () => {});
-    const cm = makeConnectorManager({ disconnect });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'headless', action: 'disconnect' }, makeCtx('sA'));
+  it('未知 action → execute 返 unknown_action → isError（attach 不再有独立 dispatch 分支）', async () => {
+    const execute = vi.fn(async () => ({
+      ok: false,
+      error: { kind: 'unknown_action', message: 'browser: 未知 action "fly"' },
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'attach', action: 'fly' }, makeCtx('sA'));
     expect(r.isError).toBe(true);
-    expect(disconnect).not.toHaveBeenCalled();
-    expect((r.content[0] as { text: string }).text).toContain('仅 attach');
-  });
-
-  it('disconnect 无副作用（未连接也 OK；idempotent）', async () => {
-    const disconnect = vi.fn(async () => {});
-    const cm = makeConnectorManager({ disconnect });
-    const tool = createBrowserTool({ connectorManager: cm });
-    // 第一次
-    const r1 = await tool.run({ mode: 'attach', action: 'disconnect' }, makeCtx('sA'));
-    expect(r1.isError).toBe(false);
-    // 第二次
-    const r2 = await tool.run({ mode: 'attach', action: 'disconnect' }, makeCtx('sA'));
-    expect(r2.isError).toBe(false);
-    expect(disconnect).toHaveBeenCalledTimes(2);
   });
 });
 
-describe('browser Tool: headless 流程', () => {
-  it('connect → dispatch(snapshot) → finally close', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
-    const r = await tool.run({ mode: 'headless', action: 'snapshot' }, makeCtx());
+describe('browser Tool: InstanceManager 常驻（headless/managed-profile，v0.0.264）', () => {
+  it('launch action → im.launch 被调 (sessionId, {mode}) + ok 透传', async () => {
+    const launch = vi.fn(async () => ({ ok: true, text: 'launched headless' }));
+    const im = makeInstanceManager({ launch });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'headless', action: 'launch' }, makeCtx('sA'));
     expect(r.isError).toBe(false);
-    expect(session.snapshot).toHaveBeenCalled();
-    expect(session.close).toHaveBeenCalled();
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'headless' });
+    expect((r.content[0] as { text: string }).text).toContain('launched');
   });
 
-  it('navigate → session.navigate(url)', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+  it('managed-profile launch 带 profileName → im.launch 被调 ({mode, profileName})', async () => {
+    const launch = vi.fn(async () => ({ ok: true, text: 'launched managed-profile p1' }));
+    const im = makeInstanceManager({ launch });
+    const tool = createBrowserTool({ instanceManager: im });
     const r = await tool.run(
-      { mode: 'headless', action: 'navigate', url: 'https://example.com' },
-      makeCtx(),
+      { mode: 'managed-profile', action: 'launch', profileName: 'p1' },
+      makeCtx('sA'),
     );
     expect(r.isError).toBe(false);
-    expect(session.navigate).toHaveBeenCalledWith('https://example.com');
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'managed-profile', profileName: 'p1' });
   });
 
-  it('driver.connect 抛错 → isError（finally 仍 close）', async () => {
-    const reg: DriverRegistry = {
-      get: () => ({
-        mode: 'headless',
-        connect: vi.fn(async () => {
-          throw new Error('chrome not found');
-        }),
-      }),
-    };
-    const tool = createBrowserTool({ driverRegistry: reg });
-    const r = await tool.run({ mode: 'headless', action: 'snapshot' }, makeCtx());
+  it('close action → im.close 被调 + ok 透传', async () => {
+    const close = vi.fn(async () => ({ ok: true, text: 'closed' }));
+    const im = makeInstanceManager({ close });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'headless', action: 'close' }, makeCtx('sA'));
+    expect(r.isError).toBe(false);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith('sA', { mode: 'headless' });
+  });
+
+  it('snapshot → im.execute 被调 (sessionId, opts, action, params, ctx) + ok 透传', async () => {
+    const execute = vi.fn(async () => ({ ok: true, text: '{"snapshot":"- button \\"Go\\""}' }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'headless', action: 'snapshot' }, makeCtx('sA'));
+    expect(r.isError).toBe(false);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith(
+      'sA',
+      { mode: 'headless' },
+      'snapshot',
+      {},
+      expect.objectContaining({ signal: undefined, snapshot: expect.any(Object) }),
+    );
+    expect((r.content[0] as { text: string }).text).toContain('snapshot');
+  });
+
+  it('navigate → im.execute 被调 with url params', async () => {
+    const execute = vi.fn(async () => ({ ok: true, text: 'navigated to https://example.com' }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run(
+      { mode: 'headless', action: 'navigate', url: 'https://example.com' },
+      makeCtx('sA'),
+    );
+    expect(r.isError).toBe(false);
+    expect(execute).toHaveBeenCalledWith(
+      'sA',
+      { mode: 'headless' },
+      'navigate',
+      { url: 'https://example.com' },
+      expect.anything(),
+    );
+    expect((r.content[0] as { text: string }).text).toBe('navigated to https://example.com');
+  });
+
+  it('无 instance 时 navigate → errorResult 提示先 launch（no_browser_instance）', async () => {
+    const execute = vi.fn(async () => ({
+      ok: false,
+      error: {
+        kind: 'no_browser_instance',
+        message: '当前会话没有 headless 浏览器实例，请先调用 browser(action="launch")',
+      },
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run(
+      { mode: 'headless', action: 'navigate', url: 'https://x' },
+      makeCtx('sA'),
+    );
     expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('chrome not found');
+    const text = (r.content[0] as { text: string }).text;
+    expect(text).toContain('no_browser_instance');
+    expect(text).toContain('launch');
   });
 
-  it('无 driverRegistry → isError', async () => {
+  it('im.execute 返 error → isError 透传（formatExecuteError 带 kind）', async () => {
+    const execute = vi.fn(async () => ({
+      ok: false,
+      error: { kind: 'worker_crashed', message: 'worker 崩溃: boom，请重新 launch' },
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const r = await tool.run({ mode: 'headless', action: 'snapshot' }, makeCtx('sA'));
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('worker_crashed');
+  });
+
+  it('无 instanceManager → isError 未注册（三模式统一 fail-closed）', async () => {
     const tool = createBrowserTool();
     const r = await tool.run({ mode: 'headless', action: 'snapshot' }, makeCtx());
     expect(r.isError).toBe(true);
-  });
-});
-
-describe('browser Tool: dispatch action 映射（attach lazy connect 通过）', () => {
-  async function runAttach(action: string, extra: Record<string, unknown> = {}) {
-    const session = makeSession();
-    const cm = makeConnectorManager({
-      connectForToolRun: vi.fn(
-        async (): Promise<ConnectForToolRunResult> => ({ ok: true, session }),
-      ),
-    });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run({ mode: 'attach', action, ...extra }, makeCtx('sA'));
-    return { r, session };
-  }
-
-  it('click(ref)', async () => {
-    const { r, session } = await runAttach('click', { ref: 'b1' });
-    expect(r.isError).toBe(false);
-    expect(session.click).toHaveBeenCalledWith('b1');
+    expect((r.content[0] as { text: string }).text).toContain('未注册');
   });
 
-  it('type(ref,text)', async () => {
-    const { r, session } = await runAttach('type', { ref: 'inp', text: 'hi' });
-    expect(r.isError).toBe(false);
-    expect(session.type).toHaveBeenCalledWith('inp', 'hi');
-  });
-
-  it('click 缺 ref → isError', async () => {
-    const { r } = await runAttach('click');
+  it('attach + 无 instanceManager → isError 未注册（不再走 connectorManager）', async () => {
+    const tool = createBrowserTool();
+    const r = await tool.run({ mode: 'attach', action: 'snapshot' }, makeCtx('sA'));
     expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('未注册');
   });
 });
 
@@ -288,17 +287,6 @@ describe('browser Tool: 校验失败', () => {
     const r = await tool.run({ mode: 'headless' }, makeCtx());
     expect(r.isError).toBe(true);
   });
-  it('未知 action → isError（走 attach dispatchAction default 分支）', async () => {
-    const session = makeSession();
-    const cm = makeConnectorManager({
-      connectForToolRun: vi.fn(
-        async (): Promise<ConnectForToolRunResult> => ({ ok: true, session }),
-      ),
-    });
-    const t = createBrowserTool({ connectorManager: cm });
-    const r = await t.run({ mode: 'attach', action: 'fly' }, makeCtx('sA'));
-    expect(r.isError).toBe(true);
-  });
 });
 
 describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
@@ -306,22 +294,18 @@ describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
   // CDP 控制面 ≠ 页面导航——loopback（127.x/::1/localhost）CDP 豁免 SSRF；
   // 非 loopback（私网/link-local/file://）仍 fail-closed。
   it('cdpUrl=127.0.0.1 loopback → SSRF 放行（CDP 控制面豁免）', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'http://127.0.0.1:9222' },
       makeCtx(),
     );
-    // loopback 放行——attach 路径无 cm → 走 not_enabled 分支，但关键是不被 SSRF 拦
+    // loopback 放行——attach 路径无 im → 未注册分支，但关键是不被 SSRF 拦
     const text = (r.content[0] as { text: string }).text;
     expect(text).not.toContain('SSRF');
   });
 
   it('cdpUrl=[::1] loopback → SSRF 放行', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'http://[::1]:9222' },
       makeCtx(),
@@ -331,9 +315,7 @@ describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
   });
 
   it('cdpUrl=localhost loopback → SSRF 放行', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'http://localhost:9222' },
       makeCtx(),
@@ -343,9 +325,7 @@ describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
   });
 
   it('cdpUrl=10.x 私网 → isError', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'http://10.0.0.5:9222' },
       makeCtx(),
@@ -355,9 +335,7 @@ describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
   });
 
   it('cdpUrl=192.168.x 私网 → isError', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'http://192.168.1.1:9222' },
       makeCtx(),
@@ -367,9 +345,7 @@ describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
   });
 
   it('cdpUrl=169.254.169.254 link-local（云元数据）→ isError SSRF', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'http://169.254.169.254:9222' },
       makeCtx(),
@@ -379,9 +355,7 @@ describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
   });
 
   it('cdpUrl=file:// → isError（协议被禁）', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'file:///etc/passwd' },
       makeCtx(),
@@ -390,160 +364,61 @@ describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
   });
 
   it('cdpUrl=公网 IP → SSRF 放行（不因 SSRF 拒绝）', async () => {
-    const session = makeSession();
-    const reg = makeRegistry(session);
-    const tool = createBrowserTool({ driverRegistry: reg });
+    const tool = createBrowserTool();
     const r = await tool.run(
       { mode: 'attach', action: 'listPages', cdpUrl: 'http://93.184.216.34:9222' },
       makeCtx(),
     );
-    // 公网 IP 放行——无 cm → 未启用引导（关键：不是 SSRF 拒绝）
+    // 公网 IP 放行——无 im → 未注册（关键：不是 SSRF 拒绝）
     const text = (r.content[0] as { text: string }).text;
     expect(text).not.toContain('SSRF');
   });
 
   it('无 cdpUrl → 不触发 SSRF 门禁（正常流程）', async () => {
-    const session = makeSession();
-    const cm = makeConnectorManager({
-      connectForToolRun: vi.fn(
-        async (): Promise<ConnectForToolRunResult> => ({ ok: true, session }),
-      ),
-    });
-    const tool = createBrowserTool({ connectorManager: cm });
+    const execute = vi.fn(async () => ({ ok: true, text: '[]' }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
     const r = await tool.run({ mode: 'attach', action: 'listPages' }, makeCtx('sA'));
     expect(r.isError).toBe(false);
-    expect(session.listPages).toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });
 
-// 截图本地化（INV-157-1/3）：attach + headless 两路径均落盘，tool_result 纯文本无 base64
-describe('browser Tool: screenshot 落盘', () => {
-  let tmpRoot: string;
-
-  beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), 'browser-screenshot-test-'));
-  });
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
-  });
-
-  /** 生成带 toolCallId + tmpdir workdir 的 ctx（截图落盘必需） */
-  function makeCtxForSnapshot(toolCallId: string): ToolCtx {
-    return { config: { tools: [], sessionId: 'sA' }, workdir: tmpRoot, toolCallId };
-  }
-
-  it('attach screenshot → saveSnapshot 落盘 + 文案含 snapshots/ + 不含 base64', async () => {
-    // mock session.screenshot 返 PNG magic bytes + mime
+// 截图本地化（INV-157-1/3）：落盘在 impl（经 ctx.snapshot），tool 只透传路径文本
+describe('browser Tool: screenshot 落盘（经 execute ctx.snapshot）', () => {
+  it('execute 返落盘路径文本 → tool 透传（snapshots/ + see_image，无 base64）', async () => {
     const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
-    const session = makeSession({
-      screenshot: vi.fn(async () => ({ mime: 'image/png', data: pngBytes })),
-    });
-    const cm = makeConnectorManager({
-      connectForToolRun: vi.fn(
-        async (): Promise<ConnectForToolRunResult> => ({ ok: true, session }),
-      ),
-    });
-    const tool = createBrowserTool({ connectorManager: cm });
-    const r = await tool.run(
-      { mode: 'attach', action: 'screenshot' },
-      makeCtxForSnapshot('call_attach_1'),
-    );
-    // isError=false
+    const execute = vi.fn(async () => ({
+      ok: true,
+      text: 'Saved browser screenshot to snapshots/call_1.png. Use see_image tool to view it.',
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
+    const ctx: ToolCtx = { config: { tools: [], sessionId: 'sA' }, workdir: '/tmp', toolCallId: 'call_1' };
+    const r = await tool.run({ mode: 'headless', action: 'screenshot' }, ctx);
     expect(r.isError).toBe(false);
     const text = (r.content[0] as { text: string }).text;
-    // 关键：tool_result 文案含 snapshots/ + browser screenshot + see_image 引导
     expect(text).toContain('snapshots/');
     expect(text).toContain('browser screenshot');
     expect(text).toContain('see_image');
-    // INV-157-1：不含 base64 字串（pngBytes 的 base64 不该出现在 text 里）
-    const b64 = pngBytes.toString('base64');
-    expect(text).not.toContain(b64);
-    expect(text).not.toContain('data:');
-    // INV-157-2/3：文件确定性命名 + 落盘成功
-    const expectedPath = join(tmpRoot, 'snapshots', 'call_attach_1.png');
-    expect(existsSync(expectedPath)).toBe(true);
-    const written = readFileSync(expectedPath);
-    expect(written.equals(pngBytes)).toBe(true);
+    expect(text).not.toContain(pngBytes.toString('base64'));
+    // execute 收到带 SnapshotSink 的 ctx（落盘 sink 由 tool 构造注入）
+    const ctxArg = (execute as ReturnType<typeof vi.fn>).mock.calls[0]![4] as ExecuteCtx;
+    expect(ctxArg.snapshot).toBeDefined();
   });
 
-  it('attach screenshot: session 无 screenshot 方法 → isError', async () => {
-    // makeSession 默认不设 screenshot（undefined）—— 但默认 makeSession 也没 screenshot 字段，
-    // 显式构造一个不带 screenshot 的 session 验证 errorResult 分支
-    const session: BrowserSession = {
-      listPages: vi.fn(async () => []),
-      selectPage: vi.fn(async () => {}),
-      navigate: vi.fn(async () => {}),
-      snapshot: vi.fn(async () => ({ snapshot: '', refs: {} })),
-      click: vi.fn(async () => {}),
-      type: vi.fn(async () => {}),
-      evaluate: vi.fn(async () => undefined),
-      close: vi.fn(async () => {}),
-    };
-    const cm = makeConnectorManager({
-      connectForToolRun: vi.fn(
-        async (): Promise<ConnectForToolRunResult> => ({ ok: true, session }),
-      ),
-    });
-    const tool = createBrowserTool({ connectorManager: cm });
+  it('execute 返 error → isError 透传（落盘失败由 impl 返回）', async () => {
+    const execute = vi.fn(async () => ({
+      ok: false,
+      error: { kind: 'screenshot_save_failed', message: 'browser screenshot 落盘失败: disk full' },
+    }));
+    const im = makeInstanceManager({ execute });
+    const tool = createBrowserTool({ instanceManager: im });
     const r = await tool.run(
       { mode: 'attach', action: 'screenshot' },
-      makeCtxForSnapshot('call_no_supp'),
+      { config: { tools: [], sessionId: 'sA' }, workdir: '/tmp', toolCallId: 'call_2' },
     );
     expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('不支持');
-  });
-
-  it('headless executeOnce screenshot → 拦截 decode+落盘（worker 协议不变）', async () => {
-    // mock driver.executeOnce 返 r.text = JSON.stringify({mime, data:base64})
-    // —— 模拟 worker boundary 协议（driver 契约不变）
-    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const fakeDriver: BrowserDriver = {
-      mode: 'headless',
-      connect: vi.fn(async () => ({}) as unknown as BrowserSession),
-      executeOnce: vi.fn(async () => ({
-        ok: true,
-        text: JSON.stringify({ mime: 'image/png', data: pngBytes.toString('base64') }),
-      })),
-    };
-    const reg: DriverRegistry = { get: () => fakeDriver };
-    const tool = createBrowserTool({ driverRegistry: reg });
-    const r = await tool.run(
-      { mode: 'headless', action: 'screenshot' },
-      makeCtxForSnapshot('call_headless_1'),
-    );
-    // 拦截成功 → 落盘 + 路径文本
-    expect(r.isError).toBe(false);
-    const text = (r.content[0] as { text: string }).text;
-    expect(text).toContain('snapshots/call_headless_1.png');
-    expect(text).toContain('browser screenshot');
-    // 不含 base64 原文
-    expect(text).not.toContain(pngBytes.toString('base64'));
-    // 文件落盘且内容正确（base64 解码后 == 原 Buffer）
-    const expectedPath = join(tmpRoot, 'snapshots', 'call_headless_1.png');
-    expect(existsSync(expectedPath)).toBe(true);
-    expect(readFileSync(expectedPath).equals(pngBytes)).toBe(true);
-  });
-
-  it('headless executeOnce 非 screenshot action（navigate）→ 保持原 textResult(r.text)', async () => {
-    // 验证拦截仅对 screenshot 生效，其他 action 不动
-    const fakeDriver: BrowserDriver = {
-      mode: 'headless',
-      connect: vi.fn(async () => ({}) as unknown as BrowserSession),
-      executeOnce: vi.fn(async () => ({
-        ok: true,
-        text: 'navigated to https://example.com',
-      })),
-    };
-    const reg: DriverRegistry = { get: () => fakeDriver };
-    const tool = createBrowserTool({ driverRegistry: reg });
-    const r = await tool.run(
-      { mode: 'headless', action: 'navigate', url: 'https://example.com' },
-      makeCtxForSnapshot('call_nav'),
-    );
-    expect(r.isError).toBe(false);
-    expect((r.content[0] as { text: string }).text).toBe('navigated to https://example.com');
-    // 非 screenshot 不该落盘任何 snapshots 文件
-    expect(existsSync(join(tmpRoot, 'snapshots'))).toBe(false);
+    expect((r.content[0] as { text: string }).text).toContain('落盘失败');
   });
 });

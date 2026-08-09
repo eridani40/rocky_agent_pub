@@ -12,7 +12,19 @@ import { mkDetail, mkMember, mkSummary } from './_fixtures';
 import { initI18n } from '../../../i18n';
 
 // [v0.0.62 i18n] 启动 i18next instance：squad/member-chat 内 ChatComposer 用 useTranslation('common')
+// Polyfill jsdom 缺失的布局方法（ProseMirror coordsAtPos → singleRect 在 Text 节点上调 getClientRects）
+// 不补则 focus('end') 触发 scrollToSelection 抛 uncaught exception（测试仍过但报错 → 全量 run 计为 failed）
 beforeAll(async () => {
+  const fakeRects = () =>
+    [{ top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0 }] as never;
+  const fakeRect = () =>
+    ({ top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => {} }) as never;
+  const TextProto = Text.prototype as unknown as { getClientRects?: unknown; getBoundingClientRect?: unknown };
+  if (typeof TextProto.getClientRects !== 'function') TextProto.getClientRects = fakeRects;
+  if (typeof TextProto.getBoundingClientRect !== 'function') TextProto.getBoundingClientRect = fakeRect;
+  const RangeProto = Range.prototype as unknown as { getClientRects?: unknown; getBoundingClientRect?: unknown };
+  if (typeof RangeProto.getClientRects !== 'function') RangeProto.getClientRects = fakeRects;
+  if (typeof RangeProto.getBoundingClientRect !== 'function') RangeProto.getBoundingClientRect = fakeRect;
   await initI18n('zh-CN');
 });
 
@@ -32,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   listStudioSessions: vi.fn(),
   getBudgetUsage: vi.fn(),
   fetchTokenStats: vi.fn(),
+  listSquadTemplates: vi.fn(),
 }));
 const apiPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../../lib/squad-api'));
 vi.mock(apiPath, () => mocks);
@@ -193,10 +206,9 @@ const newSquadBtn = () =>
 const seatsPanelSignal = () => screen.findByRole('button', { name: '自动工作' });
 /** SeatsPanel 缺席（切到 member-create/chat 后首页 tab 消失） */
 const seatsPanelAbsent = () => screen.queryByRole('button', { name: '自动工作' });
-/** mate（张三）坐席行的「进入对话」按钮（行内定位，避开队长卡同名按钮） */
+/** mate（张三）坐席行（v0.0.288：MemberRosterList 的 PanelRowView，data-testid=squad-status-row-{id}） */
 function mateEnterBtn(): HTMLElement {
-  const row = screen.getByText('张三').closest('div[class*="group"]') as HTMLElement;
-  return within(row).getByRole('button', { name: '进入对话' });
+  return screen.getByTestId('squad-status-row-m2');
 }
 /** 单聊页加载完成信号：topbar tag（chrome mock 给 mate 固定 tag） */
 const mateChatSignal = () => screen.findByText('Alpha 小队 · mate');
@@ -210,6 +222,7 @@ describe('PageStudio', () => {
     // 该调用会打在刚被 afterEach mockReset() 清空实现的裸 vi.fn() 上（返回 undefined，
     // .catch is not a function 崩溃）。
     mocks.listSquads.mockResolvedValue([mkSummary()]);
+    mocks.listSquadTemplates.mockResolvedValue([]);
     mocks.getSquad.mockResolvedValue(mkDetail());
     mocks.createSquad.mockResolvedValue(mkDetail({ id: 's2', name: 'Gamma 小队' }));
     chatMocks.getMessages.mockResolvedValue({ items: [], hasMore: false });
@@ -335,14 +348,40 @@ describe('PageStudio', () => {
     expect(screen.queryByText('新建成员')).toBeNull();
   });
 
+  it('[v0.0.276] chat 返回 seats → reloadDetail 重拉 detail（getSquad 次数 +1）', async () => {
+    render(<PageStudio />);
+    await screen.findByRole('button', { name: /Alpha 小队/ });
+    await screen.findByText('张三');
+    const before = mocks.getSquad.mock.calls.length;
+    fireEvent.click(mateEnterBtn());
+    expect(await mateChatSignal()).toBeTruthy();
+    // chat-topbar 返回键（common:action.back「返回」）→ 回 seats
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    expect(await seatsPanelSignal()).toBeTruthy();
+    // handleChatBack 触发 reloadDetail → getSquad 至少 +1（宽松口径防 R4 mutation 双拉误报）
+    expect(mocks.getSquad.mock.calls.length).toBeGreaterThanOrEqual(before + 1);
+  });
+
+  it('[v0.0.276] member-create 返回 seats → reloadDetail 重拉 detail（getSquad 次数 +1）', async () => {
+    render(<PageStudio />);
+    await screen.findByRole('button', { name: /Alpha 小队/ });
+    const addCard = await screen.findByRole('button', { name: '新增成员' });
+    const before = mocks.getSquad.mock.calls.length;
+    fireEvent.click(addCard);
+    expect(await screen.findByText('新建成员')).toBeTruthy();
+    // member-create 返回 → 回 seats（fallbackToSeats 触发 reloadDetail）
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    expect(await seatsPanelSignal()).toBeTruthy();
+    expect(mocks.getSquad.mock.calls.length).toBeGreaterThanOrEqual(before + 1);
+  });
+
   it('业务全景「更多」tab「找 leader 搭看板」→ 切 leader 单聊 + composer 预填模板文本（非群聊/非 mention）', async () => {
     render(<PageStudio />);
     await screen.findByRole('button', { name: /Alpha 小队/ });
     await seatsPanelSignal();
-    // 点「更多」固定 tab（限 panorama section 内，避开页面其他「更多」按钮）→ PanoramaIdle 引导卡出现
+    // 点「更多」固定 tab（v0.0.288 全景在 SeatsBody 右列，无 panorama-section 包裹；直接 screen 定位）
     // schema 拉回后 panorama tabs 才渲染，用 findByRole 等待
-    const panoramaSection = document.querySelector('[data-action-key="studio.squad.panorama-section"]') as HTMLElement;
-    const moreTab = await within(panoramaSection).findByRole('button', { name: '更多' });
+    const moreTab = await screen.findByRole('button', { name: '更多' });
     fireEvent.click(moreTab);
     const idleBtn = await screen.findByRole('button', { name: '找 leader 搭看板' });
     fireEvent.click(idleBtn);
@@ -368,8 +407,8 @@ describe('PageStudio', () => {
     render(<PageStudio />);
     await screen.findByRole('button', { name: /Alpha 小队/ });
     await seatsPanelSignal();
-    const panoramaSection = document.querySelector('[data-action-key="studio.squad.panorama-section"]') as HTMLElement;
-    const moreTab = await within(panoramaSection).findByRole('button', { name: '更多' });
+    // v0.0.288 全景在 SeatsBody 右列，无 panorama-section 包裹；直接 screen 定位
+    const moreTab = await screen.findByRole('button', { name: '更多' });
     fireEvent.click(moreTab);
     const idleBtn = await screen.findByRole('button', { name: '找 leader 搭看板' });
     fireEvent.click(idleBtn);

@@ -3,13 +3,14 @@
  * component-token-widget 单测 —— 首页左列 token 用量图文小组件（复用详情统计）
  * 参考: specs/ui/components/studio-page/component-token-widget.md
  *
- * 覆盖：
+ * 覆盖（v0.0.288 改造：去三色条→今日总量/60天总量并排）：
  *   1. 整卡点击 → onOpenTokenStats(squadId)（action-key 稳定）
  *   2. 复用详情统计：fetchTokenStats 传 scope='team' + 近 60 天 day（不再查 budget）
- *   3. 今日三色派生（input/output/cache M 单位）
- *   4. 7 日迷你柱（series 末 7 点）
- *   5. 累计 = Σ series（近 60 天合计，=详情合计口径）
- *   6. fetchTokenStats 失败 → 降级「—」（不崩）
+ *   3. 今日总量 = totalOf(today.breakdown)（input+output+cache 之和）
+ *   4. 60 天总量 = Σ series（cumulative，=详情合计口径）
+ *   5. 7 日迷你柱保留（h-[22px] 压缩变矮）
+ *   6. 无 TokenBar 三色比例条（DOM 不含三色条结构）
+ *   7. fetchTokenStats 失败 → 降级「—」（不崩）
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
@@ -112,34 +113,50 @@ describe('TokenWidget — 复用详情统计（v0.0.240）', () => {
     expect(opts.from).not.toBe(opts.to); // 近 60 天范围（from 早于 to）
   });
 
-  it('今日三色派生：input/output/cache 数字 M 单位', async () => {
+  it('今日总量 = totalOf(today.breakdown)（input+output+cache 之和）', async () => {
+    // 今日 input 12.4M + output 45.2M + cache 8.1M = 65.7M
     squadMocks.fetchTokenStats.mockResolvedValue(
       mkSeries({ input: 12_400_000, output: 45_200_000, cache: 8_100_000 }),
     );
     render(<TokenWidget squadId="s1" detail={mkDetail()} onOpenTokenStats={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/输入 12.4M/)).toBeTruthy());
-    expect(screen.getByText(/输出 45.2M/)).toBeTruthy();
-    expect(screen.getByText(/缓存 8.1M/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('65.7M')).toBeTruthy());
+    // 标签 = 今日（todayTotal）
+    expect(screen.getByText('今日')).toBeTruthy();
   });
 
-  it('7 日迷你柱：series 末 7 点渲染', async () => {
+  it('7 日迷你柱保留（h-[22px] 压缩变矮）', async () => {
     squadMocks.fetchTokenStats.mockResolvedValue(mkSeries(null, 200000));
     const { container } = render(<TokenWidget squadId="s1" detail={mkDetail()} onOpenTokenStats={() => {}} />);
     await screen.findByText(/Token 用量/);
-    const spark = container.querySelector('.h-\\[26px\\]');
+    const spark = container.querySelector('.h-\\[22px\\]');
     expect(spark).toBeTruthy();
     expect(spark!.children.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('累计 = Σ series（近 60 天合计，=详情合计口径）', async () => {
-    // 昨日 100k + 今日 input 1.2M + output 0.8M = Σ 2.1M（无 cache）
+  it('60 天总量 = Σ series（cumulative，=详情合计口径）', async () => {
+    // 昨日 100k + 今日 input 1.2M + output 0.8M + cache 0 = Σ 2.1M
     squadMocks.fetchTokenStats.mockResolvedValue(
       mkSeries({ input: 1_200_000, output: 800_000, cache: 0 }, 100000),
     );
     render(<TokenWidget squadId="s1" detail={mkDetail()} onOpenTokenStats={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/2.1M/)).toBeTruthy());
-    // 标签 = 近 60 天合计（非旧 budget 语义）
-    expect(screen.getByText('近 60 天合计')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('2.1M')).toBeTruthy());
+    // 标签 = 60 天总量（total60d）
+    expect(screen.getByText('60 天总量')).toBeTruthy();
+  });
+
+  it('无 TokenBar 三色比例条（DOM 不含三色条结构）', async () => {
+    squadMocks.fetchTokenStats.mockResolvedValue(
+      mkSeries({ input: 1_000_000, output: 2_000_000, cache: 500_000 }),
+    );
+    const { container } = render(<TokenWidget squadId="s1" detail={mkDetail()} onOpenTokenStats={() => {}} />);
+    await screen.findByText(/Token 用量/);
+    // 三色条容器使用 h-[7px]（TokenBar 内部比例条高度），改后不应存在
+    const oldBars = container.querySelectorAll('.h-\\[7px\\]');
+    expect(oldBars.length).toBe(0);
+    // 输入/输出/缓存 标签不应出现（i18n kindInput/Output/Cache 已删）
+    expect(screen.queryByText('输入')).toBeNull();
+    expect(screen.queryByText('输出')).toBeNull();
+    expect(screen.queryByText('缓存')).toBeNull();
   });
 
   it('fetchTokenStats 失败 → 降级（今日/累计显「—」，不崩）', async () => {

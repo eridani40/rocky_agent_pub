@@ -30,9 +30,8 @@ groups:
           - workspace
           - tool_error
           - todo
-          - reachable_agents
+          - squad_agents_status
           - squad_workspace
-          - squad_team_status
           - squad_task
 
   - id: context-assemble

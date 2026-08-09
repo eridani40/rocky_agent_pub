@@ -24,6 +24,7 @@
  *
  * 边界：纯渲染路由；会话能力/身份 header 归 SectionStudioChat 薄壳。
  */
+import { memo } from 'react';
 import type { ChatNode } from './chat-node';
 import type { MentionAttrs } from '../chat-page/chat-composer-extension';
 import { SectionStudioChat } from './section-studio-chat';
@@ -50,9 +51,14 @@ interface StudioChatRouterProps {
  *   key={node.sessionId} 保留——chat 视图按 sessionId 加 key，任何 chat 节点切换 = remount = fresh state，
  *   消除「同类型不同 session 复用实例」导致 useMessages 走 deps 变化 race 而非全新 init。
  *
+ * [v0.0.268] 导出用 memo() 包装（决策② 阻断级联）：page-studio SSE re-render 时 node/prefill
+ *   来自 mainView state（SSE 不 setMainView → 引用稳定）+ onBack 已 useCallback → props 全等
+ *   → memo 短路不 re-render chat 树（消息区/输入区零 re-render）。内部 useChatChrome 自身订阅
+ *   不受影响（memo 只挡父级 re-render 传入，不挡 hook 订阅）。
+ *
  * useThreeColLayout 在 early return **前**调用（hooks 规则）；两分支共用同一 hook 实例。
  */
-export function StudioChatRouter({ node, prefill, onBack }: StudioChatRouterProps) {
+function StudioChatRouterImpl({ node, prefill, onBack }: StudioChatRouterProps) {
   const { chrome, loading } = useChatChrome(node.sessionId);
   // 三栏响应式布局 hook（中+右两槽场景，hasLeft=false）
   //   hasLeft=false → 引擎 left=null；rightPresent=true 恒为真（studio 右栏无条件挂载）
@@ -117,5 +123,8 @@ export function StudioChatRouter({ node, prefill, onBack }: StudioChatRouterProp
     </div>
   );
 }
+
+/** [v0.0.268] memo 包装：props（node/prefill/onBack）引用稳定 → page-studio SSE re-render 不级联 chat 树 */
+export const StudioChatRouter = memo(StudioChatRouterImpl);
 
 export default StudioChatRouter;

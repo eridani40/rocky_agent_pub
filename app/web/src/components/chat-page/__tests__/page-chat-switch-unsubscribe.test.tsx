@@ -116,6 +116,7 @@ vi.mock(chatApiPath, () => ({
   // 否则「No export defined on mock」——本文件渲染 PageChat 会连带挂载 workspace 面板。
   watchWorkspaceDir: vi.fn(async () => ({ ok: true })),
   unwatchWorkspaceDir: vi.fn(async () => ({ ok: true })),
+  watchWorkspaceSet: vi.fn(async () => ({ ok: true })),
 }));
 
 // —— mock sse-singleton：返回同一 spy 实例（无论 getSseClient 调多少次） —— //

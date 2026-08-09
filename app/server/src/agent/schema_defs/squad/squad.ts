@@ -40,6 +40,14 @@ export const SquadSchema = {
      * 参考: specs/tech/agent/providers_and_models/[P0]model_resolve.md §4 原则 3
      */
     modelDefaultProviderId: { type: 'string', required: false },
+    /**
+     * [v0.0.279] 团队默认推理强度（canonical 语义键 4 档：'default'|'low'|'high'|'max'）。
+     * required:false：存量 squad 无字段 = 'default'（读取方 ?? 'default' 兜底）。
+     * 覆盖链：成员显式档（low/high/max）→ 用之；否则本字段（low/high/max）→ 用之；否则 undefined（厂商默认）。
+     * 对齐 modelDefault 模式放其下方；PATCH !== undefined 才写、显式 'default' 也落盘不清空。
+     * 参考: specs/tech/version_logs/v0.0.279/change_plan.md（PRD D2）
+     */
+    effortDefault: { type: 'string', required: false },
     /** leader member id（建队回填，data_model §2.1 双向之一） */
     leaderId: { type: 'ulid', required: true },
     /** member id 列表（含 leader；建队/hire 维护） */
@@ -72,6 +80,14 @@ export const SquadSchema = {
      * 参考: specs/tech/squad/[P1]data_model.md §1.1a
      */
     heartbeatConfig: { type: 'json', required: false },
+    /**
+     * [v0.0.270] squad 群聊可见性开关（默认开）。
+     * true=注入 SquadChat 可达 + UI 显示群聊入口；false=两者隐藏（squad 实体恒存在，仅控可见性）。
+     * required:false：容忍历史无字段的 squad record（读旧 record 时 undefined → 读取方 ?? true 兜底=开）。
+     * 无 migration；新建 squad 由 createSquadService 显式写 true（与 enableHeartBeat:false 模式对称，方向相反）。
+     * 参考: specs/tech/version_logs/v0.0.270/change_plan.md 裁决 1
+     */
+    enableGroupChat: { type: 'boolean', required: false },
   },
 } as const satisfies SchemaDef;
 

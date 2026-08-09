@@ -62,6 +62,8 @@ export function sessionDeps(bs: BootstrapResult, dataDir: string): SessionHandle
     computerNativePort: bs.computerNativePort,
     // [v0.0.23] browserDriverRegistry → session-config → web_fetch headless + browser headless/managed-profile
     browserDriverRegistry: bs.browserDriverRegistry,
+    // [v0.0.264] browserInstanceManager → session-config → browser 非 attach 前置校验 + DELETE 兜底清理
+    browserInstanceManager: bs.browserInstanceManager,
     // [v0.0.30] logWriter → session-config → SessionConfig（llm/tool hook 注入）
     logWriter: bs.logWriter,
     // [v0.0.47] metaBroadcaster → PUT /session/:id title 后直调 broadcast（前端列表实时刷新 title）
@@ -92,8 +94,9 @@ export function matchSessionPath(pathname: string): {
   // [v0.0.177] 加 save-image（粘贴图片落盘，api §2.6.6）
   // [v0.0.227] 加 file（GET 读）/file/save（POST 存，两段优先匹配）（内置 md editor 用，api §2.6.7）
   //   file/save 含 '/'：放在 alternation 最前并替换为 '-'，sub 归一为 workspace_file-save
+  // [v0.0.271] 加 watch-set（声明式替换关注集合，api §2.6.5）
   const ws = pathname.match(
-    /^\/session\/([^/]+)\/workspace\/(file\/save|tree|open|pick-directory|watch|unwatch|save-image|file)$/,
+    /^\/session\/([^/]+)\/workspace\/(file\/save|tree|open|pick-directory|watch|watch-set|unwatch|save-image|file)$/,
   );
   if (ws) return { id: ws[1]!, sub: `workspace_${ws[2]!.replace('/', '-')}` };
   // [v0.0.21] /session/:id/debug/system-prompt（test gate）
@@ -172,6 +175,7 @@ export function buildCronRouteDeps(bs: BootstrapResult): CronRouteDeps {
     engine: bs.schedulerEngine,
     sessionStore: bs.store,
     squadStore: bs.squadStore,
+    statusBus: bs.sessionStatusBus,
   };
 }
 

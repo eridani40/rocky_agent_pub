@@ -45,6 +45,12 @@ export interface StdioTransportOptions {
   command: string;
   args: string[];
   stderr?: 'pipe' | 'inherit';
+  /**
+   * 子进程环境变量（可选）。packaged Electron 下注入 ELECTRON_RUN_AS_NODE=1
+   * （配合 command=process.execPath，让 Electron binary 以纯 node 语义跑 MCP server）；
+   * SDK 内部会把它与 getDefaultEnvironment() merge。不传时行为与之前完全一致。
+   */
+  env?: Record<string, string>;
 }
 
 /** transport 句柄（只暴露 close；连接由 client.connect 完成） */

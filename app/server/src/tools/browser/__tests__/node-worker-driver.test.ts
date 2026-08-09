@@ -172,7 +172,7 @@ describe('NodeWorkerDriver executeOnce 正常路径', () => {
     expect(r.text).toBe('first');
   });
 
-  it('managed-profile（profileName 给定）→ persistent=true', async () => {
+  it('managed-profile（profileName 给定）→ persistent=true + 不传 loop（单次路径）', async () => {
     const b = makeDriver(makeFakeWorker);
     const promise = b.driver.executeOnce({ profileName: 'test-prof' }, 'navigate', {
       url: 'https://a.com',
@@ -180,6 +180,8 @@ describe('NodeWorkerDriver executeOnce 正常路径', () => {
     const fake = await waitForSpawn(b);
     const task = JSON.parse(fake.writtenTask());
     expect(task.persistent).toBe(true);
+    expect(task.loop).toBeUndefined(); // 无 loop → worker main() 走 runOnce（action 真执行，不忽略）
+    expect(task.action).toBe('navigate');
     expect(task.userDataDir).toContain('test-prof');
     fake.emitStdout(JSON.stringify({ ok: true, text: 'ok' }) + '\n');
     const r = await promise;

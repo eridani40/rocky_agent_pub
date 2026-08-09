@@ -21,6 +21,7 @@ import { handleSquadRoute } from '../squad';
 import type { SquadHandlerDeps, SquadRuntimePort } from '../squad';
 import { createSquadService } from '../../services/squad-service';
 import { SquadStore, MemberStore } from '../../stores/squad-store';
+import { ulid } from '../../config/ulid';
 import { SessionStore } from '../../agent/session-store';
 import { CompositeStore } from '../../persistence/composite';
 import { FsCrudStore } from '../../persistence/fs-store';
@@ -141,5 +142,108 @@ describe('SquadHandler PATCH — v0.0.33.4 字段生效（api §2）', () => {
     const r = await handleSquadRoute(patchReq({ enableHeartBeat: true }), 'PATCH', `/squad/${squadId}`, oldDeps);
     expect(r.status).toBe(200);
     expect((await jsonBody(r)).enableHeartBeat).toBe(true);
+  });
+});
+
+describe('SquadHandler enableGroupChat — v0.0.270 群聊开关（api §1.3/§1.4）', () => {
+  it('PATCH enableGroupChat=false → 200 + SquadDetail 回显 false + 持久', async () => {
+    const r = await handleSquadRoute(patchReq({ enableGroupChat: false }), 'PATCH', `/squad/${squadId}`, deps);
+    expect(r.status).toBe(200);
+    expect((await jsonBody(r)).enableGroupChat).toBe(false);
+    // 持久：GET 重读仍在
+    const r2 = await handleSquadRoute(new Request(`http://t/squad/${squadId}`), 'GET', `/squad/${squadId}`, deps);
+    expect((await jsonBody(r2)).enableGroupChat).toBe(false);
+    // toggle 回 true
+    const r3 = await handleSquadRoute(patchReq({ enableGroupChat: true }), 'PATCH', `/squad/${squadId}`, deps);
+    expect((await jsonBody(r3)).enableGroupChat).toBe(true);
+  });
+
+  it('PATCH 其他字段（undefined enableGroupChat）→ 不修改（建队默认 true 保持）', async () => {
+    const r = await handleSquadRoute(patchReq({ name: 'renamed' }), 'PATCH', `/squad/${squadId}`, deps);
+    expect(r.status).toBe(200);
+    expect((await jsonBody(r)).enableGroupChat).toBe(true);
+  });
+
+  it('存量 squad 无 enableGroupChat 字段 → GET toDetail ?? true 兜底（缺省=开）', async () => {
+    // 模拟老 squad record：直接 putSquad 写无 enableGroupChat 字段的 record（不含信封字段，store 注入）
+    const legacySquadId = ulid();
+    const squadStore = new SquadStore({ root: tmpRoot });
+    await squadStore.putSquad({
+      id: legacySquadId,
+      name: 'legacy',
+      description: '',
+      modelDefault: 'm',
+      leaderId: ulid(),
+      memberIds: [],
+      squadChatSessionId: ulid(),
+      enableHeartBeat: false,
+      // 无 enableGroupChat → 模拟存量 squad（required:false 容忍）
+    });
+    const r = await handleSquadRoute(new Request(`http://t/squad/${legacySquadId}`), 'GET', `/squad/${legacySquadId}`, deps);
+    expect(r.status).toBe(200);
+    expect((await jsonBody(r)).enableGroupChat).toBe(true);
+  });
+
+  it('GET /squad 列表 → toSummary 回显 enableGroupChat（建队默认 true）', async () => {
+    const r = await handleSquadRoute(new Request('http://t/squad'), 'GET', '/squad', deps);
+    const b = await jsonBody(r);
+    expect(Array.isArray(b.items)).toBe(true);
+    expect(b.items[0]!.enableGroupChat).toBe(true);
+  });
+});
+
+describe('SquadHandler effortDefault — [v0.0.279] 团队默认推理强度（api §1.3/§1.4）', () => {
+  it('PATCH effortDefault=high → 200 + SquadDetail 回显 high + 持久', async () => {
+    const r = await handleSquadRoute(patchReq({ effortDefault: 'high' }), 'PATCH', `/squad/${squadId}`, deps);
+    expect(r.status).toBe(200);
+    expect((await jsonBody(r)).effortDefault).toBe('high');
+    // 持久：GET 重读仍在
+    const r2 = await handleSquadRoute(new Request(`http://t/squad/${squadId}`), 'GET', `/squad/${squadId}`, deps);
+    expect((await jsonBody(r2)).effortDefault).toBe('high');
+  });
+
+  it('PATCH effortDefault 非法值（ultra）→ 400（字段级，先于 404）', async () => {
+    const r = await handleSquadRoute(patchReq({ effortDefault: 'ultra' }), 'PATCH', `/squad/${squadId}`, deps);
+    expect(r.status).toBe(400);
+    // 非法值 400 优先于 404（squad 不存在也 400）
+    const r2 = await handleSquadRoute(patchReq({ effortDefault: 'ultra' }), 'PATCH', '/squad/bogus-squad', deps);
+    expect(r2.status).toBe(400);
+  });
+
+  it('PATCH effortDefault=default 显式落盘（不清空，与 enableGroupChat 模式对称）', async () => {
+    // 先设 high → 再显式 'default' → 落盘 'default'（回显 default，非 undefined）
+    await handleSquadRoute(patchReq({ effortDefault: 'high' }), 'PATCH', `/squad/${squadId}`, deps);
+    const r = await handleSquadRoute(patchReq({ effortDefault: 'default' }), 'PATCH', `/squad/${squadId}`, deps);
+    expect(r.status).toBe(200);
+    expect((await jsonBody(r)).effortDefault).toBe('default');
+    // 持久：GET 重读仍在 'default'
+    const r2 = await handleSquadRoute(new Request(`http://t/squad/${squadId}`), 'GET', `/squad/${squadId}`, deps);
+    expect((await jsonBody(r2)).effortDefault).toBe('default');
+  });
+
+  it('存量 squad 无 effortDefault 字段 → GET toDetail ?? default 兜底', async () => {
+    // 模拟老 squad record：直接 putSquad 写无 effortDefault 字段的 record
+    const legacySquadId = ulid();
+    const squadStore = new SquadStore({ root: tmpRoot });
+    await squadStore.putSquad({
+      id: legacySquadId,
+      name: 'legacy',
+      description: '',
+      modelDefault: 'm',
+      leaderId: ulid(),
+      memberIds: [],
+      squadChatSessionId: ulid(),
+      enableHeartBeat: false,
+      // 无 effortDefault → 模拟存量 squad（required:false 容忍）
+    });
+    const r = await handleSquadRoute(new Request(`http://t/squad/${legacySquadId}`), 'GET', `/squad/${legacySquadId}`, deps);
+    expect(r.status).toBe(200);
+    expect((await jsonBody(r)).effortDefault).toBe('default');
+  });
+
+  it('PATCH 其他字段（undefined effortDefault）→ 不修改（建队默认 default 保持）', async () => {
+    const r = await handleSquadRoute(patchReq({ name: 'renamed' }), 'PATCH', `/squad/${squadId}`, deps);
+    expect(r.status).toBe(200);
+    expect((await jsonBody(r)).effortDefault).toBe('default');
   });
 });

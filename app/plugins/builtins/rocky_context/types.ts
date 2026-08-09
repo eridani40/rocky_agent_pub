@@ -115,7 +115,7 @@ export interface SquadContextService {
   /** 列 squad 全部 member */
   listMembers(squadId: string): unknown[] | Promise<unknown[]>;
   /**
-   * [v0.0.116] session running 状态查询（squad_team_status provider 用）。
+   * [v0.0.116] session running 状态查询（squad_agents_status provider 用）。
    * 口径：session.state==='running'（bootstrap 注入的 isSessionRunning 透传）。
    */
   isSessionRunning(sessionId: string): boolean | Promise<boolean>;

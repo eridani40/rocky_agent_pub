@@ -3,15 +3,19 @@
  * 参考: specs/api/overall/04-agent-session.md §2.6 / specs/tech/agent/session/[P0]session_workspace.md §6
  *
  * 三个端点：GET tree（lazy） / POST open（spawn 系统应用） / POST pick-directory（原生 dialog）
- * 安全：路径白名单 resolve + realpath + startsWith（防 ../ + symlink 穿越外部，spec §6 MANDATORY）
+ * 安全：路径白名单 resolve + 链式授权解析（防 ../ + 绝对路径注入；workspace 内 symlink = 用户
+ *   放置 = 授权，见 session-workspace-path.ts，spec §6 MANDATORY）
+ * [v0.0.263] whitelistResolve 迁出到 session-workspace-path.ts（本文件 ≤300 行硬限腾挪），
+ *   tree 节点新增 isSymlink/linkTarget 可选字段（symlink 浏览）。
  * 不在本文件：PUT /session/:id（切目录 → session-update.ts）；watch/unwatch（v0.0.139，见
  *   session-workspace-watch.ts，拆文件避免本文件超 300 行）；switchDir 联动（manager）
  */
-import { readdirSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, resolve, sep } from 'node:path';
+import { lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import type { SessionHandlerDeps } from './session';
 import { openWithSystemApp, type OpenKind } from '../platform/workspace-open';
 import { pickDirectory } from '../platform/workspace-dialog';
+import { whitelistResolve } from './session-workspace-path';
 
 /** GET /session/:id/workspace/tree 响应（spec §2.6.1 WorkspaceTreeResponse） */
 interface WorkspaceTreeResponse {
@@ -26,6 +30,10 @@ interface WsTreeNode {
   path: string; // 相对 workspaceDir
   type: 'file' | 'dir';
   hasChildren: boolean;
+  /** [v0.0.263] true = 该节点是 symlink（真实类型仍由 type 表达，statSync 跟随判定） */
+  isSymlink?: boolean;
+  /** [v0.0.263] symlink 目标 realpath 绝对路径；仅 isSymlink=true 时有意义 */
+  linkTarget?: string;
 }
 
 /** 与 chokidar WATCH_OPTIONS 一致的 ignore 名单（spec §2.6.1 + manager §4） */
@@ -36,38 +44,6 @@ export function json(status: number, body: unknown, allow?: string): Response {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (allow) headers.allow = allow;
   return new Response(JSON.stringify(body), { status, headers });
-}
-
-/** 白名单校验结果（区分明确越界 vs realpath 失败，供 caller 选 400/404/200） */
-export type WhitelistResult =
-  | { ok: true; realAbs: string } // 合法（已 realpath）
-  | { ok: false; reason: 'traversal' } // 明确越界（字符串前缀或 realpath 越界）→ 400
-  | { ok: false; reason: 'not_found' }; // realpath 失败（不存在/无权限）→ 404（tree/open）或静默 200（watch/unwatch）
-
-/**
- * 路径白名单校验（spec §6 安全校验 MANDATORY）：
- *   - step 1 字符串前缀：resolve(realRoot, rel) 必须在 realRoot 内（挡 ../ 和绝对路径注入）
- *   - step 2 realpath：解析符号链接后必须仍在 realRoot 内（挡 workspace 内 symlink 指向外部，如 ws/escape -> /etc）
- * caller 必须先 realpath workspaceDir 再传入（realRoot）。export 供 session-workspace-watch.ts 复用。
- */
-export function whitelistResolve(realRoot: string, rel?: string): WhitelistResult {
-  const abs = rel ? resolve(realRoot, rel) : resolve(realRoot);
-  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
-  // step 1: 字符串前缀校验（快速挡 ../ + 绝对路径注入）
-  if (abs !== realRoot && !abs.startsWith(rootWithSep)) {
-    return { ok: false, reason: 'traversal' };
-  }
-  // step 2: realpath 校验（防 symlink 穿越外部）
-  let realAbs: string;
-  try {
-    realAbs = realpathSync(abs);
-  } catch {
-    return { ok: false, reason: 'not_found' };
-  }
-  if (realAbs !== realRoot && !realAbs.startsWith(rootWithSep)) {
-    return { ok: false, reason: 'traversal' };
-  }
-  return { ok: true, realAbs };
 }
 
 /**
@@ -134,19 +110,38 @@ export async function handleWorkspaceTree(
   for (const name of entries) {
     if (IGNORED_NAMES.has(name)) continue; // 与 chokidar WATCH_OPTIONS 一致
     const absChild = resolve(absParent, name);
+    // [v0.0.263] symlink 识别：lstatSync 不跟随（statSync 跟随判真实类型，对称进行）
+    let isSymlink = false;
+    try {
+      isSymlink = lstatSync(absChild).isSymbolicLink();
+    } catch {
+      continue; // lstat 失败（权限/竞态删）跳过
+    }
     let isDir = false;
     try {
       isDir = statSync(absChild).isDirectory();
     } catch {
-      continue; // stat 失败（权限/竞态删）跳过
+      continue; // stat 失败（broken symlink 目标不存在/权限）跳过
     }
-    // 相对 workspaceDir 的 path（前端唯一 key + POST open 入参）；以 realRoot 为基准
-    const relChild = relPath(realRoot, absChild);
+    // linkTarget：仅 symlink 节点 realpath 一次；broken symlink realpath 失败 → 跳过该节点（现状隐藏语义）
+    let linkTarget: string | undefined;
+    if (isSymlink) {
+      try {
+        linkTarget = realpathSync(absChild);
+      } catch {
+        continue;
+      }
+    }
+    // 相对 workspaceDir 的 path（前端唯一 key + POST open 入参）；
+    // [v0.0.263] 基于 parentParam 拼接（保留 symlink 段——absChild 可能已解析到授权目标外部，
+    //   relPath 无法反推相对路径）；普通路径与旧 relPath(realRoot, absChild) 等价
+    const relChild = parentParam ? `${parentParam}/${name}` : name;
     nodes.push({
       name,
       path: relChild,
       type: isDir ? 'dir' : 'file',
       hasChildren: isDir ? dirHasChildren(absChild) : false,
+      ...(isSymlink ? { isSymlink: true, linkTarget } : {}),
     });
   }
 
@@ -173,17 +168,6 @@ function dirHasChildren(absDir: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** 计算相对 workspaceDir 的 path，跨平台统一用 '/' 分隔（spec §2.6.1 relPath 规范） */
-function relPath(workspaceDir: string, absChild: string): string {
-  const root = workspaceDir.endsWith(sep) ? workspaceDir : workspaceDir + sep;
-  if (absChild.startsWith(root)) {
-    const rel = absChild.slice(root.length);
-    return sep !== '/' ? rel.split(sep).join('/') : rel;
-  }
-  // 兜底：用 path.relative（不应到这里，前面白名单已挡）
-  return absChild;
 }
 
 /**

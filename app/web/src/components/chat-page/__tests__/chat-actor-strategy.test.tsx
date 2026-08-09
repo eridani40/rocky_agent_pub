@@ -6,10 +6,13 @@
  *
  * [v0.0.216] 自 studio-page/__tests__/squad-chat-helpers.test.ts 随迁（模块迁 chat-page；
  * resolveMemberActorFactory 参数窄化为 {name, role}）+ 新增 deriveRenderStrategy 数据驱动派生用例。
+ * [v0.0.295] a2a 消息从右侧（user）改回左侧（assistant），与群聊行为对齐；
+ *   resolveMemberActorFactory a2a 返回加 showNameAsPrefix=true。
+ * [v0.0.301] a2a inbox avatar=null（信封行左侧无头像）；name/showNameAsPrefix 保留。
  *
  * 覆盖：
- *   - memberSideResolver：a2a inbox → 'user'（右）；user/assistant/tool → 默认 sideOfMessage
- *   - resolveMemberActorFactory：a2a inbox 头像/名字取 ref（非 peer）；user→you；assistant→peer
+ *   - memberSideResolver：a2a inbox → 'assistant'（左，v0.0.295）；user→右；assistant/tool→左
+ *   - resolveMemberActorFactory：a2a inbox avatar=null + 名字取 ref + showNameAsPrefix=true（v0.0.301）
  *   - deriveRenderStrategy：groupRender→群聊策略；memberId→单聊策略；缺省→空策略
  */
 import { describe, it, expect } from 'vitest';
@@ -22,6 +25,7 @@ import {
   resolveGroupActor,
   groupMessageFilter,
   deriveRenderStrategy,
+  a2aRefOf,
 } from '../chat-actor-strategy';
 import { sideOfMessage } from '../component-message-stream';
 
@@ -39,29 +43,42 @@ function mkMsg(over: Omit<Partial<Message>, 'sender'> & { id: string; role?: Mes
 }
 
 /** a2a inbox 消息夹具 */
-function mkA2a(id: string, refType: string, refName: string): Message {
+function mkA2a(id: string, refType: string, refName: string, refSessionId?: string): Message {
   return mkMsg({
     id,
     role: 'user',
     sender: {
       source: 'agent',
-      agent: { ref: { type: refType, name: refName, sessionId: 's-' + refName }, needReply: false },
+      agent: { ref: { type: refType, name: refName, sessionId: refSessionId ?? 's-' + refName }, needReply: false },
     },
   });
 }
 
-/** 从 actor 返回的 avatar ReactNode 取 MemberAvatar 的 props（name/role） */
-function avatarProps(avatar: unknown): { name: string; role: string } {
+/** 从 actor 返回的 avatar ReactNode 取 MemberAvatar 的 props（name/role/id） */
+function avatarProps(avatar: unknown): { name: string; role: string; id?: string } {
   if (!isValidElement(avatar)) throw new Error('avatar 不是合法 React element');
-  const el = avatar as ReactElement<{ name: string; role: string }>;
-  return { name: el.props.name, role: el.props.role };
+  const el = avatar as ReactElement<{ name: string; role: string; id?: string }>;
+  return { name: el.props.name, role: el.props.role, id: el.props.id };
 }
 
-describe('memberSideResolver（单聊 a2a→右，随迁）', () => {
-  it('a2a inbox（leader/mate/subagent 来源）→ "user"（右，与 user 同侧，type-agnostic）', () => {
-    expect(memberSideResolver(mkA2a('a2a-1', 'leader', 'captain'))).toBe('user');
-    expect(memberSideResolver(mkA2a('a2a-2', 'mate', 'worker'))).toBe('user');
-    expect(memberSideResolver(mkA2a('a2a-3', 'subagent', 'explorer-1'))).toBe('user');
+/** [v0.0.301] 从 a2a invisible 头像取内部 MemberAvatar props：外层 div 必须含 invisible（保真布局） */
+function avatarMemberProps(avatar: unknown): { name: string; role: string; id?: string } {
+  if (!isValidElement(avatar)) throw new Error('avatar 不是合法 React element');
+  const wrapper = avatar as ReactElement<{ className?: string; children?: unknown }>;
+  expect(wrapper.type).toBe('div');
+  expect(wrapper.props.className).toContain('invisible');
+  expect(wrapper.props.className).toContain('w-9');
+  expect(wrapper.props.className).toContain('shrink-0');
+  const inner = wrapper.props.children;
+  if (!isValidElement(inner)) throw new Error('avatar 内部不是合法 React element（应为 MemberAvatar）');
+  return avatarProps(inner);
+}
+
+describe('memberSideResolver（v0.0.295: a2a→左，与群聊对齐）', () => {
+  it('a2a inbox（leader/mate/subagent 来源）→ "assistant"（左，type-agnostic）', () => {
+    expect(memberSideResolver(mkA2a('a2a-1', 'leader', 'captain'))).toBe('assistant');
+    expect(memberSideResolver(mkA2a('a2a-2', 'mate', 'worker'))).toBe('assistant');
+    expect(memberSideResolver(mkA2a('a2a-3', 'subagent', 'explorer-1'))).toBe('assistant');
   });
 
   it('human user（source=user）→ "user"；assistant/tool → "assistant"（默认 sideOfMessage）', () => {
@@ -79,53 +96,85 @@ describe('memberSideResolver（单聊 a2a→右，随迁）', () => {
     expect(memberSideResolver(m)).toBe('assistant');
   });
 
-  it('对照群聊：a2a inbox 默认 sideOfMessage→"assistant"（群聊不传 sideResolver 的原因）', () => {
+  it('对照群聊：a2a inbox memberSideResolver==sideOfMessage（单聊 v0.0.295 对齐群聊）', () => {
     const a2a = mkA2a('diff-1', 'leader', 'captain');
-    expect(memberSideResolver(a2a)).toBe('user');
+    expect(memberSideResolver(a2a)).toBe('assistant');
     expect(sideOfMessage(a2a)).toBe('assistant');
   });
 });
 
-describe('resolveMemberActorFactory（参数窄化 {name, role}；a2a 头像/名字取 ref 非 peer）', () => {
-  const peerB = { name: 'b', role: 'mate' };
+describe('resolveMemberActorFactory（参数含 id；[v0.0.301] a2a 原对象 invisible、名字取 ref 非 peer）', () => {
+  const peerB = { name: 'b', role: 'mate', id: 'peer-b-id' };
 
-  it('a2a inbox（ref.type=mate, name=alice）→ avatar 名字=alice（非 peer.name=b）', () => {
+  it('[v0.0.301] a2a inbox（ref.type=mate, name=alice）→ avatar 为原 MemberAvatar invisible（外层 div 含 invisible，内部 MemberAvatar name=alice/role=mate/id=sess-alice），name=ref.name（非 peer.name=b）', () => {
     const factory = resolveMemberActorFactory(peerB);
-    const props = avatarProps(factory(mkA2a('a2a-alice', 'mate', 'alice')).avatar);
-    expect(props.name).toBe('alice');
-    expect(props.role).toBe('mate');
+    const result = factory(mkA2a('a2a-alice', 'mate', 'alice', 'sess-alice'));
+    expect(avatarMemberProps(result.avatar)).toEqual({ name: 'alice', role: 'mate', id: 'sess-alice' });
+    expect(result.name).toBe('alice');
   });
 
-  it('a2a inbox（ref.type=leader）→ role=leader；subagent → 兜底 mate', () => {
+  it('[v0.0.301] a2a inbox（ref.type=leader → role=leader；subagent → 兜底 mate）→ 均原 MemberAvatar invisible', () => {
     const factory = resolveMemberActorFactory(peerB);
-    expect(avatarProps(factory(mkA2a('a2a-cap', 'leader', 'captain')).avatar)).toEqual({ name: 'captain', role: 'leader' });
-    expect(avatarProps(factory(mkA2a('a2a-sub', 'subagent', 'explorer')).avatar)).toEqual({ name: 'explorer', role: 'mate' });
+    expect(avatarMemberProps(factory(mkA2a('a2a-cap', 'leader', 'captain', 'sess-cap')).avatar)).toEqual({ name: 'captain', role: 'leader', id: 'sess-cap' });
+    expect(avatarMemberProps(factory(mkA2a('a2a-sub', 'subagent', 'explorer', 'sess-sub')).avatar)).toEqual({ name: 'explorer', role: 'mate', id: 'sess-sub' });
   });
 
-  it('human user → you/user；assistant answer → peer.name/peer.role', () => {
+  it('human user → you/user（无 id）；assistant answer → peer.name/peer.role/id（零回归）', () => {
     const factory = resolveMemberActorFactory(peerB);
-    expect(avatarProps(factory(mkMsg({ id: 'u1', role: 'user', sender: { source: 'user' } })).avatar)).toEqual({
-      name: 'you',
-      role: 'user',
-    });
-    expect(avatarProps(factory(mkMsg({ id: 'as1', role: 'assistant', content: [{ type: 'text', text: 'r' }] })).avatar)).toEqual({
-      name: 'b',
-      role: 'mate',
-    });
+    const userProps = avatarProps(factory(mkMsg({ id: 'u1', role: 'user', sender: { source: 'user' } })).avatar);
+    expect(userProps.name).toBe('you');
+    expect(userProps.role).toBe('user');
+    expect(userProps.id).toBeUndefined();
+    const asProps = avatarProps(factory(mkMsg({ id: 'as1', role: 'assistant', content: [{ type: 'text', text: 'r' }] })).avatar);
+    expect(asProps.name).toBe('b');
+    expect(asProps.role).toBe('mate');
+    expect(asProps.id).toBe('peer-b-id');
   });
 
-  it('peer.role=leader → assistant answer 用 leader 配色', () => {
-    const factory = resolveMemberActorFactory({ name: 'cap', role: 'leader' });
-    expect(avatarProps(factory(mkMsg({ id: 'as2', role: 'assistant', content: [{ type: 'text', text: 'r' }] })).avatar)).toEqual({
-      name: 'cap',
-      role: 'leader',
-    });
+  it('peer.role=leader → assistant answer 用 leader 配色 + peer.id', () => {
+    const factory = resolveMemberActorFactory({ name: 'cap', role: 'leader', id: 'cap-id' });
+    const props = avatarProps(factory(mkMsg({ id: 'as2', role: 'assistant', content: [{ type: 'text', text: 'r' }] })).avatar);
+    expect(props.name).toBe('cap');
+    expect(props.role).toBe('leader');
+    expect(props.id).toBe('cap-id');
   });
 
-  it('单聊无 showNameAsPrefix（与群聊 a2a 前缀行区别）', () => {
+  it('v0.0.295: a2a 返回 showNameAsPrefix=true（信封旁显示发送方名字）', () => {
     const factory = resolveMemberActorFactory(peerB);
-    const result = factory(mkA2a('a2a-noprefix', 'mate', 'alice'));
-    expect((result as { showNameAsPrefix?: boolean }).showNameAsPrefix).toBeUndefined();
+    const result = factory(mkA2a('a2a-prefix', 'mate', 'alice'));
+    expect((result as { showNameAsPrefix?: boolean }).showNameAsPrefix).toBe(true);
+  });
+});
+
+describe('a2aRefOf（v0.0.297: 返回含 sessionId）', () => {
+  it('a2a inbox 消息 → 返回 type/name/sessionId', () => {
+    const ref = a2aRefOf(mkA2a('a2a-1', 'mate', 'alice', 'sess-alice-001'));
+    expect(ref).toEqual({ type: 'mate', name: 'alice', sessionId: 'sess-alice-001' });
+  });
+
+  it('非 a2a 消息（human user）→ null', () => {
+    expect(a2aRefOf(mkMsg({ id: 'u1', role: 'user', sender: { source: 'user' } }))).toBeNull();
+  });
+});
+
+describe('resolveGroupActor（[v0.0.301] a2a 原对象 invisible；human user 头像保留）', () => {
+  it('[v0.0.301] a2a inbox → avatar 为原 MemberAvatar invisible（外层 div 含 invisible + w-9，内部 MemberAvatar name/role/id 正确），name=ref.name 保留', () => {
+    const result = resolveGroupActor(mkA2a('a2a-g', 'mate', 'alice', 'sess-g-alice'));
+    expect(avatarMemberProps(result.avatar)).toEqual({ name: 'alice', role: 'mate', id: 'sess-g-alice' });
+    expect(result.name).toBe('alice');
+  });
+
+  it('a2a inbox → showNameAsPrefix 仍为 true（信封旁名字前缀逻辑保留）', () => {
+    const result = resolveGroupActor(mkA2a('a2a-g2', 'leader', 'captain'));
+    expect((result as { showNameAsPrefix?: boolean }).showNameAsPrefix).toBe(true);
+  });
+
+  it('human user → avatar 无 id（name=you，零回归）', () => {
+    const result = resolveGroupActor(mkMsg({ id: 'u-g', role: 'user', sender: { source: 'user' } }));
+    const props = avatarProps(result.avatar);
+    expect(props.name).toBe('you');
+    expect(props.role).toBe('user');
+    expect(props.id).toBeUndefined();
   });
 });
 
@@ -174,9 +223,9 @@ describe('deriveRenderStrategy（chrome 数据驱动，零 kind 分支）', () =
     const s = deriveRenderStrategy(chrome);
     expect(s.messageFilter).toBeUndefined();
     expect(s.sideResolver).toBe(memberSideResolver);
-    // actor 用对端 alice/leader（assistant answer 走 peer 头像）
+    // actor 用对端 alice/leader（assistant answer 走 peer 头像），id=peer.id
     const props = avatarProps(s.resolveActor!(mkMsg({ id: 'as', role: 'assistant', content: [{ type: 'text', text: 'r' }] })).avatar);
-    expect(props).toEqual({ name: 'alice', role: 'leader' });
+    expect(props).toEqual({ name: 'alice', role: 'leader', id: 'm1' });
   });
 
   it('memberId 非空但 members 无匹配（数据不一致）→ 空策略兜底（默认渲染）', () => {

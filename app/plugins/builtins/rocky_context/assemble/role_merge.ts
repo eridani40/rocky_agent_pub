@@ -35,8 +35,11 @@ export default class RoleMergeReducer
       }
       const last = out[out.length - 1];
       if (last && last.role === m.role) {
-        // 合并：后者 content 并入前者
-        last.content = [...last.content, ...m.content];
+        // 合并：clone 被合并 message 的每个 block + 注入 block.sender（不 mutate 入参 block）
+        const cloned = m.content.map((b) => ({ ...b, sender: m.sender }));
+        last.content = [...last.content, ...cloned];
+        // 合并后清空 message.sender（逻辑 message 内 block 来自多 sender，置空不撒谎）
+        last.sender = undefined;
       } else {
         out.push({ ...m, content: [...m.content] });
       }

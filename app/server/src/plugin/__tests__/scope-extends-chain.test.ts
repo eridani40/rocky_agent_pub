@@ -140,8 +140,9 @@ describe('[v0.0.204 T2-B3] Q3 治理：playground/studio 拆分', () => {
     // system_prompt_mapper 在 playground scope 的 activatedPoints 中
     expect(pg!.activatedPoints).toContain('system_prompt_mapper');
     // playground scope 的 system_prompt_mapper impls 不含 squad/group 相关
+    // [v0.0.273] squad_agents_status = reachable_agents 继承者（a2a 通用对端 provider，subagent 需 [parent]），非 squad 专有 → 例外
     const squadImpls = Object.keys(pg!.impls).filter((id) =>
-      id.startsWith('squad_') || id === 'team_roster' || id === 'memory_group' || id === 'parent_task');
+      (id.startsWith('squad_') && id !== 'squad_agents_status') || id === 'team_roster' || id === 'memory_group' || id === 'parent_task');
     expect(squadImpls).toEqual([]);
   });
 });

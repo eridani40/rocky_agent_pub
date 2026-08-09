@@ -39,6 +39,7 @@ const apiMocks = vi.hoisted(() => ({
   pickWorkspaceDirectory: vi.fn(async () => undefined),
   watchWorkspaceDir: vi.fn(async () => ({ ok: true })),
   unwatchWorkspaceDir: vi.fn(async () => ({ ok: true })),
+  watchWorkspaceSet: vi.fn(async () => ({ ok: true })),
   req: vi.fn(),
 }));
 const apiPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../../lib/chat-api.ts'));

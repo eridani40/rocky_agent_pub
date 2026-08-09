@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isBuiltinEditable } from '../file-format';
 import {
   isDangerousScheme,
+  isDangerousImageScheme,
   classifyLinkTarget,
   toChatLinkTarget,
   openLinkTarget,
@@ -60,6 +61,40 @@ describe('isDangerousScheme', () => {
     expect(isDangerousScheme('https://x.com')).toBe(false);
     expect(isDangerousScheme('file:///abs/path')).toBe(false);
     expect(isDangerousScheme('mailto:a@b.com')).toBe(false);
+  });
+});
+
+describe('isDangerousImageScheme（v0.0.286 图片专用白名单）', () => {
+  it('javascript: 拦截', () => {
+    expect(isDangerousImageScheme('javascript:alert(1)')).toBe(true);
+  });
+  it('vbscript: 拦截', () => {
+    expect(isDangerousImageScheme('vbscript:foo')).toBe(true);
+  });
+  it('data:image/ 放行（base64 内联图片白名单）', () => {
+    expect(isDangerousImageScheme('data:image/png;base64,iVBOR...')).toBe(false);
+    expect(isDangerousImageScheme('data:image/svg+xml,<svg/>')).toBe(false);
+    expect(isDangerousImageScheme('data:image/jpeg;base64,/9j/')).toBe(false);
+  });
+  it('data: 非 image 拦截（text/html / text/plain 等）', () => {
+    expect(isDangerousImageScheme('data:text/html,<script>')).toBe(true);
+    expect(isDangerousImageScheme('data:text/plain,hello')).toBe(true);
+  });
+  it('大小写不敏感', () => {
+    expect(isDangerousImageScheme('JAVASCRIPT:x')).toBe(true);
+    expect(isDangerousImageScheme('Data:text/html,x')).toBe(true);
+    expect(isDangerousImageScheme('DATA:IMAGE/PNG;base64,x')).toBe(false);
+  });
+  it('前导空白容忍', () => {
+    expect(isDangerousImageScheme('  javascript:alert(1)')).toBe(true);
+    expect(isDangerousImageScheme('\tdata:text/html,x')).toBe(true);
+    expect(isDangerousImageScheme('  data:image/png;base64,x')).toBe(false);
+  });
+  it('合法 http/https/绝对路径不拦', () => {
+    expect(isDangerousImageScheme('http://x.com/a.png')).toBe(false);
+    expect(isDangerousImageScheme('https://x.com/b.jpg')).toBe(false);
+    expect(isDangerousImageScheme('/abs/path/c.gif')).toBe(false);
+    expect(isDangerousImageScheme('~/img/d.png')).toBe(false);
   });
 });
 

@@ -468,3 +468,154 @@ describe('SessionWorkspaceManager 场景 — lazy 钩子接线（SseChannel 集�
     expect(count).toBe(1);
   });
 });
+
+// ============================================================
+// 9. applyWatchSet（v0.0.271 声明式 watch-set：全量 diff + 泄漏收敛 + 多 tab 合并）
+// ============================================================
+
+describe('SessionWorkspaceManager — applyWatchSet 全量 diff（v0.0.271）', () => {
+  it('初始集合 → 全部建 watcher；同集合再调 → 幂等不变', async () => {
+    const sid = '01TEST00000000000000000060';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    const sub = resolve(dir, 'sub');
+    mkdirSync(sub, { recursive: true });
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['', 'sub']);
+    let status = manager.getStatus();
+    expect(status).toHaveLength(2);
+    expect(status.map((s) => s.absDir).sort()).toEqual([dir, sub].sort());
+    expect(status.every((s) => s.refcount === 1)).toBe(true);
+
+    // 幂等：同集合再调 → diff 全空 → 不叠加
+    await manager.applyWatchSet(sid, 'c1', dir, ['', 'sub']);
+    status = manager.getStatus();
+    expect(status).toHaveLength(2);
+    expect(status.every((s) => s.refcount === 1)).toBe(true);
+  });
+
+  it('移除路径 → 物理 watcher close（不在新集合一律 close，泄漏收敛）', async () => {
+    const sid = '01TEST00000000000000000061';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    const sub = resolve(dir, 'sub');
+    mkdirSync(sub, { recursive: true });
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['', 'sub']);
+    expect(manager.getStatus()).toHaveLength(2);
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['']);
+    const status = manager.getStatus();
+    expect(status).toHaveLength(1); // sub 已 close
+    expect(status[0]?.absDir).toBe(dir);
+  });
+
+  it('多 tab 合并：c1 移除但 c2 仍持有 → refcount>0 → 不 close', async () => {
+    const sid = '01TEST00000000000000000062';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    mkdirSync(dir, { recursive: true });
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['']);
+    await manager.applyWatchSet(sid, 'c2', dir, ['']);
+    let status = manager.getStatus();
+    expect(status).toHaveLength(1);
+    expect(status[0]?.refcount).toBe(2); // 两 tab 合并 1 watcher
+
+    // c1 移出（空集合）→ refcount 2→1 → 不 close
+    await manager.applyWatchSet(sid, 'c1', dir, []);
+    status = manager.getStatus();
+    expect(status).toHaveLength(1);
+    expect(status[0]?.refcount).toBe(1);
+
+    // c2 也移出 → refcount 1→0 → close
+    await manager.applyWatchSet(sid, 'c2', dir, []);
+    expect(manager.getStatus()).toHaveLength(0);
+  });
+
+  it('新增 + 移除混合：集合从 {a,b} → {b,c} → a close、c 建、b 保持', async () => {
+    const sid = '01TEST00000000000000000063';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    const a = resolve(dir, 'a');
+    const b = resolve(dir, 'b');
+    const c = resolve(dir, 'c');
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    mkdirSync(c, { recursive: true });
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['a', 'b']);
+    expect(manager.getStatus()).toHaveLength(2);
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['b', 'c']);
+    const status = manager.getStatus();
+    expect(status).toHaveLength(2);
+    expect(status.map((s) => s.absDir).sort()).toEqual([b, c].sort());
+    expect(status.every((s) => s.refcount === 1)).toBe(true);
+  });
+
+  it('不存在/非目录路径 → 静默跳过（不登记不报错）', async () => {
+    const sid = '01TEST00000000000000000064';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    mkdirSync(dir, { recursive: true });
+    const file = resolve(dir, 'afile');
+    writeFileSync(file, 'x');
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['', 'not-exists', 'afile']);
+    const status = manager.getStatus();
+    expect(status).toHaveLength(1); // 只有根
+    expect(status[0]?.absDir).toBe(dir);
+  });
+
+  it('越界路径 → resolveAbsDir 返 null 跳过（不登记）', async () => {
+    const sid = '01TEST00000000000000000065';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    mkdirSync(dir, { recursive: true });
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['', '../../outside']);
+    const status = manager.getStatus();
+    expect(status).toHaveLength(1);
+    expect(status[0]?.absDir).toBe(dir);
+  });
+
+  it('空集合 → 清空该 tab 全部监听（与 releaseTab 语义一致）', async () => {
+    const sid = '01TEST00000000000000000066';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    mkdirSync(dir, { recursive: true });
+
+    await manager.applyWatchSet(sid, 'c1', dir, ['']);
+    expect(manager.getStatus()).toHaveLength(1);
+
+    await manager.applyWatchSet(sid, 'c1', dir, []);
+    expect(manager.getStatus()).toHaveLength(0);
+  });
+
+  it('stopAll 后 applyWatchSet → no-op（stopped 短路）', async () => {
+    const sid = '01TEST00000000000000000067';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    mkdirSync(dir, { recursive: true });
+
+    await manager.stopAll();
+    await expect(manager.applyWatchSet(sid, 'c1', dir, [''])).resolves.toBeUndefined();
+    expect(manager.getStatus()).toHaveLength(0);
+  });
+
+  it('4 条回收路径交互：applyWatchSet 建立后 releaseTab / recycleSession 均能收敛', async () => {
+    const sid = '01TEST00000000000000000068';
+    const dir = resolve(tmpRoot, 'ws', sid);
+    const sub = resolve(dir, 'sub');
+    mkdirSync(sub, { recursive: true });
+
+    // applyWatchSet 建立集合
+    await manager.applyWatchSet(sid, 'c1', dir, ['', 'sub']);
+    expect(manager.getStatus()).toHaveLength(2);
+
+    // releaseTab（旧增量回收路径）清空该 tab → 全部 close
+    await manager.releaseTab(sid, 'c1');
+    expect(manager.getStatus()).toHaveLength(0);
+
+    // 重新 applyWatchSet → 重建
+    await manager.applyWatchSet(sid, 'c1', dir, ['', 'sub']);
+    expect(manager.getStatus()).toHaveLength(2);
+
+    // recycleSession 清空整个 session
+    await manager.recycleSession(sid);
+    expect(manager.getStatus()).toHaveLength(0);
+  });
+});

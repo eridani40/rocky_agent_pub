@@ -147,7 +147,7 @@ describe('resolveActor 注入（squad MemberAvatar 替换默认）', () => {
     expect((av as HTMLElement).style.background).toBe('var(--fg-2)');
   });
 
-  it('群聊策略（resolveGroupActor + groupMessageFilter）：a2a 渲 MemberAvatar + 前缀行，assistant mute', () => {
+  it('[v0.0.301] 群聊策略（resolveGroupActor + groupMessageFilter）：a2a 行原 MemberAvatar invisible（保真布局）+ 信封 senderName，human user 头像保留，assistant mute', () => {
     const msgs: Message[] = [
       userMsg('u1', 'hi'),
       a2aInboxMsg('a1', 'captain', 'leader'),
@@ -164,12 +164,21 @@ describe('resolveActor 注入（squad MemberAvatar 替换默认）', () => {
     // user + a2a 渲染
     expect(getRow('u1')).toBeTruthy();
     expect(getRow('a1')).toBeTruthy();
-    // a2a 角色名前缀行
-    expect(screen.getByText('captain:').textContent).toContain('captain:');
-    // [v0.0.165] a2a MemberAvatar(leader) 走 hash-by-id 8 色 palette（详见 lib/hue-hash）；leader/mate 不再固定色
-    const av = within(getRow('a1')).getByText('C'); // captain 首字母
-    expect((av as HTMLElement).style.background).toMatch(/^var\(--hue-(rose|orange|amber|green|teal|blue|violet|pink)\)$/);
-    expect(av.textContent).toBe('C');
+    // [v0.0.301] a2a 行：无前缀行（v0.0.295 守卫 !isA2aInbox 已生效）
+    expect(screen.queryByText('captain:')).toBeNull();
+    // [v0.0.301] a2a 行头像：原 MemberAvatar 对象 invisible 包裹（DOM 保留原对象、不可见，信封位置不动）
+    const avatarWrap = getRow('a1').querySelector('.invisible');
+    expect(avatarWrap).toBeTruthy();
+    expect(avatarWrap!.className).toContain('w-9');
+    expect(avatarWrap!.className).toContain('shrink-0');
+    // 内部仍是原 MemberAvatar（captain 首字母色块存在，仅被 invisible 隐藏）
+    expect(within(avatarWrap as HTMLElement).getByText('C')).toBeTruthy();
+    // a2a 信封 senderName 可见（信封承载名字；invisible 头像内 MemberAvatar 也有 name label，用信封按钮 scope 精确定位）
+    const envelopeToggle = within(getRow('a1')).getByTestId('a2a-envelope-toggle');
+    expect(within(envelopeToggle).getByText('captain')).toBeTruthy();
+    // [v0.0.165] human user 头像保留：you 首字母 Y 色块（零回归）
+    const av = within(getRow('u1')).getByText('Y');
+    expect((av as HTMLElement).style.background).toBe('var(--fg-2)');
     // assistant answer 被 mute
     expect(queryRow('as1')).toBeNull();
     expect(screen.queryByText('loop')).toBeNull();

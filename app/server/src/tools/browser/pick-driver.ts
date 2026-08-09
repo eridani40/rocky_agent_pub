@@ -23,8 +23,8 @@ export interface DriverRegistry {
 /**
  * 默认 DriverRegistry：内存 Map 持有各 mode 的 driver。
  * headless/managed-profile 共用 NodeWorkerDriver（mode 在 executeOnce 时按 opts 推断）。
- * attach → ChromeMcpDriver（可选；ConnectorManager 持有 chromeDriver 单例时由 app 注入；
- *   attach 模式实际走 connectorManager.getAttachSession，不查 registry，故 chromeMcp 可缺省）。
+ * attach → ChromeMcpDriver（可选；v0.0.266 起由 bootstrap 共享 attachDriver 单例注入
+ *   InstanceManager，attach 走 launch 时 connect，不查 registry，故 chromeMcp 可缺省）。
  *
  * headless/managed-profile 用 NodeWorkerDriver（PlaywrightDriver 的 connect 路径在 Bun 下永久 hang）。
  */

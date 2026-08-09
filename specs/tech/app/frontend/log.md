@@ -1,13 +1,96 @@
 ---
 type: log
 title: Frontend KB 变更记录
-updated: 2026-08-04
+updated: 2026-08-08
 ---
 
 # Frontend KB 变更记录（ISO 倒序，最新在前）
 
+## 2026-08-08 · v0.0.286（Markdown Viewer 图片渲染）
+
+- **`index.md` ① 概念表 L42**：v0.0.253 link-target 概念行扩展 v0.0.286——`isDangerousImageScheme`（图片专用危险协议判定，不改 isDangerousScheme：拦 javascript:/vbscript:/非 image data:，放行 data:image/ 白名单）+ `primitive-markdown-image.tsx` 新 helper（从渲染内核拆出 ≤300 行约束，范本 gfm-table）：block 级独立行 `![alt](url)` → `MarkdownImage` 三源分流（web 直渲 / data:image 直渲 / absolute readFileBinary IPC / relative joinPath resolve→workspace HTTP 或 IPC / 无 baseDir 降级 alt）+ 加载四态（loading/error/too-large/loaded）+ `PrimitiveImageLightbox`（Portal+遮罩+全尺寸 img+Esc/遮罩/✕ 三路关闭，本地+web 统一不走 WsImageViewer）+ 纯函数（resolveImageUrl/joinPath/deriveBaseDir）。modal-md-editor 加 filePath/sessionId 可选 props（deriveBaseDir(filePath)→baseDir）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① isDangerousImageScheme `link-target.ts L55` 拦 javascript:/vbscript:/data:(非image) + 放行 data:image/ ✅；② MarkdownImage 三源分流 `primitive-markdown-image.tsx` resolveImageUrl L58-67（web/data/absolute/relative 四分类）+ effect L135-192 按 type 分流（web/data 直渲不异步读 / absolute readFileBinary IPC / relative joinPath→workspace HTTP 或 IPC）✅；③ joinPath L24-31（空 baseDir 返 relative 原样，BUG-001 修复）+ deriveBaseDir L39-44（纯文件名→空串=根目录，BUG-001 修复）+ resolveImageUrl L63 `baseDir !== undefined` 判定（空串是有效根目录值，BUG-002 修复）✅；④ PrimitiveImageLightbox L72-103（Portal+遮罩+max-h-88vh+Esc/遮罩/✕ 三路关闭）✅；⑤ primitive-markdown-view.tsx block image 分支 L268（独立行 `^!\[...\]\(...\)---
+type: log
+title: Frontend KB 变更记录
+ 正则→MarkdownImage 渲染；baseDir/sessionId props 透传）✅；⑥ modal-md-editor.tsx L42-45 filePath/sessionId props + L207 `deriveBaseDir(filePath)` + sessionId 传 PrimitiveMarkdownView ✅；⑦ ws-file-editor L126-127 + chat-link-viewer L198-199 filePath=target.path+sessionId 传递链路完整 ✅；⑧ 2 BUG 修复（BUG-001 deriveBaseDir 纯函数替代有 bug 正则 + joinPath 空 baseDir；BUG-002 resolveImageUrl `baseDir!==undefined` 替代 falsy 判定 + readBinary DI prop）已核实 == 代码 ✅。
+
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-07 · v0.0.280（聊天链接打开行为统一 ≡ 右侧文件区 — openLocalPath 共享分发 + 去强制只读 + image/.url/absolute 分流 + 新 IPC 通道）
+
+- **`lib/open-local-path.ts` NEW（151 行）**：共享本地文件分发 lib（聊天链 + 右侧 handleOpen 共用，老板铁律行为永远一致）。5 分支 × 2 源（workspace/absolute）：①folder→系统文件管理器 ②`.url`→嗅探浏览器（workspace→openRemoteLink / absolute→readFileText+parseUrlFileContent+openWebUrl；失败降级 txt editor）③image 6 格式→onImageViewer ④12 格式→onEditor(format) ⑤其余→系统打开。复用 file-format 单一权威（getFileFormat/isImagePath/isRemoteLinkPath），不新开格式集/图片白名单；kind=undefined（聊天链）跳过文件夹分支。basename 内部 5 行（file-format basename 私有不导出）。
+- **`lib/link-target.ts`**：local 分支改调 openLocalPath（有 onLocalViewer → openLocalPath 回调，无 Provider → 降级 openPath 不变）；opts 加 `sessionId?`；web/dangerous 分支零改动。
+- **`lib/remote-link.ts`**：`openWebUrl` 导出（断循环依赖——remote-link 不再 import link-target，openWebUrl ≡ link-target web 分支逐字等价）。
+- **`chat-page/component-chat-link-viewer.tsx`**：**覆盖 v0.0.253 强制只读**——去 readOnly 传 onSave（workspace→saveWorkspaceFile / absolute→writeFileText IPC）+ 渲染分流（isImagePath→WsImageViewer source 透传 / 否则→ModalMdEditor format=getFileFormat ?? 'txt'）+ image 分支不读文本（直接清态走渲染分流——v0.0.253 遗留缺陷修复）+ 成功 toast「已保存」（2.6s flash）。
+- **`chat-page/component-ws-image-viewer.tsx`**：WsImageTarget 加 `source?: 'workspace'|'absolute'`（缺省 workspace）；source='absolute' → readFileBinary IPC → base64 data URL（右侧 handleOpen 调用零变化）。
+- **`chat-page/section-workspace-panel.tsx`**：handleOpen 改调 openLocalPath（行为零变化，五路分流语义原样保留）。
+- **`common/primitive-markdown-view.tsx`**：linkOpts 构造带 sessionId。
+- **electron IPC（`open-external-ipc.ts` + preload + rocky-shell.d.ts）**：新 `computeWriteFileText`（utf8 覆盖 last-write-wins；ENOENT→not-found / EACCES→permission-denied）+ `computeReadFileBinary`（stat 预检 >2MB→too-large；base64 返回）+ `shell:writeFileText` / `shell:readFileBinary` 两 channel（均先 computeResolveLocalPath 展开）。错误语义与 readFileText 逐字对齐。
+- **偏离1（循环依赖断环）**：openLocalPath→remote-link→link-target→openLocalPath 环（vitest mock 下绑定 undefined）→ remote-link 去掉 link-target import（openWebUrl 内联导出，语义逐字等价）+ open-local-path 从 remote-link 复用。**偏离2（image 分支不读文本）**：change_plan 行 29 指非 image 分支；原 useEffect 无条件读文本是 v0.0.253 遗留缺陷，image 二进制 readFileText 失败挡 viewer → 修复后对齐右侧 handleOpen。
+- 详见 `specs/tech/version_logs/v0.0.280/change_plan.md`（24 行 method 级表 + 6 裁决）+ `change_log.md`
+
+## 2026-08-06 · v0.0.269（workspace 文件类型分流 + 团队状态浮菜单 — handleOpen 五路分流 + binary 通道 + squad-status modal）
+
+- **`lib/file-format.ts`**：加 `IMAGE_EXTS`（6 格式闭合 png/jpg/jpeg/gif/webp/svg）+ `isImagePath(path)`（basename 扩展名大小写不敏感，无扩展名 false）——image 分流判定；`looksBinary` **保留**（注释更新：前置分流后不作主判定，仅 text 白名单内真二进制防御——`.txt` 改名成真二进制时占位 pill）。
+- **`chat-page/component-ws-image-viewer.tsx` NEW（148 行）**：workspace 图片只读查看器——`WsImageTarget`（path/fileName/subtitle）+ `Props { sessionId, target, onClose }`（target null 不渲染）；L3 modal（Portal + modal shell + 遮罩/Esc/关闭三路）；打开 `readWorkspaceFileBinary` → `data:image/{ext};base64,` → `<img>`（max-w/max-h 保持纵横比）；mediaTypeFromPath 6 格式映射兜底 octet-stream；只读（无编辑/保存/格式化/校验）；失败轻量 error。testid：ws-image-viewer / ws-image-viewer-img / ws-image-viewer-error。
+- **`chat-page/section-workspace-panel.tsx` handleOpen 五路分流（v0.0.263 二元 → v0.0.269 五路，顺序 MUST）**：`node.type !== 'file'`（文件夹）→ openWorkspaceItem(kind='folder')；`isRemoteLinkPath`（.url）→ openRemoteLink（嗅探失败降级 editor）；`isImagePath`（6 格式）→ `setWsImageTarget`（与 fileEditorTarget 互斥）；`getFileFormat !== null`（12 格式文本）→ setFileEditorTarget；其余（未知/非 6 格式图片）→ openWorkspaceItem(kind='file') 系统打开（**无占位 pill**）。**消灭「二进制无法预览」占位 pill**——前置分流后进 editor 的都是文本。
+- **`lib/chat-api/workspace-api.ts` `readWorkspaceFileBinary` NEW**：`GET /session/:id/workspace/file?binary=1` → `{ content: base64 }`（服务端读 Buffer；白名单校验与文本同一路径安全面不变）。
+- **`chat-page/component-chat-float-menu.tsx` 第 4 菜单项「团队状态」**（skills 下方、todo **上方**——todo 保持最后，共 5 项）：`useSquadStatus()` 读 SquadStatusContext（page-studio chat 分支 Provider 下传；**无 Provider → 按钮不渲染 fail-safe**）；running badge = `deriveRunningCount`（deployed isRunningState 计数含 leader，0 态 Badge 不渲染不占位）；`openModal` 扩 `'squad-status'`；props 加 `chrome?: SessionChromeView`（`currentMemberId = chrome?.memberId ?? undefined` 防套娃）。data-action-key="chat.squad-status.open"。
+- **`chat-page/section-chat-session.tsx`**：渲染 float-menu 传 `chrome={chrome}`（currentMemberId 来源；studio 单聊=对端 member id，群聊/playground/academy=undefined）。
+- **`studio-page/component-squad-status-modal.tsx`（v0.0.268 entry 改造）**：面板逻辑自 entry 迁本组件——L3 modal（Portal + modal shell + 遮罩/Esc/关闭三路）+ running 上 / idle 下分区（derivePanelRows）+ presence 文字 + hover 进入对话 icon + **防套娃**（`row.member.id === currentMemberId` → 不渲染进入对话 icon，行内容保留）+ 打开 refreshDetail fire-and-forget（ctx null 守卫前无条件调用，hooks 规则）+ 无 Provider 不渲染（双保险）。testid：squad-status-modal / squad-status-row-{memberId}。Props `{ onClose, currentMemberId? }`。
+- **`studio-page/section-studio-chat.tsx` topbarLeft 恢复 268 前形态**：`SquadStatusEntry` 删除——单聊 = MemberAvatar+name+tag；群聊 = 缺省 ChatSessionTopbarLeft。`component-squad-status-entry.tsx` 删除（按钮逻辑并入 float-menu 第 4 项，面板逻辑迁 modal）；squad-status-utils/context/Provider 不动（数据注入 268 架构保持）。
+- **测试**：`session-workspace-file.test.ts` +2（binary=1 → base64 还原 == 原 Buffer / 白名单不变 traversal→400 + missing→404）+ `file-format.test.ts` isImagePath 组（6 格式 true / 非 6 格式 false）+ `component-ws-image-viewer.test.tsx` NEW（img 渲染/svg media type/error/只读无编辑/关闭三路/target null）+ `component-chat-float-menu.test.tsx`（squad-status 项 + fail-safe + running badge）+ `component-squad-status-modal.test.tsx` NEW（分区/防套娃/refreshDetail）。
+- **代码↔spec 偏离核实（doc-modifier 阶段 5）**：IMAGE_EXTS 6 格式闭合 + isImagePath 大小写不敏感 / handleOpen 五路顺序（folder > .url > image > text > 系统打开）/ binary=1 Buffer→base64 + 白名单不变 / viewer L3 modal + 只读 + testid 三件套 / float-menu 第 4 项（skills 与 todo 之间、todo 最后）+ chrome prop + fail-safe / modal 防套娃 currentMemberId + refreshDetail / section-studio-chat topbarLeft 恢复 268 前形态 全部与 change_plan 一致 ✓；偏离 2 项等价合理（viewer Props 实际 = `{ sessionId, target, onClose }`（target 对象而非扁平 path/fileName/subtitle，spec 已按实现修正）/ i18n wsImageViewer 键在 chat ns workspace 嵌套对象下 ✓）。`component-workspace-panel.md §4.4` / `component-chat-float-menu.md` / `section-studio-chat.md` / `component-squad-status-modal.md` / `component-ws-image-viewer.md` / `04-agent-session.md §2.6.7` / `00-app-guide.md` 已按实际实现同步；`component-squad-status-entry.md` 删除（代码已删）。
+- 详情：`specs/tech/version_logs/v0.0.269/change_plan.md`（method 级契约）+ `specs/tech/version_logs/v0.0.269/change_log.md`；PRD `specs/prd/version_logs/v0.0.269.file_dispatch_nav_status/prd.md`
+
+## 2026-08-06 · v0.0.267（Session 输入草稿缓存 — chat-slice drafts + useChatDraft 接线 + 草稿>prefill）
+
+- **`store/chat-slice.ts`**：`DraftContent = string` type（serializeEditorContent 序列化字符串——与发送通道 onSend content 同构，mention 保真）+ `ChatSliceState.drafts: Record<sessionId, DraftContent>`（内存级，无 persist）+ `saveDraft(sessionId, content)`（空内容 `!content.trim()` → 删 key 等价清除；非空 spread 新建写；**值相同不 set** 防恢复回写触发订阅）+ `clearDraft(sessionId)`（key 不存在 no-op 幂等）——均不可变更新。
+- **`chat-page/use-chat-draft.ts` NEW（70 行）**：`useChatDraft(editor, sessionId, initialContent, store?)`——**全部 getState 读/写不订阅** → 输入零 re-render；mount 恢复（草稿 > prefill：有草稿 → `restoreDraftContent` 置 injectedRef 跳过 initialContent；无草稿 → 既有 injectInitialContent）；返回 `saveDraft(ed)`（serializeEditorContent 写缓存）+ `clearDraft()`；`store` 可选参数 = 测试注入独立实例。
+- **`chat-page/chat-composer-helpers.ts`**：新增 `restoreDraftContent(editor, content)`——`deserializeContentToParagraphs`（mention pill 保真）→ `insertContent(paragraphs)`；与 injectInitialContent 并列（editor 命令封装；ref guard / queueMicrotask 推迟由 useChatDraft 负责）。
+- **`chat-page/component-chat-composer.tsx`**：原 initialContent effect（ref guard + empty check + queueMicrotask）**移入 useChatDraft**（单一出口，净 -10 行）；onUpdate 追加 `saveDraft(ed)`（编辑即写，含空内容自动清除）；handleSubmit 追加 `clearDraft()`（发送后显式清，不赌 clearContent 触发 onUpdate 的框架行为，双保险）；297 行（≤300 达标）。
+- **测试**：`store/__tests__/chat-slice-draft.test.ts` NEW（11 用例：写/空清除/值相同不 set/clearDraft 幂等/不可变/DraftContent 形）+ `chat-page/__tests__/use-chat-draft.test.tsx` NEW（7 用例：有草稿恢复含 pill/无草稿 prefill/草稿优先/回写同值幂等/actions 语义）+ composer 集成 UT 追加草稿用例（mount 恢复/输入写缓存/发送清除/prefill 回归）。
+- **代码↔spec 偏离核实（doc-modifier 阶段 5）**：DraftContent/drafts/saveDraft 空清除+值相同不 set/clearDraft 幂等/useChatDraft getState 不订阅+草稿>prefill+store 注入/restoreDraftContent deserialize→insertContent/composer onUpdate+handleSubmit 全部与 change_plan 一致 ✓；偏离 2 项等价合理（interrupt.test beforeEach 清 drafts 既有测试适配 / useChatDraft store 参数测试隔离注入，生产零影响）✓。`chat-composer.md` / `section-chat-session.md` / `[P0]component_architecture.md` / `00-app-guide.md` 已按实际实现同步，无静默偏离。
+- 详情：`specs/tech/version_logs/v0.0.267/change_plan.md`（method 级契约）+ `specs/tech/version_logs/v0.0.267/change_log.md`；PRD `specs/prd/version_logs/v0.0.267.input_draft_cache/prd.md`
+## 2026-08-06 · v0.0.268（Squad 成员状态导航 — SquadStatusContext + 入口面板 + memo 阻断级联）
+
+- **`studio-page/squad-status-context.ts` NEW**：`SquadStatusContextValue`（`{ detail, memberStateMap, onEnterChat, refreshDetail }`）+ `SquadStatusContext`（createContext null）+ `useSquadStatus()`（无 Provider 返 null fail-safe）——入口组件数据注入契约。
+- **`studio-page/squad-status-utils.ts` NEW**：`buildMemberChatNode(detail, memberId, t)`（从 SeatsPanel 抽公共 helper，tag 规则 leader→tagLeader / mate→tagSingle + squadId，member 不存在返 null）+ `deriveRunningCount(detail, memberStateMap)`（deployed 成员 isRunningState 计数含 leader，suspended/benched 不计）+ `derivePanelRows(detail, memberStateMap)`（running/idle 分区，benched 过滤，行 = member/isLeader/presence/statusTextSource——复用 use-seats-data 同源派生）。
+- **`studio-page/component-squad-status-entry.tsx` NEW（187 行）**：入口 = squad 图标 + running badge（**0 态不显示数字**，绝对定位叠加不占文档流）+ 面板（running 上 / idle 下分区 + presence 文字 + hover chat icon opacity 保留占位 + 整行 button）+ 外部点击/Esc 关闭 + 打开 refreshDetail fire-and-forget + detail null → loading + 无 Provider fail-safe 不渲染。testid：squad-status-entry / squad-status-panel / squad-status-row-{memberId}。
+- **`studio-page/squad-status-provider.tsx` NEW（86 行，C1 拆分）**：memberStateMap 派生（遍历 detail.members sessionId → stateMap[sid]，**值比较逐项比对返 lastRef 稳定引用**——非成员 SSE 引用不变）+ refreshDetail useCallback（selectedSquadId + reloadDetail）+ value useMemo——包 chat 子树，**不新增 SSE 订阅**（复用 page-studio 已订阅的 session_meta `_all`）。
+- **`studio-page/page-studio.tsx`（275 → 295 行）**：chat 分支包 `<SquadStatusProvider detail stateMap onEnterChat reloadDetail selectedSquadId>`（仅 chat，seats 不包）；onBack 改 useCallback（`handleChatBack`，deps chatBackSquadId 派生值 + fallbackToSeats，稳定引用供 memo）；onEnterChat = `handleSquadEnterChat` useCallback（setMainView chat 语义）。
+- **`studio-page/component-studio-chat-router.tsx`**：导出改 `memo(StudioChatRouterImpl)`——props（node/prefill/onBack）引用稳定 → **page-studio SSE re-render 不级联 chat 树**（消息区/输入区零 re-render）；内部 useChatChrome 订阅不受影响；key={sessionId} remount 保留。
+- **`studio-page/section-studio-chat.tsx`**：topbarLeft 恒渲染——单聊 = SquadStatusEntry + MemberAvatar+name+tag；群聊 = SquadStatusEntry + 显式 ChatSessionTopbarLeft（readOnly 缺省 chrome.readOnly，与 defaultTopbarLeft 等价）。
+- **`studio-page/component-seats-panel.tsx`**：buildMemberChatNode 改调 squad-status-utils 公共 helper（DRY，行为逐字节一致，签名保留）。
+- **i18n**：`studio:squadStatus.ariaLabel`（成员状态）/ `ariaLabelRunning`（成员状态，{{count}} 个运行中）双语同步。
+- **测试**：squad-status-utils.test.ts（13 用例）+ component-squad-status-entry.test.tsx（14 用例）+ squad-status-provider.test.tsx（8 用例，锁定「非成员 SSE 引用不变」验收点）+ section-studio-chat.test.tsx 断言更新（topbarLeft 恒渲染）+ seats 回归。
+- **代码↔spec 偏离核实（doc-modifier 阶段 5）**：SquadStatusContextValue / useSquadStatus fail-safe / buildMemberChatNode DRY / deriveRunningCount 含 leader / derivePanelRows 分区 / badge 0 态 + 绝对定位 / aria-label / 面板 refreshDetail / 外部点击+Esc / memo 阻断 / onBack useCallback / memberStateMap 值比较 / Provider 仅 chat / topbarLeft 恒渲染 / seats helper 全部与 change_plan 一致 ✓；偏离 2 项等价合理（PanelRow presence 字段 = seats fallback 键依赖 / i18n +2 键 ariaLabel）；C1 拆分（page-studio 326→295 + squad-status-provider 86 行）等价合理，详见 change_log.md 偏离记录。`section-studio-chat.md` / `component-seats-panel.md` / `00-app-guide.md` / 新组件 spec 已同步，无静默偏离。
+- 详情：`specs/tech/version_logs/v0.0.268/change_plan.md`（method 级契约）+ `specs/tech/version_logs/v0.0.268/change_log.md`；PRD `specs/prd/version_logs/v0.0.268.squad_status_nav/prd.md`
+
+## 2026-08-06 · v0.0.263（workspace symlink 浏览 + 内置 editor 放开格式限制 — 链式授权 + handleOpen 新语义 + symlink 渲染 + 二进制降级）
+
+- **后端 `session-workspace-path.ts` NEW（whitelistResolve 迁出 + 链式授权解析）**：step1 字符串前缀检查保留（挡 `../` + 绝对路径注入）；step2 从 realRoot 逐段 resolve——每段 `lstatSync` 判 symlink → 命中则 `realpathSync` 授权该目标为继续解析的根。workspace 内存在的 symlink = 用户放置 = 授权（目标可在 workspace 外）；4 处调用点（tree/open/watch/file）自动统一；无 symlink 段时与旧 realpathSync 等价（普通路径零行为变化）；broken symlink → not_found。watch/file 仅 import 路径改 `./session-workspace-path`（零逻辑改动）。
+- **`session-workspace.ts`**：WsTreeNode 加可选 `isSymlink?: boolean` + `linkTarget?: string`（type 仍 statSync 跟随后的真实类型 'file'|'dir'，枚举不变）；handleWorkspaceTree 节点 `lstatSync().isSymbolicLink()` 判 isSymlink + `realpathSync` 算 linkTarget（仅 symlink 节点）；过滤按节点名不变。前端 `workspace-types.ts` 对齐同字段。
+- **`lib/file-format.ts`**：新增 `isRemoteLinkPath(path)`（`.url` 大小写不敏感 → true）；isBuiltinEditable **保留原 12 格式语义**（link-target.ts markdown 链接点击分发 v0.0.253 契约不变），仅注释更新说明「workspace 文件树打开不再用它判定」。
+- **`lib/remote-link.ts` NEW**：`parseUrlFileContent(content)`（正则 `/(https?:\/\/[^\s]+)/i` 首个命中 → URL；无命中 → null）+ `openRemoteLink(sessionId, path)`（readWorkspaceFile → parse → openLinkTarget(url) Electron shell.openExternal / window.open fallback；嗅探失败返 `{opened:false}` 供降级）。
+- **`section-workspace-panel.tsx` handleOpen 新语义**：`type==='file'` → ① `isRemoteLinkPath` → openRemoteLink（失败降级 editor）② 本地文件**一律进 editor**（任意扩展名，含 symlink；`format: getFileFormat(path) ?? 'txt'`，fallback 从 'md' 改 'txt'——unsupported → plain `<pre>` 防二进制当 markdown）；`type==='dir'`（含 symlink→dir）→ openWorkspaceItem kind='folder' 不变（后端链式放行）。
+- **`component-ws-tree-item.tsx` symlink 渲染**：isSymlink → ① link 角标（absolute 右上角叠加，`.ws-ico` 槽位固定宽 13px 不占位——布局稳定性 MANDATORY，`data-testid="symlink-badge-{path}"`）② tooltip `title="→ {linkTarget}"`（i18n `workspace.tree.symlinkTooltip`）③ 交互不变（symlink→dir 有 twisty 可展开；hover 打开照常；排序归属真实类型分组不变）。
+- **`component-ws-file-editor.tsx` 二进制降级**：readWorkspaceFile 后 `looksBinary(content)`（NUL `\u0000` 或替换符 `\uFFFD` 占比 >5%）→ 占位 pill「二进制文件无法预览」（i18n `workspace.mdEditor.binaryUnsupported`），不渲染 editor modal。
+- **i18n**：`workspace.tree.symlinkTooltip`（"→ {{target}}"）+ `workspace.mdEditor.binaryUnsupported`（en "Binary file cannot be previewed" / zh "二进制文件无法预览"）双语同步。
+- **代码↔spec 偏离核实（doc-modifier 阶段 5）**：链式授权（step1+step2）/ broken→not_found / isSymlink+linkTarget 可选字段 / type 真实类型 / isRemoteLinkPath 纯函数 / isBuiltinEditable 保留 / parseUrlFileContent 正则 / openRemoteLink opened:false / handleOpen 分流 / format??'txt' / symlink 角标+tooltip / looksBinary >5% / i18n 双语全部与 change_plan 一致 ✓；唯一偏离 = isBuiltinEditable 语义保留（架构决策②明确记录 + 已上报 orchestrator，非静默）。2 条后端测试预期反转（symlink 越界 400→200）= 本版本预期行为变更。`component-workspace-panel.md` §4.4+§6.5 / api §2.6 / session_workspace §6 / manager watch 策略 / app-guide 已按实际实现同步。
+- 详情：`specs/tech/version_logs/v0.0.263/change_plan.md`（method 级契约）+ `specs/tech/version_logs/v0.0.263/change_log.md`；PRD `specs/prd/version_logs/v0.0.263.workspace_symlink_browse/prd.md`
+
+## 2026-08-06 · v0.0.262（聊天滚动引导气泡 + 自动滚动跟丢修复 — hook 签名扩展 + 内容签名 autoScroll + rAF 合并）
+
+- **`use-message-scroll-pagination.ts` 返回签名扩展**：`{ onScroll }` → `{ onScroll, nearBottom, scrollToBottom }`（新增字段向后兼容）。`nearBottom` = `useState(true)` React state（onScroll 内 `setNearBottom(scrollHeight - scrollTop - clientHeight <= 120)`，setState 值去重防滚动事件风暴）；`scrollToBottom(behavior='auto')` = `el.scrollTo({top: scrollHeight, behavior})` + 同步 `nearBottom=true`（气泡点击滚底后即时消失；编程 scrollTo 不触发 scroll 事件需显式同步）。
+- **autoScroll 触发语义 = 内容变化（跟丢修复核心）**：`autoScrollDeps` 由 caller 传内容签名 `${rows.length}:${textLenSum}`（渲染视图 rows 派生，tool-batch 无 text 跳过）→ 新消息到达 **OR** 既有消息内容增长（流式 `text_block_delta` 同 rows.length 内容变）都触发滚底；旧 `rows.length` 单维度是生成跟丢根因。hook 内 **rAF 合并节流**（cancel + requestAnimationFrame + cleanup cancel，每帧最多一次滚底）。三不变量保留（isLoadingMore 跳过 / wasLoadingMoreRef / nearBottomRef 门控）。
+- **`component-scroll-guide-bubble.tsx` NEW（ScrollGuideBubble）**：`visible = !nearBottom && hasMessages`；文案 = runActive ? 「新消息」: 「回到底部」；absolute 定位不占文档流（布局稳定性）；visible 用 opacity/pointer-events 过渡不 unmount（动画平滑）；button 语义 + aria-label。
+- **`component-message-stream.tsx`**：contentSignature useMemo（`${rows.length}:${textLenSum}`）→ autoScrollDeps；解构 nearBottom/scrollToBottom；scroll 容器外包 relative wrapper + absolute 挂气泡（scroll div className 原样保留，BaseChatPage 骨架零改动）。
+- **`build-render-rows.ts` NEW（79 行纯函数）**：`buildRenderRows(elements, elementBatch, batches)` + `RenderRow` 类型导出——message-stream 超 300 行上限（code-review Critical）触发抽离，纯机械抽取零逻辑改动。
+- **i18n**：`chat.json` 顶层新增 `scrollGuide` 对象（en + zh-CN 双语）：`newMessage` / `backToBottom` / `ariaLabel.{newMessage,backToBottom}`。
+- **代码↔spec 偏离核实（doc-modifier 阶段 5）**：hook 签名 / 阈值 120 / rAF 合并 / 三不变量 / contentSignature（tool-batch 跳过）/ 气泡 visible / 不 unmount / button+aria-label / i18n 双语全部与 change_plan 一致 ✓；ariaLabel 嵌套键（原计划单键）语义等价 Minor 记录不修 ✓。`_overview.md` 新建 §4.5 滚动权威章节（代码注释既有引用补成文）+ 新组件 spec + app-guide 操作语义，无静默偏离。
+- 详情：`specs/tech/version_logs/v0.0.262/change_plan.md`（method 级契约）+ `specs/tech/version_logs/v0.0.262/change_log.md`；PRD `specs/prd/version_logs/v0.0.262.scroll_guide_bubble/prd.md`
 
 ## 2026-08-04 · v0.0.253（markdown 链接点击分发 — link-target lib 单一权威 + ChatLinkHandlerContext 透传 + 内置只读 viewer 挂载）
 

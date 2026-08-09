@@ -1,143 +1,139 @@
 /**
- * component-seats-body —— SeatsPanel seats tab 主体（双列指挥台）
+ * component-seats-body —— SeatsPanel seats tab 主体（v0.0.288 左竖条 + 右全景）
  * 参考: specs/ui/components/studio-page/component-seats-body.md
- *       reqs/[working] v0.0.240.squad_task/demo-home.html（.seats / .col / .roster，视觉契约）
  *
- * 职责：
- *   左列 seats-side（296px）= 队长 mini 卡（SeatCard）+ TokenWidget（图文组件，整卡点击进 token-stats）
- *   右列 roster 白卡 = roster 头（成员计数 N=当前视图行数 + 视图筛选开关 + 「＋ 新增成员」按钮）
- *   + 行列表（SeatRowView × N，仅 mate）。mates=0 → roster 体内 seats-empty 占位。
- * 边界：纯展示 + 回调；数据由 SeatsPanel 通过 use-seats-data 派生后传入（含视图过滤，本组件零过滤）。
+ * 职责（v0.0.288 重构）：
+ *   左列（296px，flex-col gap）= TokenWidget（上）+ 成员列表卡（下）
+ *     - 成员卡头部：左标题「成员·N」+ 右组右对齐（在岗/全部 → 群聊图标(icon-only) → 加号(icon-only)）
+ *     - 成员卡体：MemberRosterList（三分区 running/idle/benched，showBenched=view==='all'）
+ *   右列 = PanoramaRoute（overflow-hidden + min-w-0，不横滑）
+ *   队长卡删除——队长入 MemberRosterList 行内 isLeader badge 区分
+ * 边界：纯展示 + 回调；数据由 SeatsPanel 传入（detail + memberStateMap → derivePanelRows 派生三分区）。
  */
 import type { ReactNode } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Member, SquadDetail } from './squad-types';
+import type { SquadDetail } from './squad-types';
+import type { SessionState } from '../chat-page/types';
 import type { ChatNode } from './chat-node';
-import type { SeatRow, SeatStatsData, SeatsView } from './use-seats-data';
-import { SeatCard } from './component-seat-card';
-import { SeatRowView } from './component-seat-row';
+import type { SeatsView } from './use-seats-data';
 import { TokenWidget } from './component-token-widget';
 import { SeatsViewSwitch } from './component-seats-view-switch';
+import { MemberRosterList } from './component-member-roster-list';
+import { derivePanelRows } from './squad-status-utils';
+import { PanoramaRoute } from './component-panorama-route';
 import { Icon } from './studio-icons';
 
 export interface SeatsBodyProps {
   detail: SquadDetail;
-  seats: SeatRow[];
-  leaderRow: SeatRow | null;
-  mateRows: SeatRow[];
-  stats: SeatStatsData;
-  /** 当前视图（active=在岗 / all=全部），SeatsPanel state 注入（受控，本组件不持） */
+  /** 成员 session state map（derivePanelRows 需要） */
+  memberStateMap: Record<string, SessionState>;
+  /** 当前视图（active=在岗 / all=全部），控制 showBenched */
   view: SeatsView;
-  /** 视图切换回调（透传 SeatsViewSwitch.onChange；过滤在 SeatsPanel 单点） */
   onViewChange: (v: SeatsView) => void;
   onEnterChat: (node: ChatNode) => void;
   onOpenGroupChat: (node: ChatNode) => void;
   /** [v0.0.194] Token 统计入口（TokenWidget 整卡点击） */
   onOpenTokenStats?: (squadId: string) => void;
-  onEditMember: (m: Member) => void;
-  onBenchMember: (m: Member) => void;
-  onDeployMember: (id: string) => void;
   onHire: () => void;
   buildMemberChatNode: (memberId: string) => ChatNode | null;
   buildGroupChatNode: () => ChatNode;
-  /** 右键 → 父级浮层菜单（复制 sessionId）。坐席卡/行 + 群聊入口 link 共用；缺省 → 不接右键 */
+  /** 全景「更多」tab 的「去群聊 @leader」透传 */
+  onAtLeader: () => void;
+  /** 右键 → 父级浮层菜单（复制 sessionId） */
   onContextMenu?: (sessionId: string, x: number, y: number) => void;
 }
 
-/** seats tab 主体（双列指挥台） */
+/** seats tab 主体（v0.0.288 左竖条 + 右全景） */
 export function SeatsBody(props: SeatsBodyProps): ReactNode {
   const { t } = useTranslation('studio');
   const {
-    detail, leaderRow, mateRows, view, onViewChange,
+    detail, memberStateMap, view, onViewChange,
     onEnterChat, onOpenGroupChat, onOpenTokenStats,
-    onEditMember, onBenchMember, onDeployMember, onHire,
-    buildMemberChatNode, buildGroupChatNode,
-    onContextMenu,
+    onHire, buildMemberChatNode, buildGroupChatNode,
+    onAtLeader, onContextMenu,
   } = props;
 
-  // roster 头计数：成员 N = mateRows.length（队长不计）——跟随当前视图（mateRows 已被 panel 按视图过滤）
-  const memberCount = mateRows.length;
+  // 三分区派生（首页统一用 derivePanelRows，替代旧 deriveViewRows；含 leader 行）
+  const rows = useMemo(() => derivePanelRows(detail, memberStateMap), [detail, memberStateMap]);
+  // [v0.0.292] 成员计数 = 当前视图实际行数（含队长）——删 288 的 nonLeaderCount 排除逻辑
+  const memberCount = view === 'all'
+    ? rows.running.length + rows.idle.length + rows.benched.length
+    : rows.running.length + rows.idle.length;
+
+  const groupChatEnabled = detail.enableGroupChat !== false;
 
   return (
-    <div className="px-6 py-5">
-      <div className="grid grid-cols-[296px_minmax(0,1fr)] items-start gap-5">
-        {/* 左列：队长 mini 卡 + token 小组件 */}
-        <div className="flex flex-col gap-3.5">
-          {leaderRow && (
-            <SeatCard
-              row={leaderRow}
-              onEnter={() => {
-                const n = buildMemberChatNode(leaderRow.member.id);
-                if (n) onEnterChat(n);
-              }}
-              /* 群聊入口（v0.0.194 挪入队长卡操作行）：点击开群聊；右键复制 squadChat sessionId */
-              onOpenGroupChat={() => onOpenGroupChat(buildGroupChatNode())}
-              onGroupChatContextMenu={
-                onContextMenu
-                  ? (x, y) => onContextMenu(detail.squadChatSessionId, x, y)
-                  : undefined
-              }
-              onEdit={onEditMember}
-              onDeploy={onDeployMember}
-              onContextMenu={onContextMenu}
-              /* onBench 不传 —— leader 硬规则不可 bench（UI 双层拒） */
-            />
-          )}
-          <TokenWidget
-            squadId={detail.id}
-            detail={detail}
-            onOpenTokenStats={onOpenTokenStats ?? (() => {})}
-          />
-        </div>
+    <div className="flex gap-5 px-6 py-5">
+      {/* 左竖条：296px（token 卡上 + 成员卡下） */}
+      <div className="flex w-[296px] shrink-0 flex-col gap-3.5">
+        <TokenWidget
+          squadId={detail.id}
+          detail={detail}
+          onOpenTokenStats={onOpenTokenStats ?? (() => {})}
+        />
 
-        {/* 右列：roster 白卡（头 + mate 行列表） */}
-        <div className="overflow-hidden rounded-xl border border-border bg-surface">
-          {/* roster 头：成员计数（N=当前视图行数）+ 视图筛选开关（恒渲染）+ 「＋ 新增成员」按钮 */}
+        {/* 成员列表卡（[v0.0.292] 删 overflow-hidden，高度随内容撑开） */}
+        <div className="rounded-xl border border-border bg-surface">
+          {/* 成员卡头部：左标题「成员·N」+ 右组右对齐（在岗/全部 → 群聊图标 → 加号） */}
           <div className="flex items-center border-b border-border px-4 py-2.5">
             <span className="text-[13.5px] font-semibold text-fg">
               {t('seats.sectionMembers', { count: memberCount })}
             </span>
             <div className="ml-auto flex items-center gap-3">
               <SeatsViewSwitch view={view} onChange={onViewChange} />
+              {/* 群聊图标按钮（icon-only 无文字；enableGroupChat !== false 时渲染） */}
+              {groupChatEnabled && (
+                <button
+                  type="button"
+                  data-action-key="studio.squad.open-group-chat"
+                  data-testid="seats-group-chat-btn"
+                  onClick={() => onOpenGroupChat(buildGroupChatNode())}
+                  onContextMenu={
+                    onContextMenu
+                      ? (e) => {
+                          e.preventDefault();
+                          onContextMenu(detail.squadChatSessionId, e.clientX, e.clientY);
+                        }
+                      : undefined
+                  }
+                  className="flex items-center justify-center rounded-md p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-fg focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)]"
+                  aria-label={t('squadTree.groupChat')}
+                >
+                  <Icon name="chat" size={14} />
+                </button>
+              )}
+              {/* 加号图标按钮（icon-only 无文字，新增成员） */}
               <button
                 type="button"
                 data-action-key="studio.member.hire"
+                data-testid="seats-hire-btn"
                 onClick={onHire}
-                className="flex items-center gap-1 rounded-md border border-border bg-surface px-3 py-1 text-[12.5px] font-medium text-fg transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)]"
+                className="flex items-center justify-center rounded-md p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-fg focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)]"
+                aria-label={t('seats.addCard.title')}
               >
-                <Icon name="plus" size={12} />
-                {t('seats.addCard.title')}
+                <Icon name="plus" size={14} />
               </button>
             </div>
           </div>
 
-          {/* mate 行列表（seats-mates-grid 语义=行列表容器，恒渲染；空态内含 seats-empty） */}
-          <div>
-            {mateRows.length === 0 ? (
-              <div
-
-                className="px-6 py-10 text-center text-[12.5px] text-muted"
-              >
-                {t('seats.emptyMembers')}
-              </div>
-            ) : (
-              mateRows.map((row) => (
-                <SeatRowView
-                  key={row.member.id}
-                  row={row}
-                  onEnter={() => {
-                    const n = buildMemberChatNode(row.member.id);
-                    if (n) onEnterChat(n);
-                  }}
-                  onEdit={onEditMember}
-                  onBench={onBenchMember}
-                  onDeploy={onDeployMember}
-                  onContextMenu={onContextMenu}
-                />
-              ))
-            )}
+          {/* 成员列表体（MemberRosterList 三分区） */}
+          <div className="p-1">
+            <MemberRosterList
+              rows={rows}
+              showBenched={view === 'all'}
+              onEnterChat={(memberId) => {
+                const n = buildMemberChatNode(memberId);
+                if (n) onEnterChat(n);
+              }}
+            />
           </div>
         </div>
+      </div>
+
+      {/* 右主体：全景（[v0.0.292] 加外层卡片边界；[v0.0.294] 去掉 flex-1/min-w-0 让卡片随内容撑开，整页滚动由外层 overflow-y-auto 负责） */}
+      <div className="self-start overflow-x-auto rounded-xl border border-border bg-surface p-4">
+        <PanoramaRoute squadId={detail.id} onAtLeader={onAtLeader} />
       </div>
     </div>
   );

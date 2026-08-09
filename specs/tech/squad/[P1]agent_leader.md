@@ -22,8 +22,8 @@ since: v0.0.33.2
 |---|---|
 | **identity** | leader 人设（团队协调者） |
 | **rules** | 团队管理协议（hire/bench/edit 规则 + **bench member 须告知用户** + 不可换 leader）+ **"消息从哪来到哪去"**（a2a_protocol §4.1：a2a→send_message 回；非 a2a→自己 session 出 final text；主动问 user 在群聊）+ 升级规则（何时向老板汇报/提问） |
-| **reachable_agents** | ★ 动态注入可达对象（`../multi_agent/[P1]a2a_protocol.md §3`）：**squadchat + 同 squad 所有 member**（不含 user——user 在 session UI 旁） |
-| **team_status** | ★ **团队当前状态段**（`squad_team_status` reminder）：只列 session 正在 running 的成员及其 presence 标记（`member.currentWork`，可能为空）；睡着的不展示。详 `squad_reminder_providers.md §3` |
+| **squad_agents_status** | ★ 动态注入统一全员状态块（`../multi_agent/[P1]a2a_protocol.md §3`）：**SquadChat + 同 squad 所有 member**（不含 user——user 在 session UI 旁）；全员列出 running/idle + presence |
+| **team_status** | ★ **团队当前状态段**（`squad_agents_status` reminder，[v0.0.273] 取代旧 `squad_team_status`）：统一全员状态块——squad/leader/mate/subagent 分派，成员行 `- {name} ({role}, sessionId) · {running|idle} · presence`；SquadChat 行随 270 门控显隐；全员列出（idle 不消失）+ benched 过滤。详 `squad_reminder_providers.md §3` |
 | **skills** | 管理/规划类（可选） |
 | **tool_guidance** | send_message + team(hire/deploy/bench/edit) + **presence(set/clear)** |
 | **context** | 成员花名册 + reports |

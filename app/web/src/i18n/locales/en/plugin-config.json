@@ -153,9 +153,8 @@
           "workspace": { "description": "System reminder: workspace state (current workspace / grep context)" },
           "tool_error": { "description": "System reminder: tool error hint (guidance when tool invocation fails)" },
           "todo": { "description": "System reminder: todo list (todo progress tracking hint)" },
-          "reachable_agents": { "description": "[v0.0.33.2] reachable_agents reminder (derives a2a peers by sessionType; user never included; volatile; preserves system prompt cache)" },
+          "squad_agents_status": { "description": "[v0.0.273] Squad unified all-member status reminder (dispatches by leader/mate/squad/subagent; lists all members running/idle + presence; SquadChat row gated by enableGroupChat; replaces reachable_agents + squad_team_status)" },
           "squad_workspace": { "description": "[v0.0.111] Squad team workspace reminder (leader + mate; injects team drive root <dataDir>/squads/<squadId>; coexists with personal workspace)" },
-          "squad_team_status": { "description": "[v0.0.116] Squad team status reminder (leader only; lists only members whose sessions are running, with their presence/currentWork; emitted every round)" },
           "squad_task": { "description": "[v0.0.240] Squad task reminder (leader sees all active tasks / mate sees owner=me ∪ blocking-me; task = panorama builtin entity; archived excluded; emitted every round, dedup-reduced)" },
           "threshold_should_compact": {
             "description": "[v0.0.40] Compact predicate: (totalTokens + maxOutputTokens) / tokenLimit > compactRatio (default 0.6) → true; proactive compaction, not wall-bump",

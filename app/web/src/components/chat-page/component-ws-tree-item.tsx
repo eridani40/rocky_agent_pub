@@ -89,16 +89,28 @@ export function ComponentWsTreeItem({
       )}
 
       {/* icon：文件夹 gold（展开变 folderOpen）/ 文件 muted（§6.5 .ws-ico） */}
-      <span className={'ws-ico inline-flex shrink-0 ' + (isDir ? 'dir text-gold' : 'file text-muted')}>
+      <span className={'ws-ico inline-flex shrink-0 relative ' + (isDir ? 'dir text-gold' : 'file text-muted')}>
         {isDir ? (
           expanded ? <FolderOpenIcon size={13} /> : <FolderIcon size={13} />
         ) : (
           <FileIcon size={13} />
         )}
+        {/* [v0.0.263] symlink 角标：absolute 叠加图标右上角（不占位，不推动 name 位移）；
+            title 由外层 item 提供（含 linkTarget），此处仅视觉标记 */}
+        {node.isSymlink && (
+          <span
+            data-testid={`symlink-badge-${testidPath}`}
+            aria-hidden
+            className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-accent border border-surface pointer-events-none"
+          />
+        )}
       </span>
 
-      {/* name（§6.5 .ws-name，12.5px ellipsis） */}
-      <span className="ws-name flex-1 min-w-0 text-[12.5px] text-fg-2 whitespace-nowrap overflow-hidden text-ellipsis">
+      {/* name（§6.5 .ws-name，12.5px ellipsis）；[v0.0.263] symlink hover tooltip 显示目标绝对路径 */}
+      <span
+        title={node.isSymlink && node.linkTarget ? t('chat:workspace.tree.symlinkTooltip', { target: node.linkTarget }) : undefined}
+        className="ws-name flex-1 min-w-0 text-[12.5px] text-fg-2 whitespace-nowrap overflow-hidden text-ellipsis"
+      >
         {node.name}
       </span>
 

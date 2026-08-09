@@ -151,6 +151,13 @@ export interface SessionConfig {
    */
   browserDriverRegistry?: unknown;
   /**
+   * [v0.0.264] BrowserInstanceManager 引用（headless/managed-profile 常驻浏览器实例管理器）。
+   * browser tool 非 attach 前置校验读；由 session-config 构造期注入；
+   * 缺省 → browser headless/managed-profile 报「未注册」isError。
+   * 类型用 unknown 避免本文件耦合 tools/browser（鸭子类型）。
+   */
+  browserInstanceManager?: unknown;
+  /**
    * [v0.0.204 T2-B2] SessionConfig.scope 死字段已删（零消费；spec agent_tools §2.2/2.3 描述的
    * agent-loop stageToolExecution 按 scope 过滤 allowedTools 已不存在——profile toolBound 已全权）。
    * subagent 不可见 agent 工具由 profile `playground-rocky.subagent.main.yaml` toolBound 不含 'agent' 保证。

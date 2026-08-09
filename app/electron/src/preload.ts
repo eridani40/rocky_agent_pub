@@ -39,10 +39,12 @@ contextBridge.exposeInMainWorld('rockyComputer', {
 
 /**
  * v0.0.253：暴露通用「打开外部资源」能力到 window.rockyShell（package_structure §4.4）。
- * 三方法经 ipcRenderer.invoke 对应主进程 shell:* channel（open-external-ipc.ts）：
+ * 五方法经 ipcRenderer.invoke 对应主进程 shell:* channel（open-external-ipc.ts）：
  *   - openExternal(url) → 系统默认浏览器（web scheme）
  *   - openPath(path)    → 系统默认应用（绝对路径，main 侧展开 ~ / file://）
  *   - readFileText(path) → 读绝对路径 utf8 文本喂内置 viewer
+ *   - writeFileText(path, content) → 写绝对路径 utf8 文本（覆盖，last-write-wins）
+ *   - readFileBinary(path) → 读绝对路径二进制 → base64（图片 viewer）
  * 前端类型声明镜像见 app/web/src/types/rocky-shell.d.ts（IPC 边界契约）。
  * window.rockyShell 不存在 = 非 Electron 环境 → 前端降级（web→window.open 兜底 / local→系统打开 / 无内置 viewer）。
  */
@@ -50,4 +52,8 @@ contextBridge.exposeInMainWorld('rockyShell', {
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', { url }),
   openPath: (path: string) => ipcRenderer.invoke('shell:openPath', { path }),
   readFileText: (path: string) => ipcRenderer.invoke('shell:readFileText', { path }),
+  // [v0.0.280] 写绝对路径文本（utf8 覆盖，last-write-wins）——absolute 源编辑器保存用
+  writeFileText: (path: string, content: string) => ipcRenderer.invoke('shell:writeFileText', { path, content }),
+  // [v0.0.280] 读绝对路径二进制 → base64（≤2MB）——absolute 源图片 viewer 用
+  readFileBinary: (path: string) => ipcRenderer.invoke('shell:readFileBinary', { path }),
 });

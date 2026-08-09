@@ -4,6 +4,7 @@
  *       specs/ui/components/studio-page/{squad-autonomy-toggle,heartbeat-config,budget-meter,auto-work-history}.md
  *
  * [v0.0.116] 新增 HeartbeatConfigSection 块（squad 级心跳配置）；BudgetMeter 加 budget/onSaveBudget prop。
+ * [v0.0.292] GroupChatToggle 迁出（挪入 manage-tab）。本 tab 从五块→四块。
  * 职责：autowork tab 的组合容器——垂直堆叠各功能块。
  * 边界：纯容器，各块各自管自己的数据流；容器只透传 squad detail + onSaveMeta。
  */

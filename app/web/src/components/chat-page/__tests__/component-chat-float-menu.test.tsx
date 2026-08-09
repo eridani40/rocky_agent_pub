@@ -13,10 +13,15 @@
  *     useSkillsCatalog 恒挂载 + 点击挂 ComponentSkillsModal；hideCron 不影响 skills 项
  *   - [v0.0.223] todo 第 4 菜单项（skills 下方）：useTodoCrud 恒挂载 + badge=pendingCount +
  *     点击挂 ComponentTodoModal；hideCron 不影响 todo 项
+ *   - [v0.0.269] 团队状态第 4 菜单项（skills 下方 todo 上方——todo 保持最后）：有 Provider →
+ *     渲染 squad 图标 + running badge（deriveRunningCount 口径）+ 点击挂 ComponentSquadStatusModal
+ *     （currentMemberId=chrome.memberId 防套娃）；无 Provider → 按钮不渲染（fail-safe，playground/academy）
  *
  * mock 策略：vi.hoisted + __dirname 派生绝对路径 mock use-memory-crud / use-cron-crud /
  * use-skills-catalog / use-todo-crud + mock 四个弹层组件（component-memory-modal /
- * component-cron-modal / component-skills-modal / component-todo-modal）。
+ * component-cron-modal / component-skills-modal / component-todo-modal）+
+ * [v0.0.269] mock use-squad-status-context（useSquadStatus；缺省 null = 无 Provider fail-safe，
+ * 既有 4 图标顺序用例不破坏）+ mock component-squad-status-modal。
  */
 import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
@@ -30,6 +35,10 @@ const memoryModalMocks = vi.hoisted(() => ({ ComponentMemoryModal: vi.fn() }));
 const cronModalMocks = vi.hoisted(() => ({ ComponentCronModal: vi.fn() }));
 const skillsModalMocks = vi.hoisted(() => ({ ComponentSkillsModal: vi.fn() }));
 const todoModalMocks = vi.hoisted(() => ({ ComponentTodoModal: vi.fn() }));
+const squadStatusMocks = vi.hoisted(() => ({
+  useSquadStatus: vi.fn(),
+  ComponentSquadStatusModal: vi.fn(),
+}));
 
 const memoryCrudPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../use-memory-crud'));
 const cronCrudPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../use-cron-crud'));
@@ -39,6 +48,8 @@ const memoryModalPath = vi.hoisted(() => require('node:path').resolve(__dirname,
 const cronModalPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../component-cron-modal'));
 const skillsModalPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../component-skills-modal'));
 const todoModalPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../component-todo-modal'));
+const squadCtxPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../studio-page/squad-status-context'));
+const squadModalPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../studio-page/component-squad-status-modal'));
 
 vi.mock(memoryCrudPath, () => memoryCrudMocks);
 vi.mock(cronCrudPath, () => cronCrudMocks);
@@ -48,6 +59,8 @@ vi.mock(memoryModalPath, () => memoryModalMocks);
 vi.mock(cronModalPath, () => cronModalMocks);
 vi.mock(skillsModalPath, () => skillsModalMocks);
 vi.mock(todoModalPath, () => todoModalMocks);
+vi.mock(squadCtxPath, () => ({ useSquadStatus: squadStatusMocks.useSquadStatus }));
+vi.mock(squadModalPath, () => ({ ComponentSquadStatusModal: squadStatusMocks.ComponentSquadStatusModal }));
 
 beforeAll(async () => {
   await initI18n('zh-CN');
@@ -101,6 +114,53 @@ function mkTodoCrud(pendingCount: number) {
   };
 }
 
+/** 团队状态 Context value（缺省 leader running + mate idle；deriveRunningCount=1） */
+function mkSquadCtx(over: Record<string, unknown> = {}) {
+  return {
+    detail: {
+      id: 'sq1',
+      name: 'Squad A',
+      description: '',
+      modelDefault: '',
+      leaderId: 'm-lead',
+      memberIds: ['m-lead', 'm1'],
+      members: [
+        { id: 'm-lead', squadId: 'sq1', sessionId: 's-lead', name: 'Bob', role: 'leader', state: 'deployed' },
+        { id: 'm1', squadId: 'sq1', sessionId: 's1', name: 'Alice', role: 'mate', state: 'deployed' },
+      ],
+      squadChatSessionId: 's-g',
+      version: 1,
+      createdAt: '',
+      updatedAt: '',
+      enableHeartBeat: false,
+    },
+    memberStateMap: { 's-lead': 'running', s1: 'idle' },
+    onEnterChat: vi.fn(),
+    refreshDetail: vi.fn(),
+    ...over,
+  } as never;
+}
+
+/** chrome 夹具（团队状态 Modal currentMemberId 来源） */
+function mkChrome(over: Record<string, unknown> = {}) {
+  return {
+    sessionId: 'sess-1',
+    kind: 'studio_member',
+    readOnly: false,
+    title: 'Alice',
+    titled: true,
+    tag: 'Squad A · mate',
+    sessionModel: null,
+    defaultModel: null,
+    effort: null,
+    approvalMode: null,
+    members: [],
+    memberId: null,
+    capabilities: {},
+    ...over,
+  } as never;
+}
+
 beforeEach(() => {
   memoryCrudMocks.useMemoryCrud.mockReset().mockReturnValue(mkMemoryCrud(0));
   cronCrudMocks.useCronCrud.mockReset().mockReturnValue(mkCronCrud([]));
@@ -117,6 +177,11 @@ beforeEach(() => {
   ));
   todoModalMocks.ComponentTodoModal.mockReset().mockImplementation(() => (
     <div>TODO_MODAL_STUB</div>
+  ));
+  // [v0.0.269] 团队状态：缺省 null = 无 Provider fail-safe（既有 4 图标顺序用例不破坏）
+  squadStatusMocks.useSquadStatus.mockReset().mockReturnValue(null);
+  squadStatusMocks.ComponentSquadStatusModal.mockReset().mockImplementation(() => (
+    <div>SQUAD_MODAL_STUB</div>
   ));
 });
 afterEach(() => cleanup());
@@ -270,6 +335,69 @@ describe('ComponentChatFloatMenu — todo 第 4 菜单项（v0.0.223）', () => 
   it('hideCron=true → cron 项不挂载但 todo 项仍挂载', () => {
     render(<ComponentChatFloatMenu sessionId="s1" hideCron />);
     expect(screen.queryByRole('button', { name: '定时任务' })).toBeNull();
+    expect(screen.getByRole('button', { name: '待办' })).toBeTruthy();
+  });
+});
+
+describe('ComponentChatFloatMenu — 团队状态第 4 菜单项（v0.0.269）', () => {
+  it('有 Provider → 第 4 项「团队状态」挂载（skills 与 todo 之间，todo 保持最后）', () => {
+    squadStatusMocks.useSquadStatus.mockReturnValue(mkSquadCtx());
+    render(<ComponentChatFloatMenu sessionId="s1" />);
+    const names = screen
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label'));
+    expect(names).toEqual(['长期记忆', '定时任务', '技能', '团队状态', '待办']);
+  });
+
+  it('running badge = deriveRunningCount（deployed 成员 isRunningState 计数含 leader；非 0 显示数字）', () => {
+    squadStatusMocks.useSquadStatus.mockReturnValue(mkSquadCtx()); // s-lead running → 1
+    render(<ComponentChatFloatMenu sessionId="s1" />);
+    expect(getBadge('团队状态')!.textContent).toBe('1');
+  });
+
+  it('running=0 → badge 不渲染（不占位）', () => {
+    squadStatusMocks.useSquadStatus.mockReturnValue(
+      mkSquadCtx({ memberStateMap: { 's-lead': 'idle', s1: 'idle' } }),
+    );
+    render(<ComponentChatFloatMenu sessionId="s1" />);
+    expect(getBadge('团队状态')).toBeNull();
+  });
+
+  it('无 Provider（useSquadStatus null）→ 团队状态按钮不渲染（fail-safe，playground/academy），其余 4 项仍在', () => {
+    squadStatusMocks.useSquadStatus.mockReturnValue(null);
+    render(<ComponentChatFloatMenu sessionId="s1" />);
+    expect(screen.queryByRole('button', { name: '团队状态' })).toBeNull();
+    expect(screen.getByRole('button', { name: '技能' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '待办' })).toBeTruthy();
+  });
+
+  it('点「团队状态」→ ComponentSquadStatusModal 挂载（currentMemberId = chrome.memberId，防套娃）', () => {
+    squadStatusMocks.useSquadStatus.mockReturnValue(mkSquadCtx());
+    render(<ComponentChatFloatMenu sessionId="s1" chrome={mkChrome({ memberId: 'm1' })} />);
+    expect(screen.queryByText('SQUAD_MODAL_STUB')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '团队状态' }));
+    expect(screen.getByText('SQUAD_MODAL_STUB')).toBeTruthy();
+    const props = squadStatusMocks.ComponentSquadStatusModal.mock.calls[0]![0] as {
+      currentMemberId?: string;
+    };
+    expect(props.currentMemberId).toBe('m1');
+  });
+
+  it('chrome 无 memberId（群聊）→ currentMemberId undefined（无自己行，全部显示 icon）', () => {
+    squadStatusMocks.useSquadStatus.mockReturnValue(mkSquadCtx());
+    render(<ComponentChatFloatMenu sessionId="s1" chrome={mkChrome({ memberId: null })} />);
+    fireEvent.click(screen.getByRole('button', { name: '团队状态' }));
+    const props = squadStatusMocks.ComponentSquadStatusModal.mock.calls[0]![0] as {
+      currentMemberId?: string;
+    };
+    expect(props.currentMemberId).toBeUndefined();
+  });
+
+  it('hideCron=true → cron 项不挂载但团队状态项仍挂载（与 skills/todo 同 gate 无关）', () => {
+    squadStatusMocks.useSquadStatus.mockReturnValue(mkSquadCtx());
+    render(<ComponentChatFloatMenu sessionId="s1" hideCron />);
+    expect(screen.queryByRole('button', { name: '定时任务' })).toBeNull();
+    expect(screen.getByRole('button', { name: '团队状态' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '待办' })).toBeTruthy();
   });
 });

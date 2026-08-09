@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
- * useCronCrud 单测（v0.0.131 T6）
+ * useCronCrud 单测（v0.0.131 T6 / v0.0.303 SSE 实时化改造）
  * 参考: specs/tech/version_logs/v0.0.131/change_plan.md A 组 + G 组
+ *       specs/tech/version_logs/v0.0.303/change_plan.md（SSE 订阅改造）
  *       app/web/src/components/chat-page/use-cron-crud.ts
  *       app/web/src/lib/__tests__/use-lifecycle.test.ts（startTimer→onTick fake timers 用法）
  *
@@ -10,15 +11,24 @@
  *   - toggle（enable/disable）后 refetch（重新 GET）
  *   - delete 后 refetch（重新 GET）
  *   - enabled=false（如群聊 hideCron）→ 零网络：listCronJobs 不调用，jobs 恒为 []
- *   - 60s poll 声明：onTick 到点重新 GET（startTimer intervalMs=60000 生效）
+ *   - SSE 订阅：mount → subscribe session_panel；收到 session_cron_changed → reload（重新 GET）
+ *   - 收到其他事件（session_usage_update）→ 不 reload
+ *   - 5min 漂移兜底 timer：startTimer intervalMs=300000 到点触发 onTick 重新 GET
  *
  * mock 策略（MEMORY test-vitest-mock-absolute-path）：vi.hoisted + __dirname 派生绝对路径 mock cron-api，
- * useLifecycle 本身不 mock（真实跑，验证 hook 端到端行为，含 60s timer）。
+ * sse-singleton mock（仿 use-usage.test.ts），useLifecycle 本身不 mock（真实跑）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { CronJobSummary } from '../../../lib/cron-api';
+import type { SessionEvent } from '../../../store/session-slice-reducer';
 
+const sse = vi.hoisted(() => ({
+  handlers: {} as Record<string, (f: { data: unknown }) => void>,
+  instances: 0,
+  destroyed: 0,
+  unsub: [] as string[],
+}));
 const apiMocks = vi.hoisted(() => ({
   listCronJobs: vi.fn(),
   createCronJob: vi.fn(),
@@ -27,8 +37,43 @@ const apiMocks = vi.hoisted(() => ({
   enableCronJob: vi.fn(),
   deleteCronJob: vi.fn(),
 }));
+const singletonPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../../lib/sse-singleton'));
 const apiPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../../lib/cron-api'));
 
+vi.mock(singletonPath, () => {
+  let subIdCounter = 0;
+  class FakeSseClient {
+    constructor() {
+      sse.instances++;
+    }
+    async connect() {
+      /* no-op */
+    }
+    async subscribe(topic: string, _group: string, handler: (f: { data: unknown }) => void) {
+      sse.handlers[topic] = handler;
+      const subId = `sub-${++subIdCounter}-${topic}`;
+      return { subId, topic, group: _group, unsubscribe: async () => { sse.unsub.push(topic); } };
+    }
+    async unsubscribe(handle: { subId?: string } | string) {
+      const subId = typeof handle === 'string' ? handle : handle?.subId;
+      if (subId) sse.unsub.push(subId);
+    }
+    destroy() {
+      sse.destroyed++;
+    }
+  }
+  let singleton: FakeSseClient | null = null;
+  return {
+    getSseClient: () => {
+      if (!singleton) singleton = new FakeSseClient();
+      return singleton;
+    },
+    _resetSseSingletonForTest: () => {
+      if (singleton) singleton.destroy();
+      singleton = null;
+    },
+  };
+});
 vi.mock(apiPath, () => apiMocks);
 
 import { useCronCrud } from '../use-cron-crud';
@@ -55,7 +100,16 @@ async function settle(): Promise<void> {
   });
 }
 
+/** 推一帧到 session_panel（仿 use-usage.test.ts pushPanel） */
+function pushPanel(evt: SessionEvent): void {
+  act(() => sse.handlers['session_panel']?.({ data: evt }));
+}
+
 beforeEach(() => {
+  sse.handlers = {};
+  sse.instances = 0;
+  sse.destroyed = 0;
+  sse.unsub = [];
   apiMocks.listCronJobs.mockReset().mockResolvedValue([]);
   apiMocks.disableCronJob.mockReset().mockResolvedValue({ id: 'j1', enabled: false });
   apiMocks.enableCronJob.mockReset().mockResolvedValue({ id: 'j1', enabled: true });
@@ -129,8 +183,42 @@ describe('useCronCrud — enabled=false 零网络', () => {
   });
 });
 
-describe('useCronCrud — 60s poll 声明', () => {
-  it('startTimer(intervalMs=60000) 到点触发 onTick 重新 GET', async () => {
+describe('useCronCrud — SSE 订阅 + session_cron_changed → reload', () => {
+  it('mount → subscribe session_panel', async () => {
+    renderHook(() => useCronCrud('s1'));
+    await settle();
+    expect(sse.handlers['session_panel']).toBeTruthy();
+  });
+
+  it('收到 session_cron_changed → reload（listCronJobs 再次调用）', async () => {
+    apiMocks.listCronJobs.mockResolvedValue([mkJob('j1')]);
+    renderHook(() => useCronCrud('s1'));
+    await settle();
+    expect(apiMocks.listCronJobs).toHaveBeenCalledTimes(1);
+
+    pushPanel({ type: 'session_cron_changed', sessionId: 's1', createdAt: 't1', data: {} });
+    await settle();
+
+    // SSE session_cron_changed → reload → 重新 GET
+    expect(apiMocks.listCronJobs).toHaveBeenCalledTimes(2);
+  });
+
+  it('收到其他事件（session_usage_update）→ 不 reload', async () => {
+    apiMocks.listCronJobs.mockResolvedValue([mkJob('j1')]);
+    renderHook(() => useCronCrud('s1'));
+    await settle();
+    expect(apiMocks.listCronJobs).toHaveBeenCalledTimes(1);
+
+    pushPanel({ type: 'session_usage_update', sessionId: 's1', createdAt: 't2', data: { current: 0, sub: {}, forked: {}, total: 0 } as never });
+    await settle();
+
+    // 其他事件不应触发 reload
+    expect(apiMocks.listCronJobs).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useCronCrud — 5min 漂移兜底 timer', () => {
+  it('startTimer(intervalMs=300000) 到点触发 onTick 重新 GET', async () => {
     vi.useFakeTimers();
     try {
       apiMocks.listCronJobs.mockResolvedValue([mkJob('j1')]);
@@ -140,13 +228,13 @@ describe('useCronCrud — 60s poll 声明', () => {
       });
       expect(apiMocks.listCronJobs).toHaveBeenCalledTimes(1);
 
-      // 未到 60s：不触发
+      // 未到 5min：不触发
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(59_000);
+        await vi.advanceTimersByTimeAsync(299_000);
       });
       expect(apiMocks.listCronJobs).toHaveBeenCalledTimes(1);
 
-      // 到 60s：onTick 触发第二次 GET
+      // 到 5min：onTick 触发第二次 GET
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_000);
       });
@@ -156,7 +244,7 @@ describe('useCronCrud — 60s poll 声明', () => {
     }
   });
 
-  it('enabled:false 时不声明 timer（推进 60s 无新增 GET）', async () => {
+  it('enabled:false 时不声明 timer（推进 5min 无新增 GET）', async () => {
     vi.useFakeTimers();
     try {
       renderHook(() => useCronCrud('s1', { enabled: false }));
@@ -164,7 +252,7 @@ describe('useCronCrud — 60s poll 声明', () => {
         await vi.advanceTimersByTimeAsync(0);
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(120_000);
+        await vi.advanceTimersByTimeAsync(300_000);
       });
       expect(apiMocks.listCronJobs).not.toHaveBeenCalled();
     } finally {

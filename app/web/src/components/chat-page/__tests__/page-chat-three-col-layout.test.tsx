@@ -64,6 +64,7 @@ vi.mock(chatApiPath, () => ({
   getWorkspaceTree: vi.fn(async () => ({ workspaceDir: '', tree: [] })),
   watchWorkspaceDir: vi.fn(async () => ({ ok: true })),
   unwatchWorkspaceDir: vi.fn(async () => ({ ok: true })),
+  watchWorkspaceSet: vi.fn(async () => ({ ok: true })),
 }));
 
 vi.mock(singletonPath, () => ({

@@ -9,6 +9,11 @@ updated: 2026-07-31
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
 
+## 2026-08-07 · v0.0.279（effort 覆盖链：成员 > 团队 effortDefault > 厂商默认）
+
+- **`[P0]llm_protocol_interface.md §3.8` 补 studio 覆盖链注记**：透传链后加「studio 覆盖链（[v0.0.279]）」——`buildSessionConfigFromDeps` 与 resolveModel 同区调 `resolveEffort(sessionPersist.effort, isStudio && squad ? squad.effortDefault : undefined)`（纯函数 session-config.ts L107-114）：成员显式档（low/high/max）→ 用之；否则团队 `squad.effortDefault`（low/high/max）→ 用之；否则 `undefined`（厂商默认，encode 不注入）。成员 `'default'` 与 `undefined` 同语义；resolve 时机与 model 一致（每次 `resolveConfigBySid` 现拉无 cache）；playground/academy/standalone 无 squad → 只 session 一层；subagent 继承父 resolve 结果不重复 resolve；`squad.effortDefault` 由 schema `required:false` + PATCH 校验双保证合法值。encode 层零改动（config.effort 已是 low/high/max/undefined）。
+- 详情：`specs/tech/version_logs/v0.0.279/change_plan.md`（12 行 method 级表）+ `change_log.md`
+
 ## 2026-07-31 · v0.0.230（model_resolve 收窄 academy 链去 app 默认兜底 — 群体级无应用层默认）
 
 - **`[P0]model_resolve.md` 收窄 academy 链**：`buildFallbackChain` academy 分支删第三档 `readPlaygroundDefault` push（session → classroom.defaultModel → throw）；`resolveModel` throw 按 sessionType 给引导文案（academy →「教室未配置默认模型，请先在教室设置中选择一个具体模型」；playground/studio 保持默认）。§1.1 解决的问题、§2 接口签名（classroom 注释）、§3 fallback 链表、§3.1 academy 不经 resolveDefaultModel、§4 原则 7/8、§6 错误体、§5 academy 同链均同步。app 默认是 playground 个体级概念，误用为群体级（academy/studio）默认档是错的（用户确认）；academy 对齐 studio 两档链。

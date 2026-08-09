@@ -158,3 +158,111 @@ describe('encodeAnthropicMessages — cache control 2bp', () => {
     expect(content[2]!.cache_control).toEqual({ type: 'ephemeral' });
   });
 });
+
+/**
+ * [v0.0.274] tool 消息带 reminder 的 encode 配合（R4 零改动复核固化，cache_control.md §3.2/§3.3）
+ * 背景：ingest 侧放宽 tool_result 也注入 reminder 后，encode 侧零改动必须配合成立——
+ *   encodeMessage 最末 message（role 不限）保留最末 reminder + bp#2 跳过 reminder 注入
+ *   tool_result 正文块 → tool 上加 reminder 不破坏 prompt caching。
+ * 校验点：
+ *   1. 最末 tool 消息带 reminder：wire 保留该 reminder + bp#2 落在 tool_result 正文（reminder block 无 cache_control）
+ *   2. 多 tool 轮次各带 reminder（模拟长 run）：wire 只保留最末一个，历史 reminder 全 drop
+ *   3. reminder 位置不变时 bp#2 落点稳定（cache 前缀稳定段不变）
+ */
+describe('v0.0.274 — tool 消息带 reminder 的 encode 配合', () => {
+  /** 构造一个 tool 轮次：assistant tool_call → tool_result + reminder（isSystemReminder text block） */
+  function toolTurn(toolCallId: string, resultText: string, reminderText: string): Message[] {
+    return [
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_call', id: toolCallId, name: 'read', arguments: { path: '/a' } }],
+      },
+      {
+        role: 'tool',
+        content: [
+          { type: 'tool_result', toolCallId, content: [{ type: 'text', text: resultText }], isError: false },
+          // 块级 isSystemReminder 标记（text block 携带，wire 层不输出该字段，仅 flags 平行标记）
+          { type: 'text', text: reminderText, isSystemReminder: true },
+        ],
+      },
+    ];
+  }
+
+  /** 取 wire messages 全部 text 文本（扁平） */
+  function allTexts(body: ReturnType<typeof encodeAnthropicMessages>): string[] {
+    const msgs = body['messages'] as { content: Record<string, unknown>[] }[];
+    return msgs.flatMap((m) => m.content.map((b) => (b.type === 'text' ? (b.text as string) : '')));
+  }
+
+  it('最末 tool 消息带 reminder：wire 保留该 reminder + bp#2 落在 tool_result 正文（reminder block 无 cache_control）', () => {
+    const messages: Message[] = [
+      { role: 'system', content: [{ type: 'text', text: 'sys' }] },
+      { role: 'user', content: [{ type: 'text', text: 'q' }] },
+      ...toolTurn('tc1', 'r1', '[squad:agents] 团队状态 v1'),
+    ];
+    const body = encodeAnthropicMessages(req(messages));
+    const msgs = body['messages'] as { role: string; content: Record<string, unknown>[] }[];
+
+    // 最末 wire message = tool_result + reminder（role tool→user 映射）
+    const lastMsg = msgs[msgs.length - 1]!;
+    expect(lastMsg.role).toBe('user');
+    // ① 保留 reminder：wire 含 reminder 文本（encodeMessage 最末 message 保留最末 reminder）
+    expect(allTexts(body)).toContain('[squad:agents] 团队状态 v1');
+    // reminder block 恒无 cache_control（bp#2 跳过 reminder block）
+    const reminderBlock = lastMsg.content.find(
+      (b) => b.type === 'text' && b.text === '[squad:agents] 团队状态 v1',
+    )!;
+    expect(reminderBlock.cache_control).toBeUndefined();
+    // ② bp#2 落在非 reminder block：tool_result 正文块（reminder 前一 block）
+    const toolResultBlock = lastMsg.content.find((b) => b.type === 'tool_result')!;
+    expect(toolResultBlock.cache_control).toEqual({ type: 'ephemeral' });
+    // reminder 是最后一块（cache 前缀稳定段在它之前）
+    expect(lastMsg.content[lastMsg.content.length - 1]).toBe(reminderBlock);
+  });
+
+  it('多 tool 轮次各带 reminder（长 run）：wire 只保留最末一个，历史 reminder 全 drop', () => {
+    const messages: Message[] = [
+      { role: 'system', content: [{ type: 'text', text: 'sys' }] },
+      { role: 'user', content: [{ type: 'text', text: 'q' }] },
+      ...toolTurn('tc1', 'r1', '[reminder] 第1轮'),
+      ...toolTurn('tc2', 'r2', '[reminder] 第2轮'),
+      ...toolTurn('tc3', 'r3', '[reminder] 第3轮'),
+    ];
+    const body = encodeAnthropicMessages(req(messages));
+    const texts = allTexts(body);
+
+    // wire 层只保留最末消息的最末一个 reminder
+    const reminderTexts = texts.filter((t) => t.startsWith('[reminder]'));
+    expect(reminderTexts).toEqual(['[reminder] 第3轮']);
+    // 历史 reminder 全 drop（transcript 仍持久化，wire 是一次性产物——§3.3）
+    expect(texts).not.toContain('[reminder] 第1轮');
+    expect(texts).not.toContain('[reminder] 第2轮');
+  });
+
+  it('reminder 位置不变时 bp#2 落点稳定（cache 前缀稳定段不变）', () => {
+    const mkMsgs = (reminderText: string): Message[] => [
+      { role: 'system', content: [{ type: 'text', text: 'sys' }] },
+      { role: 'user', content: [{ type: 'text', text: 'q' }] },
+      ...toolTurn('tc1', 'r1', reminderText),
+    ];
+    // reminder 文本变化但位置不变（始终是最后一块）→ 两次 encode 落点一致
+    const b1 = encodeAnthropicMessages(req(mkMsgs('[reminder] v1')));
+    const b2 = encodeAnthropicMessages(req(mkMsgs('[reminder] v2')));
+
+    const locate = (body: ReturnType<typeof encodeAnthropicMessages>) => {
+      const msgs = body['messages'] as { content: Record<string, unknown>[] }[];
+      const last = msgs[msgs.length - 1]!;
+      const cacheIdx = last.content.findIndex((b) => b.cache_control !== undefined);
+      return {
+        cacheIdx,
+        cacheType: last.content[cacheIdx]?.type,
+        contentLen: last.content.length,
+        lastType: last.content[last.content.length - 1]?.type,
+      };
+    };
+    expect(locate(b1)).toEqual(locate(b2));
+    // 落点 = tool_result 正文（reminder 前一块），reminder 恒最后一块
+    expect(locate(b1).cacheType).toBe('tool_result');
+    expect(locate(b1).lastType).toBe('text'); // reminder 块（text）
+  });
+});

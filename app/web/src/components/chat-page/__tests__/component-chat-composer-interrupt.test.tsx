@@ -11,11 +11,18 @@
  *   - isFocused() / isPopoverOpen() handle 方法语义正确
  *   - 注入后 editor 仍可用（焦点未失活，UC-F1/F2 都给可用焦点态）
  */
-import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import { createRef } from 'react';
 import { ChatComposer, type ChatComposerHandle } from '../component-chat-composer';
 import { initI18n } from '../../../i18n';
+import { useChatStore } from '../../../store/chat-slice';
+
+// [v0.0.267] 草稿缓存隔离：ChatComposer 现接 useChatDraft（editor 内容变化 → onUpdate → saveDraft 写单例），
+// 用例间不清理会残留草稿 → 后续用例 mount 恢复 → 多出内容（change_plan 风险点 2）
+beforeEach(() => {
+  useChatStore.setState({ drafts: {} });
+});
 
 beforeAll(async () => {
   // Polyfill jsdom 缺失的布局方法（ProseMirror coordsAtPos → singleRect 在 Text 节点上调 getClientRects）

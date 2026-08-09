@@ -11,11 +11,14 @@
  *
  * 边界：不挂 area-hooks/handler/HITL 接线；chrome 由 router 注入（防双拉，须稳定引用）；
  *   布局/SectionRightTabs 归 component-studio-chat-router.tsx。
+ *   [v0.0.269] SquadStatusEntry 已删除——团队状态入口挪 chat 右上浮菜单（component-chat-float-menu
+ *   第 4 项「团队状态」→ ComponentSquadStatusModal），topbarLeft 恢复 268 前形态（单聊/群聊两态）。
  */
 import { useTranslation } from 'react-i18next';
 import type { SessionChromeView } from '../../lib/chat-api';
 import type { MentionAttrs } from '../chat-page/chat-composer-extension';
 import { SectionChatSession } from '../chat-page/section-chat-session';
+import { ChatSessionTopbarLeft } from '../chat-page/component-chat-session-topbar-left';
 import { MemberAvatar, type MemberAvatarRole } from '../common/member-avatar';
 
 interface SectionStudioChatProps {
@@ -38,26 +41,27 @@ export function SectionStudioChat({ sessionId, chrome, prefill, onBack }: Sectio
   // 对端 member：memberId 命中 members = 单聊；否则（群聊/数据不一致）走缺省 header 兜底
   const member = chrome.memberId ? chrome.members.find((m) => m.id === chrome.memberId) : undefined;
 
-  // 单聊身份 header：角色头像纯展示（非编辑入口，不可点）+ name + tag
-  const topbarLeft = member
-    ? () => (
-        <>
-          <div className="flex items-center gap-2 px-2 py-1">
-            <MemberAvatar
-              name={member.name}
-              role={member.role as MemberAvatarRole}
-              id={member.id}
-              size="sm"
-              showName={false}
-            />
-            <span className="text-[13px] font-semibold text-fg">{member.name}</span>
-          </div>
-          {chrome.tag && (
-            <span className="rounded-xs bg-bg-warm px-2 py-0.5 font-mono text-[11px] text-muted">{chrome.tag}</span>
-          )}
-        </>
-      )
-    : undefined; // 群聊：缺省 ChatSessionTopbarLeft（chrome.title=squad 名 + tag）
+  // [v0.0.269 恢复 268 前形态] 单聊 = MemberAvatar+name+tag；群聊 = 缺省 ChatSessionTopbarLeft
+  const topbarLeft = () =>
+    member ? (
+      <>
+        <div className="flex items-center gap-2 px-2 py-1">
+          <MemberAvatar
+            name={member.name}
+            role={member.role as MemberAvatarRole}
+            id={member.id}
+            size="sm"
+            showName={false}
+          />
+          <span className="text-[13px] font-semibold text-fg">{member.name}</span>
+        </div>
+        {chrome.tag && (
+          <span className="rounded-xs bg-bg-warm px-2 py-0.5 font-mono text-[11px] text-muted">{chrome.tag}</span>
+        )}
+      </>
+    ) : (
+      <ChatSessionTopbarLeft chrome={chrome} />
+    );
 
   return (
     <SectionChatSession

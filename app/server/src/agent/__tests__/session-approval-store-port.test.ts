@@ -60,9 +60,9 @@ describe('SessionStore — getAlwaysApprovedKeys（ApprovalStorePort 实现）',
       biz: 'playground',
       role: 'rocky',
       derivation: 'parent',
-      alwaysApprovedKeys: ['bash:rm-wildcard', 'bash:ssh-read'],
+      alwaysApprovedKeys: ['bash:rm-wildcard', 'bash:custom-1'],
     } as never);
-    expect(await store.getAlwaysApprovedKeys(sid)).toEqual(['bash:rm-wildcard', 'bash:ssh-read']);
+    expect(await store.getAlwaysApprovedKeys(sid)).toEqual(['bash:rm-wildcard', 'bash:custom-1']);
   });
 });
 
@@ -88,11 +88,11 @@ describe('SessionStore — addAlwaysApprovedKey（read-modify-write 去重）', 
     const sid = ulid();
     await store.createSession({ id: sid });
     await store.addAlwaysApprovedKey(sid, 'bash:rm-wildcard');
-    await store.addAlwaysApprovedKey(sid, 'bash:ssh-read');
+    await store.addAlwaysApprovedKey(sid, 'bash:custom-1');
     const keys = await store.getAlwaysApprovedKeys(sid);
     expect(keys).toHaveLength(2);
     expect(keys).toContain('bash:rm-wildcard');
-    expect(keys).toContain('bash:ssh-read');
+    expect(keys).toContain('bash:custom-1');
   });
 
   it('跨 session 隔离：s1 追加不影响 s2', async () => {

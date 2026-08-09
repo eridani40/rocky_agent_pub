@@ -42,16 +42,16 @@ describe('策略门 — deny 分支（INV-P4 不悬挂）', () => {
     const runSpy = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: '不应被调用' }], isError: false });
     const tool: Tool = {
       definition: { name: 'bash', description: '测试', inputSchema: { type: 'object' } },
-      checkPermission: () => ({ behavior: 'deny', reason: '禁止访问 ~/.ssh 敏感目录' }),
+      checkPermission: () => ({ behavior: 'deny', reason: '策略拒绝（测试 deny 分支）' }),
       run: runSpy,
     };
     const mgr = new ApprovalManager();
     const engine = new ToolExecutionEngine(mgr);
-    const { results, pending } = await engine.execute(makeConfig([tool]), [makeCall('bash', { command: 'ls ~/.ssh' })]);
+    const { results, pending } = await engine.execute(makeConfig([tool]), [makeCall('bash', { command: 'dangerous-cmd' })]);
 
     expect(results).toHaveLength(1);
     expect(results[0]!.isError).toBe(true);
-    expect((results[0]!.content[0]! as { type: string; text: string }).text).toContain('禁止访问 ~/.ssh');
+    expect((results[0]!.content[0]! as { type: string; text: string }).text).toContain('策略拒绝');
     expect(pending).toHaveLength(0); // 不悬挂
     expect(runSpy).not.toHaveBeenCalled(); // run 未被调
   });
@@ -298,19 +298,19 @@ describe('策略门 — [v0.0.148] 绿灯短路（approvalMode=greenlight）', (
     const runSpy = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: '不应被调用' }], isError: false });
     const tool: Tool = {
       definition: { name: 'bash', description: '测试', inputSchema: { type: 'object' } },
-      checkPermission: () => ({ behavior: 'deny', reason: '禁止访问 ~/.ssh' }),
+      checkPermission: () => ({ behavior: 'deny', reason: '策略拒绝（测试 deny 分支）' }),
       run: runSpy,
     };
     const mgr = new ApprovalManager();
     const engine = new ToolExecutionEngine(mgr);
     const { results, pending } = await engine.execute(
       makeConfigWithApproval([tool], 'greenlight'),
-      [makeCall('bash', { command: 'cat ~/.ssh/id_rsa' })],
+      [makeCall('bash', { command: 'dangerous-cmd' })],
     );
 
     // deny 路径在 ask 之前，绿灯不绕过
     expect(results[0]!.isError).toBe(true);
-    expect((results[0]!.content[0]! as { text: string }).text).toContain('禁止访问 ~/.ssh');
+    expect((results[0]!.content[0]! as { text: string }).text).toContain('策略拒绝');
     expect(pending).toHaveLength(0);
     expect(runSpy).not.toHaveBeenCalled();
   });

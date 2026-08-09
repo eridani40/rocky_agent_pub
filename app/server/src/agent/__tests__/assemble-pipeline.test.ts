@@ -101,7 +101,7 @@ describe('rocky_context plugin impl 登记', () => {
     expect(cleanReducers).toHaveLength(8);
   });
 
-  it('全 impl inventory（ingest 5 + assemble_mapper 2 + assemble_reducer 1 + clean_view_reducer 8 + prompt_mapper 12 + prompt_reducer 3 + reminder 9 + session_store exclusive 选 1）= 41', () => {
+  it('全 impl inventory（ingest 5 + assemble_mapper 2 + assemble_reducer 1 + clean_view_reducer 8 + prompt_mapper 12 + prompt_reducer 3 + reminder 8 + session_store exclusive 选 1）= 40', () => {
     const counts = {
       context_ingest_handler: 5,
       context_assemble_mapper: 2,
@@ -109,7 +109,7 @@ describe('rocky_context plugin impl 登记', () => {
       context_clean_view_reducer: 8, // v0.0.207 头插 dedup_tool_result；v0.0.256 第 4 位插 bubble_text_before_tool_call
       system_prompt_mapper: 12, // v0.0.232 +agent_profile
       system_prompt_reducer: 3,
-      system_reminder: 9, // v0.0.237 摘 squad_charter/task/squad_board；v0.0.240 +squad_task
+      system_reminder: 8, // v0.0.237 摘 squad_charter/task/squad_board；v0.0.240 +squad_task；v0.0.273 reachable_agents + squad_team_status → squad_agents_status
       session_store: 1, // exclusive EP：恰好 1 active
     };
     let total = 0;
@@ -119,8 +119,8 @@ describe('rocky_context plugin impl 登记', () => {
       expect(impls.length, `${pointId} 应有 ${expected} impl`).toBe(expected);
       total += expected;
     }
-    // 总数：5+2+1+8+12+3+9+1 = 41
-    expect(total).toBe(41);
+    // 总数：5+2+1+8+12+3+8+1 = 40
+    expect(total).toBe(40);
   });
 });
 

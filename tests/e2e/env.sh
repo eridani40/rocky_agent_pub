@@ -7,6 +7,9 @@
 # 设计：nohup + pidfile + 轮询 health；DATA_DIR 绝对路径展开（$HOME，禁字面 ~）；pidfile 精确 kill（禁 pkill -f）。
 # v0.0.215：清残留改 cmdline 验证（_kill_port_orphans 只杀本服务孤儿），删旧 lsof 裸杀；
 #           全局注册表 _registry/ 跨 worktree/跨 case 确权。
+# v0.0.272：chrome 泄漏治理——pidfile 三行**不含 chrome**（ET chrome 是 executor 跑 playwright-cli
+#           才起的，start 拿不到 pid）→ stop 用 marker 扫描兜底（lib/et-chrome-cleanup.sh）。
+# v0.0.272 C1：进程扫描/验证改 pgrep（seatbelt 沙箱 ps 不可用 exit 126，ET 冒烟回归 blocking 修复）。
 # 参考: reqs/[working] v0.0.188.et-playwright-agent/req.md（每 case 独立环境 + 双模式）
 #       scripts/run-test.sh（electron 模式蓝本：起 server + web + electron 外壳）
 #       memory BUG-004 / pkill-wide-match-kills-other-worktrees
@@ -17,7 +20,7 @@
 #   tests/e2e/env.sh case-data-dir <case_id>
 #
 # case_id 须匹配 [a-z0-9-]+；DATA_DIR 派生为 $HOME/.rocky_agent_et_<case_id>（绝对路径）。
-# stop 用 pidfile 精确 kill（绝不 pkill -f 宽匹配）+ 删本 case DATA_DIR。
+# stop 用 pidfile 精确 kill（绝不 pkill -f 宽匹配）+ 删本 case DATA_DIR + 回收 ET chrome 孤儿。
 set -euo pipefail
 
 # ── 常量 ─────────────────────────────────────────────────────────────────────
@@ -37,6 +40,7 @@ TESTS_DIR="$ROOT_DIR/tests"
 # 不同版本 worktree 天然不同段；_pick_free_port 再叠全局注册表 + lsof 双校验选具体口。
 # 基址由 tests/lib/port_alloc.sh 的 _port_et_*_base 派生（worktree 名提取版本后三位）。
 . "$TESTS_DIR/lib/port_alloc.sh"   # 复用全局注册表 + 版本基址函数（_PORT_WT/_PORT_REG_DIR 等）
+. "$SCRIPT_DIR/lib/et-chrome-cleanup.sh"   # v0.0.272：ET chrome 孤儿清理函数（marker 扫描）
 ET_API_PORT_BASE=$(_port_et_api_base); ET_API_PORT_MAX=$((ET_API_PORT_BASE + 19))
 ET_WEB_PORT_BASE=$(_port_et_web_base); ET_WEB_PORT_MAX=$((ET_WEB_PORT_BASE + 19))
 ET_CDP_PORT_BASE=$(_port_et_cdp_base); ET_CDP_PORT_MAX=$((ET_CDP_PORT_BASE + 19))
@@ -81,23 +85,25 @@ _pick_free_port() {
 # ── 工具：清理本 case 端口残留（cmdline marker 验证，只杀本服务孤儿）────────────
 # v0.0.215：替代旧 `lsof -ti:$port | xargs kill` 裸杀。端口为版本编码基址（本 worktree 独占段），
 # 残留只能是自己的孤儿；marker 验证双保险，绝不误杀无关/兄弟进程。
-_ORPHAN_MARKERS='index.ts|app/web|electron|bun|vite'
+# v0.0.272：扩充 chrome|playwright|remote-debugging——仅 ET 端口段内用（用户 Chrome 不监听
+#           43xxx/45xxx/46xxx → 零误杀；禁端口段外全量扫描）。cmdline 验证走 _pid_cmdline_matches
+#           （ps 优先 fallback pgrep——seatbelt 沙箱 ps 不可用，v0.0.272 ET 冒烟 blocking 修复）。
+_ORPHAN_MARKERS='index.ts|app/web|electron|bun|vite|chrome|playwright|remote-debugging'
 _kill_port_orphans() {
-  local port="$1" pids p cmd
+  local port="$1" pids p
   pids=$(lsof -ti:"$port" 2>/dev/null || true)
   [ -z "$pids" ] && return 0
   for p in $pids; do
-    cmd=$(ps -o command= -p "$p" 2>/dev/null || true)
-    if echo "$cmd" | grep -qE "$_ORPHAN_MARKERS"; then
+    if _pid_cmdline_matches "$p" "$_ORPHAN_MARKERS"; then
       echo "[env.sh] 清理端口 $port 本服务孤儿 pid=$p"; kill "$p" 2>/dev/null || true
-    elif [ -n "$cmd" ]; then
-      echo "[env.sh] WARN: 端口 $port pid=$p 非本服务, cmdline=$cmd, 跳过" >&2
+    else
+      echo "[env.sh] WARN: 端口 $port pid=$p 非本服务, 跳过" >&2
     fi
   done
   sleep 0.3
   # SIGKILL 顽固（同样 marker 验证）
   for p in $(lsof -ti:"$port" 2>/dev/null || true); do
-    ps -o command= -p "$p" 2>/dev/null | grep -qE "$_ORPHAN_MARKERS" && kill -9 "$p" 2>/dev/null || true
+    _pid_cmdline_matches "$p" "$_ORPHAN_MARKERS" && kill -9 "$p" 2>/dev/null || true
   done
 }
 
@@ -246,6 +252,8 @@ cmd_stop() {
     rm -f "$pidfile"
   fi
 
+  # [v0.0.272] ET chrome 孤儿回收（playwright-cli 起的 chrome，pidfile 记不到 → marker 扫描兜底，顺序在 pidfile kill 后）
+  _cleanup_et_chrome
   # 清端口残留（孤儿/子进程；_kill_port_orphans 已 cmdline 验证只杀本服务孤儿，绝不误杀）
   if [ -f "$portfile" ]; then
     while IFS= read -r line; do

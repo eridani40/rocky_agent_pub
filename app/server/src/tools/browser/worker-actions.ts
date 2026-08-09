@@ -6,7 +6,7 @@
  * 参照 playwright-session.ts 实现，无 bun-only API（bun build --target=node 打包）。
  */
 import { buildSnapshotResult, lookupRef } from './snapshot-ref';
-import type { BrowserActionParams } from './types';
+import type { BrowserActionParams, WorkerSessionState } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PWBrowser = any;
@@ -15,17 +15,20 @@ type PWPage = any;
 
 /**
  * dispatch action —— 纯 playwright page 操作。
+ * @param state 跨 action 会话状态（lastRefs 持久，供 click/type 引用之前 snapshot 的 ref）。
+ *              v0.0.264 起由 worker-entry 常驻循环持有；单次调用传新 state（行为等价旧实现）。
  * @returns action 结果文本（写入 WorkerResult.text）
  */
 export async function dispatchAction(
   browser: PWBrowser,
   action: string,
   params: BrowserActionParams,
+  state: WorkerSessionState,
 ): Promise<string> {
   const ctx = browser.contexts()[0] ?? (await browser.newContext());
   let page: PWPage = ctx.pages()[0];
   if (!page) page = await ctx.newPage();
-  let lastRefs: Record<string, { role: string; name: string; nth: number }> = {};
+  const lastRefs = state.lastRefs;
 
   switch (action) {
     case 'navigate': {
@@ -54,13 +57,14 @@ export async function dispatchAction(
         text = await page.ariaSnapshot({ mode });
       }
       const result = buildSnapshotResult(text, format);
-      lastRefs = result.refs;
+      // 跨 action 保持：snapshot 更新 state.lastRefs（常驻循环下 click/type 引用前次 snapshot）
+      state.lastRefs = result.refs;
       return JSON.stringify(result);
     }
     case 'click': {
       const ref = params.ref ?? '';
       if (!ref) throw new Error('browser click: ref 必填');
-      const info = lookupRef(lastRefs, ref); // 跨调用 lastRefs 重置 = pre-existing 限制
+      const info = lookupRef(lastRefs, ref); // 跨 action 由 state.lastRefs 保持（v0.0.264 常驻循环）
       const locator = page.getByRole(info.role, { name: info.name, exact: true }).nth(info.nth);
       await locator.click({ timeout: 5000 });
       return `clicked ${ref}`;

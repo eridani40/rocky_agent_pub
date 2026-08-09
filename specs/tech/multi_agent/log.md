@@ -1,10 +1,25 @@
 ---
 type: log
 title: Multi-Agent KB 变更记录
-updated: 2026-08-04
+updated: 2026-08-07
 ---
 
 # Multi-Agent KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-07 · v0.0.273（squad_agents_status 统一全员状态块取代 reachable_agents + squad_team_status）
+
+- **`[P1]a2a_protocol.md`**：§3 `reachable_agents` → `squad_agents_status`（统一全员状态块）——可达性派生表不变（squad/leader/mate/subagent/standalone 5 行）+ 新增「全员列出」语义（running + idle 都保留，做完的 mate 不消失）+ 板块格式改 `[squad:agents]`（成员行 = 可达性 + running/idle + presence 三合一）；v0.0.270 enableGroupChat 门控描述从「squadChatRef 构造」改「SquadChat 行渲染」；§7 section 表 + §8 边界表引用同步。**可达性语义不变**（name + sessionId 仍在统一块，a2a 对端信息不丢）。
+- **`index.md`**：核心概念表 + 导航表 reachable_agents → squad_agents_status（曾名标注）。
+- **`[P1]subagent_derivation.md §5`**：send_message 校验 `caller.reachable_agents` → `caller.squad_agents_status`；拓扑编码引用表名同步。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `squad_agents_status.ts` L67-79 readSessionType 5 种分派（standalone [] / subagent [parent] / squad 全员 / leader SquadChat+mates / mate SquadChat+leader+peers）✅；② L111-116 逐 member 查 running 但**不过滤**（全员列出，idle 保留）✅；③ L93-94 270 门控 `enableGroupChat !== false` + L151 benched 过滤 `state !== 'benched'` ✅；④ L211-218 成员行格式 `- {name} ({role}, sessionId: {sid}) · {running|idle} · presence: {text|(无 presence)}` ✅；⑤ 旧文件 reachable_agents.ts / squad_team_status.ts / 旧测试已删 + plugin.json 删二加一 + 生产代码零残留 ✅。
+- 详情：`specs/tech/version_logs/v0.0.273/change_plan.md`（8 裁决 R1-R8）+ `change_log.md`
+
+## 2026-08-06 · v0.0.270（enableGroupChat 门控 — reachable_agents 单点 + resolveSquadAlias 返 null）
+
+- **`[P1]a2a_protocol.md §3`**：reachable_agents 派生表补 `enableGroupChat` 门控注记——`squadChatRef` 构造条件 `squadChatSid && squad.enableGroupChat !== false`（`!== false` 语义：undefined/缺省=开，仅显式 false 关）；同 provider 供 system prompt + system_reminder 两头（一处管、两头同时无）；关态下 `send_message('squadchat')` 报「cannot resolve target」类错误（resolveSquadAlias 返 null，全私聊语义）。
+- **`index.md`**：核心概念表加「enableGroupChat 群聊门控（注入 + 别名解析双关）」行（见下）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `reachable_agents.ts:93-106` duck-type + `squadChatRef = squadChatSid && squad.enableGroupChat !== false ? {...} : null` ✅；② `runtime-context.ts:275-286` resolveSquadAlias 'squadchat' 分支 `=== false` 返 null ✅；③ resolveAgentRefWithSquad fallback 拦截（coder3 偏离 ①：squad 分支 resolveSquadAlias 返 null 且 ref==='squadchat' 时直接返 null，不 fallback 直传 'squadchat' 字串——否则 send_message 报「session not found」而非契约「cannot resolve target」；'leader'/member name 保持原 fallback）✅；④ a2a_protocol 板块格式补「`← [v0.0.270] enableGroupChat=false 时不渲染此行`」✅。
+- 详情：`specs/tech/version_logs/v0.0.270/change_plan.md` + `change_log.md`
 
 ## 2026-08-04 · v0.0.255（async subagent 回报兜底 — 系统代发 + 判据 A 履约追踪）
 

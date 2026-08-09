@@ -3,7 +3,7 @@
  * 参考: specs/ui/components/studio-page/component-token-widget.md
  *       reqs/[working] v0.0.240.squad_task/demo-home.html（.card.token 块，视觉契约）
  *
- * 职责：图文结合展示 token 用量（今日三色比例条 + 7 日迷你柱 + 近 60 天合计）+ 整卡点击 → token-stats。
+ * 职责：今日总量 / 60 天总量两数据并排 + 7 日迷你柱 + 整卡点击 → token-stats。
  * 数据源：useSquadTokenStats（与详情 panel 共用一套 fetch，口径对齐详情——不再自己查一套）：
  *   - 查询 scope='team' + 近 60 天 day（=详情 panel defaultRange）
  *   - 今日 = series 末点（bucket === 今日本地 key）；7 日柱 = series 末 7 点；累计 = Σ series（=详情合计）
@@ -55,21 +55,6 @@ function deriveWidgetData(series: TokenUsageStatPoint[] | undefined, todayKey: s
   return { today, daily7, cumulative };
 }
 
-/** 三色比例条单段：label + 比例条（按值占三段峰值） + 数字 */
-function TokenBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
-  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-[7px] flex-1 overflow-hidden rounded-full bg-surface-2">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
-      </div>
-      <div className="w-[78px] shrink-0 text-right text-[10.5px] text-muted">
-        {label} {formatTokens(value)}
-      </div>
-    </div>
-  );
-}
-
 /** token 用量图文小组件（复用详情统计，不自己查一套） */
 export function TokenWidget({ squadId, onOpenTokenStats }: TokenWidgetProps) {
   const { t } = useTranslation(['studio', 'common']);
@@ -90,7 +75,7 @@ export function TokenWidget({ squadId, onOpenTokenStats }: TokenWidgetProps) {
   );
 
   const today = data.today;
-  const maxOfDay = today ? Math.max(today.input, today.output, today.cache) : 0;
+  const todayTotal = today ? totalOf(today) : 0;
   const maxDaily = Math.max(1, ...data.daily7.map((d) => d.total));
   const loading = state.kind === 'loading';
 
@@ -109,26 +94,34 @@ export function TokenWidget({ squadId, onOpenTokenStats }: TokenWidgetProps) {
         </span>
       </div>
 
-      {/* 今日三色比例条 */}
-      <div>
-        <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-2">{t('studio:tokenWidget.todayLabel')}</div>
-        {loading ? (
-          <div className="h-[42px] animate-pulse rounded bg-surface-2" />
-        ) : today ? (
-          <div className="flex flex-col gap-1">
-            <TokenBar label={t('studio:tokenWidget.kindInput')} value={today.input} max={maxOfDay} color="var(--hue-blue)" />
-            <TokenBar label={t('studio:tokenWidget.kindOutput')} value={today.output} max={maxOfDay} color="var(--hue-violet)" />
-            <TokenBar label={t('studio:tokenWidget.kindCache')} value={today.cache} max={maxOfDay} color="var(--hue-green)" />
-          </div>
-        ) : (
-          <div className="text-[11px] text-muted">—</div>
-        )}
+      {/* 今日总量 / 60 天总量并排（v0.0.288：去三色比例条，改两数据并排变矮） */}
+      <div className="flex items-baseline justify-between">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-wide text-muted-2">{t('studio:tokenWidget.todayTotal')}</span>
+          {loading ? (
+            <div className="h-[18px] w-[60px] animate-pulse rounded bg-surface-2" />
+          ) : (
+            <span className="font-mono text-[14px] font-bold text-fg">
+              {today ? formatTokens(todayTotal) : '—'}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-0.5">
+          <span className="text-[10px] uppercase tracking-wide text-muted-2">{t('studio:tokenWidget.total60d')}</span>
+          {loading ? (
+            <div className="h-[18px] w-[60px] animate-pulse rounded bg-surface-2" />
+          ) : (
+            <span className="font-mono text-[14px] font-bold text-fg">
+              {state.kind === 'ok' ? formatTokens(data.cumulative) : '—'}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* 7 日迷你柱（series 末 7 点） */}
+      {/* 7 日迷你柱（series 末 7 点，h-[22px] 压缩变矮） */}
       <div>
         <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-2">{t('studio:tokenWidget.trend7d')}</div>
-        <div className="flex h-[26px] items-end gap-1">
+        <div className="flex h-[22px] items-end gap-1">
           {data.daily7.length === 0
             ? Array.from({ length: 7 }).map((_, i) => (
                 <span key={i} className="block w-[10px] rounded-t bg-surface-2" style={{ height: '6%' }} />
@@ -145,14 +138,6 @@ export function TokenWidget({ squadId, onOpenTokenStats }: TokenWidgetProps) {
                 />
               ))}
         </div>
-      </div>
-
-      {/* 累计：近 60 天合计（=详情 panel summary 同口径，复用详情统计；非 budget） */}
-      <div className="flex items-baseline justify-between text-[11px] text-muted">
-        <span>{t('studio:tokenWidget.consumedLabel')}</span>
-        <span className="font-mono text-[14px] font-bold text-fg">
-          {state.kind === 'ok' ? formatTokens(data.cumulative) : '—'}
-        </span>
       </div>
     </button>
   );

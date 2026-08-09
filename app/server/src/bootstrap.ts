@@ -35,6 +35,7 @@ import type { SessionTaskLock } from './agent/session-task-lock';
 import type { AppTaskLock } from './agent/app-task-lock';
 import type { SseChannel } from './sse/sse-channel';
 import type { ConnectorManager } from './tools/browser/connector-manager';
+import type { BrowserInstanceManager } from './tools/browser/instance-manager';
 import type { ComputerNativePort } from './platform/computer/native-port';
 import type { ChannelManager } from './channel/channel-manager';
 import type { DriverRegistry } from './tools/browser/pick-driver';
@@ -74,6 +75,7 @@ import { bootstrapMentionRegistry } from './mention/bootstrap-mention';
 import { MemberStore } from './stores/squad-store';
 // Phase helpers（v0.0.156 拆分）
 import { bootstrapPluginPhase } from './bootstrap-plugin-phase';
+import { syncBuiltinSquadTemplates } from './bootstrap/squad-templates-bootstrap';
 import { bootstrapBusPhase } from './bootstrap-bus-phase';
 import { bootstrapStorePhase } from './bootstrap-store-phase';
 import { bootstrapAgentPhase } from './bootstrap-agent-phase';
@@ -86,6 +88,8 @@ import { TrainingEngine as TrainingEngineImpl } from './academy/training-engine'
 import { createAcademyLlmPort } from './academy/llm-caller-adapter';
 // [v0.0.223] TodoStore 实例化（独立 store，仿 CronPersistenceAdapter；fsRoot=dataDir 经 resolveDataDir 展开）
 import { TodoStore as TodoStoreImpl } from './agent/todo/todo-store';
+// [v0.0.296] bash engine 配置注入（bash_seatbelt 开关）
+import { setBashEngineConfigReader } from './tools/bash-engine';
 
 /** bootstrap 返回的共享实例集合（router/handler 全程复用） */
 export interface BootstrapResult {
@@ -158,6 +162,11 @@ export interface BootstrapResult {
    */
   browserDriverRegistry: DriverRegistry;
   /**
+   * BrowserInstanceManager —— headless/managed-profile 常驻浏览器实例管理器（v0.0.264）。
+   * browser tool 非 attach 路径 + session DELETE 兜底清理用；装配失败 → undefined（noop fallback）。
+   */
+  browserInstanceManager?: BrowserInstanceManager;
+  /**
    * LogWriter —— dev 调试日志（4 开关各写一个 JSONL 文件）。
    * router api hook 经 bs.logWriter 取用；event hook 由 wrapBusWithLog proxy 内部持引用。
    */
@@ -209,6 +218,11 @@ export interface BootstrapResult {
    * fsRoot=dataDir（resolveDataDir 已展开绝对路径，packaged cwd=/ 护栏）。
    */
   todoStore: TodoStore;
+  /**
+   * session_panel topic 的 raw bus（bus-phase 产出，wrap 前）。
+   * router buildCronRouteDeps 读此字段注入 handleCronRoute；cron 写操作后 emit session_cron_changed。
+   */
+  sessionStatusBus: ReplayableEventBus;
   /**
    * CronPersistenceAdapter — cron.json 持久化（session 级分片）。
    * 由 bootScheduler 装配；router buildCronRouteDeps 读此字段 + schedulerEngine
@@ -289,6 +303,15 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
   // 纯 move 到 bootstrap-plugin-phase.ts（v0.0.156 结构性拆分）。
   const { registry, pluginManager, pluginConfigService, appConfig, policyStore } =
     await bootstrapPluginPhase(dataDir);
+
+  // [v0.0.296] bash engine 配置注入——在 getBashEngine() 首次调用前注入配置读取函数，
+  // 使 bash_seatbelt=false 时走 PassthroughBashEngine（绕过嵌套沙箱 exit 71）。
+  setBashEngineConfigReader(() => appConfig.get('runtime', 'bash_seatbelt'));
+
+  // builtin squad 模板同步——plugin phase 之后，覆盖 builtin:true 模板到用户目录。
+  // builtinsDir 与 bootstrap-plugin-phase.ts L58 一致；错误不阻断 bootstrap。
+  const builtinsDir = path.resolve(__dirname, '../../plugins/builtins');
+  syncBuiltinSquadTemplates(builtinsDir, dataDir);
 
   // [v0.0.150] MigrationManager —— 启动期数据迁移主控。
   //   位置：AppConfigService 之后、业务 store（MemberStore/SessionStore）之前，
@@ -392,6 +415,8 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
   // 关键时序：cronToolDeps 在 bootScheduler 完成后才产出，后置填入 lateBound.cronToolDeps.value。
   const schedulerResult = await bootstrapSchedulerPhase({
     dataDir, store, agentManager, appConfig, pluginManager, appTaskLock,
+    // sessionStatusBus 透传到 cronToolDeps.statusBus（cron 写操作后 emit session_cron_changed）
+    sessionStatusBus,
   });
   lateBound.cronToolDeps.value = schedulerResult.cronToolDeps;
 
@@ -413,6 +438,7 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
   });
   lateBound.connectorManager.value = connectorsResult.connectorManager;
   lateBound.browserDriverRegistry.value = connectorsResult.browserDriverRegistry;
+  lateBound.browserInstanceManager.value = connectorsResult.browserInstanceManager;
   if (connectorsResult.computerNativePort) {
     lateBound.computerNativePort.value = connectorsResult.computerNativePort;
   }
@@ -461,6 +487,9 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
     // ChannelManager（可选：构造失败 → undefined）
     ...(connectorsResult.channelManager ? { channelManager: connectorsResult.channelManager } : {}),
     browserDriverRegistry: connectorsResult.browserDriverRegistry,
+    ...(connectorsResult.browserInstanceManager
+      ? { browserInstanceManager: connectorsResult.browserInstanceManager }
+      : {}),
     logWriter,
     squadRuntime: schedulerResult.squadRuntime,
     budgetAggregator: schedulerResult.budgetAggregator,
@@ -476,6 +505,8 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
     // [v0.0.223] TodoStore（router buildTodoRouteDeps 读注入 handleTodoRoute；
     // todo 工具经 rtc.sessionDeps.todoStore 读；reminder 经 ctx.todoStore 读）
     todoStore,
+    // session_panel topic raw bus（buildCronRouteDeps 读注入 handleCronRoute）
+    sessionStatusBus,
     // cronStore + schedulerEngine + cronToolDeps 由 bootScheduler 装配（two-phase init）；
     // router buildCronRouteDeps 读 cronStore + schedulerEngine 注入 handleCronRoute；
     // session-config 透传 cronToolDeps 到 ctx.config.cronToolDeps（agent cron_* 工具读）。

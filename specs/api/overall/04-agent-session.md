@@ -190,7 +190,7 @@ interface UpdateSessionBody {
 
 1. 校验 `newDir`：`path.isAbsolute(newDir) && fs.existsSync(newDir) && fs.statSync(newDir).isDirectory()` → 否则 `400`。
 2. **[v0.0.139]** `SessionWorkspaceManager.switchDir(sid, newDir, setDirCb)` 内部：`recycleSession(sid)`（回收旧目录**全部**监听——相对路径基准变了，旧监听失效）→ `setDirCb`=`SessionStore.setWorkspaceDir(sid, newDir)`（更新字段 + 持久化 + emit `session_workspace_dir_changed`）。
-3. 响应 `200` + 更新后的 `Session`。**不重启 watch**：前端收 `session_workspace_dir_changed` → 重置 tree + GET 顶层 + 重新 `POST watch{clientId, path:''}` 新目录根（同新 tab 打开路径）。
+3. 响应 `200` + 更新后的 `Session`。**不重启 watch**：前端收 `session_workspace_dir_changed` → 重置 tree（清 expanded）+ GET 顶层 + **watch-set 重算 effect 自动发新关注集合**（根 + 新根一级子文件夹，同新 tab 打开路径）。
 
 **错误**：`400` body 非法 JSON / `workspaceDir` 非绝对路径 / 不存在 / 非目录；`404` session 不存在。
 
@@ -219,8 +219,12 @@ interface WorkspaceTreeResponse {
 interface WsTreeNode {
   name: string;                  // 显示名（basename）
   path: string;                  // 相对 workspaceDir 的相对路径（唯一 key + POST open 入参；如 "src/auth/login.ts"）
-  type: "file" | "dir";
+  type: "file" | "dir";          // 真实类型（statSync 跟随 symlink 后判定）；symlink 不是新类型，是叠加标记
   hasChildren: boolean;          // dir 才有意义：是否有子项（前端据此决定 twisty 是否显示；本版本一次性返该层，不递归）
+  /** [v0.0.263] true = 该节点是 symlink（lstatSync 识别，不跟随）；缺省 false 兼容旧响应 */
+  isSymlink?: boolean;
+  /** [v0.0.263] symlink 目标 realpath 绝对路径（仅 isSymlink=true 时有意义；供前端 tooltip/标注显示） */
+  linkTarget?: string;
 }
 ```
 
@@ -230,9 +234,12 @@ interface WsTreeNode {
 - **单次 GET 只返一层**（depth 固定 1），不递归 children；前端按需逐层 GET。
 - watch event（§session_event.md `session_workspace_file_changed`）推送的变化，前端按展开状态决定立即刷新该层（GET `?parent=<父 path>`）还是标记 stale（下次展开 GET 拉最新）。
 
-**过滤**：默认 ignore `node_modules` / `.git`（与 chokidar WATCH_OPTIONS 一致，`session_workspace_manager.md §4`）。
+**过滤**：默认 ignore `node_modules` / `.git`（与 chokidar WATCH_OPTIONS 一致，`session_workspace_manager.md §4`）。按**节点名**过滤，与是否 symlink 无关。
 
-**安全（路径白名单 MANDATORY）**：若提供 `parent`，后端 `absParent = path.resolve(workspaceDir, parent)` 必须 `startsWith(workspaceDir + path.sep)` —— 防目录穿越（如 `?parent=../../etc` → resolve 后不在 workspaceDir 内 → 拒绝）。
+**安全（路径白名单 MANDATORY，v0.0.263 链式授权）**：若提供 `parent`，后端 `whitelistResolve(realRoot, parent)` 分两步：
+- **step 1 字符串前缀**：`resolve(realRoot, parent)` 必须在 `realRoot` 内（挡 `../` + 绝对路径注入）。
+- **step 2 链式授权解析**：从 realRoot 出发**逐段** resolve——每段 `lstatSync` 判 symlink，命中则 `realpathSync` 授权该 symlink 目标为继续解析的根（**workspace 内存在的 symlink = 用户放置 = 用户显式意图 = 授权**）。无 symlink 段时与旧 `realpathSync(abs)` 等价（普通路径零行为变化）。
+- 未授权越界（`?parent=../../etc`、绝对路径注入、未先展开 symlink 就访问其目标路径）→ `400`（穿越攻击语义不变）。
 
 **错误**：`404` session 不存在；`400` `parent` resolve 后不在 workspaceDir 内（目录穿越攻击）/ `depth` 非 [1,10]；`500` workspaceDir 不存在或不可读（极端：用户外部删了目录 → 前端显示空态 + 提示切换目录）。
 
@@ -249,9 +256,11 @@ interface OpenBody {
 }
 ```
 
-**安全（路径白名单 MANDATORY）**：后端 `absPath = path.resolve(workspaceDir, relPath)`，校验 `absPath.startsWith(workspaceDir + path.sep)` —— 防目录穿越（如 `../../etc/passwd` → resolve 后不在 workspaceDir 内 → 拒绝）。
+**[v0.0.263] 打开语义收窄**：本地文件（含普通 + symlink）**不再走本端点**——前端 handleOpen 对 `node.type === 'file'` 一律进内置 editor（`GET/POST /workspace/file`，见 §2.6.7）；远程链接（http/https，如 `.url`）走前端 `openLinkTarget` 浏览器打开。本端点当前实际只服务：文件夹（kind=folder，系统文件管理器打开 symlink→dir 目标目录）+ 历史兼容入口。kind 枚举保持 `file | folder` **不变**（后端不加 `link`——URL 打开是前端平台能力，open 端点保持纯文件路径语义）。
 
-**错误**：`400` `path` resolve 后不在 workspaceDir 内（目录穿越攻击）；`400` `kind` 非 file/folder；`404` session 不存在 / 文件/文件夹不存在；`500` spawn 失败（如 Linux 无 `xdg-open` → 错误信息提示「需安装 xdg-open」）。
+**安全（路径白名单 MANDATORY，v0.0.263 链式授权）**：后端 `whitelistResolve(realRoot, relPath)` 分两步——step 1 字符串前缀（`resolve(realRoot, relPath)` 必须在 realRoot 内，挡 `../` + 绝对路径注入）；step 2 链式授权解析（逐段 lstatSync 判 symlink → realpathSync 授权目标为继续解析根；workspace 内存在的 symlink = 用户放置 = 授权）。未授权越界（`../../etc/passwd`、绝对路径注入、未展开 symlink 先访问目标路径）→ `400`（穿越攻击语义不变）。
+
+**错误**：`400` `path` resolve 后不在 workspaceDir 内（目录穿越攻击）；`400` `kind` 非 file/folder；`404` session 不存在 / 文件/文件夹不存在（含 broken symlink）；`500` spawn 失败（如 Linux 无 `xdg-open` → 错误信息提示「需安装 xdg-open」）。
 
 ### 2.6.3 `POST /session/:id/workspace/pick-directory` — 系统 dialog 选目录
 
@@ -294,14 +303,15 @@ interface PickDirectoryResponse {
 
 > 非生产 API，仅供 ET。生产 API 仍走 §2.6.1-2.6.3 三个 `/session/:id/workspace/*` 端点。
 
-### 2.6.5 `POST /session/:id/workspace/watch` + `/unwatch` — 懒监听 acquire/release（v0.0.139 新增）
+### 2.6.5 `POST /session/:id/workspace/watch` + `/unwatch` + `/watch-set` — 懒监听 acquire/release/声明式替换（v0.0.139 新增 / v0.0.271 加 watch-set）
 
-> 权威模型见 `specs/tech/agent/session/[P0]session_workspace_manager.md`（懒监听：根一层 + 展开目录各一层非递归 + tab 监听列表 + 目录引用计数）。前端在文件树展开=watch、收起=unwatch（`component-workspace-panel.md §4.3`）。
+> 权威模型见 `specs/tech/agent/session/[P0]session_workspace_manager.md`（懒监听：根一层 + 展开目录各一层非递归 + tab 关注集合 + 目录引用计数）。**v0.0.271 起前端主路径走声明式 `watch-set`**（关注集合 = 打开节点自身 + 一级子文件夹，全量重算 + diff）；`watch`/`unwatch` 增量端点保留向后兼容（release-all 仍用）。前端接线见 `component-workspace-panel.md §4.3`。
 
 | 方法 | 路径 | 语义 | 请求体 | 成功响应 |
 |------|------|------|--------|---------|
-| `POST` | `/session/:id/workspace/watch` | 为一个 tab（`clientId`）登记对 `path`（相对 workspaceDir 的目录，一层非递归）的监听 | `WatchBody` | `200` + `{ ok: true }` |
+| `POST` | `/session/:id/workspace/watch` | 为一个 tab（`clientId`）登记对 `path`（相对 workspaceDir 的目录，一层非递归）的监听（增量兼容；新前端不再调单 path） | `WatchBody` | `200` + `{ ok: true }` |
 | `POST` | `/session/:id/workspace/unwatch` | 注销该 tab 对 `path` 的监听；**`path` 省略 = 回收该 tab 全部监听**（release-all，前端卸载/切 session 调） | `UnwatchBody` | `200` + `{ ok: true }` |
+| `POST` | `/session/:id/workspace/watch-set` | **声明式替换**该 tab 关注集合（v0.0.271）：发**完整集合**（非增量），后端与上次 diff 增删，**不在新集合一律 close**（防泄漏对账） | `WatchSetBody` | `200` + `{ ok: true }` |
 
 ```typescript
 interface WatchBody {
@@ -312,21 +322,29 @@ interface UnwatchBody {
   clientId: string;   // 必填
   path?: string;      // 省略 = 回收该 tab 名下全部监听（release-all-for-tab）
 }
+interface WatchSetBody {
+  clientId: string;   // 必填（缺 → 400）
+  paths: string[];    // 完整关注集合（相对 workspaceDir 的目录路径数组；含 "" 根；非数组 → 400；元素非 string → 400）
+}
 ```
 
 **幂等（MANDATORY，用户裁决 #3）**：
 - `watch` 同 `(clientId, path)` 重复 → **不叠加**（tab 目录集是 Set；已持有则 no-op，不重复 refcount++）。
-- `unwatch` 该 tab 未持有 `path` → 静默 **no-op**（200，非错误）。快速连点展开/收起、重试天然安全，**不做全量对账**（增量操作，非声明式全量列表）。
+- `unwatch` 该 tab 未持有 `path` → 静默 **no-op**（200，非错误）。快速连点展开/收起、重试天然安全。
+- `watch-set` 同集合重复 → **diff 全空 → no-op**（幂等；前端初始 rootTree 两次 applyWatchSet、展开后 childrenCache 补发两次均安全）。
+- ⚠️ **不建议与 watch/unwatch 增量混用同一 tab**：增量改集合，声明式 diff 基于旧集合 → 状态不一致。
 
 **语义要点**：
 - **显式控制，GET tree 绝不隐式 watch**（用户裁决 #1）：`GET .../workspace/tree` 只取数据、不建监听；监听只由本端点组显式驱动。
 - **引用计数合并（多 tab）**（用户裁决 #5）：同一目录被 N 个 tab watch → 计数 N，只 1 个物理 watcher；unwatch/回收只减自己那份，计数归零才真正停止监听。
 - **收起期间不推事件 + 展开兜底**（用户裁决 #4）：unwatch 后该目录变化后端不接、不推；重新展开时前端 GET `tree?parent=<path>` 拉回最新（复用既有 lazy 兜底）。
 - **兜底回收**（用户裁决 #2）：即便前端未显式 unwatch（浏览器崩溃/断连），`session_panel` 订阅归零（1→0）经既有 unsubscribe 钩子触发 `recycleSession(sid)` 回收该 session 全部监听。
+- **watch-set 泄漏对账**（v0.0.271 裁决 R3）：`applyWatchSet` 全量 diff，不在新集合的物理 watcher 一律 close（refcount 归零即关）——结构性收敛，不做周期对账。
+- **watch-set realRoot 基准**（v0.0.271 coder3 实现发现）：handler 用 `realpathSync(workspaceDir)` 作 realRoot，与 watch/unwatch 三端点共用 `resolveRoot`——macOS `/var` vs `/private/var` symlink 记账一致（测试锁定）。
 
-**安全（路径白名单 MANDATORY）**：`absDir = path.resolve(workspaceDir, path)` 必须 `startsWith(workspaceDir)`（含根本身）——防目录穿越，与 §2.6.1 tree 同款校验。
+**安全（路径白名单 MANDATORY）**：`absDir = path.resolve(workspaceDir, path)` 必须 `startsWith(workspaceDir)`（含根本身）——防目录穿越，与 §2.6.1 tree 同款校验。`watch-set` 的 `paths` 逐元素同款校验（穿越 → 400；不存在/非目录 → 静默跳过不建监听）。
 
-**错误**：`404` session 不存在；`400` body 非法 / 缺 `clientId` / `path` resolve 后不在 workspaceDir 内（目录穿越）/ `path` 非目录。**注**：目标目录不存在或非目录时后端**静默忽略不建监听**（返 200，容忍前端与 fs 短暂不一致；对齐 manager「不存在忽略不报错」），仅穿越攻击才 400。
+**错误**：`404` session 不存在；`400` body 非法 / 缺 `clientId` / `path` resolve 后不在 workspaceDir 内（目录穿越）/ `path` 非目录 / `paths` 非数组或含非 string 元素。**注**：目标目录不存在或非目录时后端**静默忽略不建监听**（返 200，容忍前端与 fs 短暂不一致；对齐 manager「不存在忽略不报错」），仅穿越攻击才 400。
 
 ### 2.6.6 `POST /session/:id/workspace/save-image` — 粘贴图片落盘 workspace（v0.0.177 新增）
 
@@ -384,16 +402,17 @@ curl -X POST http://127.0.0.1:3710/session/01KV.../workspace/save-image \
 
 ### 2.6.7 `GET /session/:id/workspace/file` + `POST /session/:id/workspace/file/save` — workspace 文本文件读/存（v0.0.227 新增）
 
-> 服务内置 file viewer/editor 用：workspace panel 点文本文件在前端拦截改走内置 editor（复用 academy `component-modal-md-editor`），读/存经本组端点。**[v0.0.241] 起前端拦截 11 种格式（xml/yaml/json/jsonl/txt/csv/tsv/toml/ini/.env/.log）+ md 均走此端点查看/编辑（含格式化 + 校验，前端 `isBuiltinEditable` 守门）；后端不限扩展名——前端守门决定走内置 editor 还是系统打开**。其它扩展名 / 文件夹仍走 §2.6.2 `POST /workspace/open` 系统应用打开（行为零变更）。技术权威 `specs/tech/version_logs/v0.0.227/change_plan.md`（v0.0.227 引入）+ `specs/tech/version_logs/v0.0.241/change_plan.md`（v0.0.241 扩 11 格式）；UI 契约 `specs/ui/components/chat-page/component-workspace-panel.md §4.4`（`isBuiltinEditable` 拦截判定 + 12 格式分类表）+ `specs/ui/components/common/component-modal-md-editor.md`（通用 file editor，view 按 format 分流 + edit + 格式化/校验按钮）。
+> 服务内置 file viewer/editor 用：workspace panel 点文件在前端拦截改走内置 editor（复用 academy `component-modal-md-editor`），读/存经本组端点。**[v0.0.241] 前端拦截 11 种格式（xml/yaml/json/jsonl/txt/csv/tsv/toml/ini/.env/.log）+ md 均走此端点查看/编辑（含格式化 + 校验，前端 `isBuiltinEditable` 守门）**；**[v0.0.263] 起本地文件（任意扩展名，含普通 + symlink）一律进内置 editor——前端 handleOpen 不再用 `isBuiltinEditable` 白名单判定（该函数保留原 12 格式语义服务 link-target.ts markdown 链接分发），改为「本地文件一律 editor && !isRemoteLinkPath(.url)」新判定；`.url` 远程链接走浏览器**。后端不限扩展名。技术权威 `specs/tech/version_logs/v0.0.227/change_plan.md`（v0.0.227 引入）+ `specs/tech/version_logs/v0.0.241/change_plan.md`（v0.0.241 扩 11 格式）+ `specs/tech/version_logs/v0.0.263/change_plan.md`（v0.0.263 本地/远程二元 + 授权模型）；UI 契约 `specs/ui/components/chat-page/component-workspace-panel.md §4.4`（文件点击分流）+ `specs/ui/components/common/component-modal-md-editor.md`（通用 file editor，view 按 format 分流 + edit + 格式化/校验按钮）。
 
 | 方法 | 路径 | 语义 | 请求体 / query | 成功响应 |
 |------|------|------|--------|---------|
-| `GET` | `/session/:id/workspace/file` | 读 workspace 内文本文件（UTF-8）内容，供内置 file editor 查看（前端 `isBuiltinEditable` 守门 12 格式：md + xml/yaml/json/jsonl/txt/csv/tsv/toml/ini/.env/.log） | query `path`（相对 workspaceDir） | `200` + `{ content: string }` |
+| `GET` | `/session/:id/workspace/file` | 读 workspace 内文件内容（**[v0.0.263] 前端本地文件一律进 editor，后端不限扩展名**；.url 也走本端点读内容后嗅探 URL；**[v0.0.269] `?binary=1` → 读 Buffer 返 base64**，供图片 viewer 二进制通道） | query `path`（相对 workspaceDir）+ `binary?`（`'1'` 时二进制，缺省/非 `'1'` = UTF-8 文本） | `200` + `{ content: string }`（binary=1 时 content 为 base64 字符串） |
 | `POST` | `/session/:id/workspace/file/save` | 覆盖写 workspace 内文本文件（**last-write-wins**，无 mtime 校验、无冲突提示） | `SaveFileBody` | `200` + `{ ok: true }` |
 
 ```typescript
 // GET query param
 path: string;   // 相对 workspaceDir 的路径（同 §2.6.1 tree node.path / §2.6.2 OpenBody.path）
+binary?: string; // [v0.0.269] '1' = 二进制通道（读 Buffer 返 base64）；缺省/非 '1' = UTF-8 文本
 
 interface SaveFileBody {
   path: string;     // 相对 workspaceDir 的路径
@@ -410,7 +429,7 @@ interface SaveFileBody {
 4. 取 `session.workspaceDir`：缺失 → `500`。
 5. `realpathSync(workspaceDir)` 解析 `realRoot`：异常 → `500`（防 workspaceDir 自身含 symlink 段）。
 6. **路径白名单（MANDATORY，复用 whitelistResolve）**：`whitelistResolve(realRoot, path)` → `traversal` → `400`；`not_found`（realpath 失败/文件不存在）→ `404`。
-7. `readFileSync(absPath, 'utf8')` → 返 `200` + `{ content }`。读失败（权限/磁盘）→ `500`。
+7. **读取（v0.0.269 binary 分支）**：query `binary === '1'` → `readFileSync(absPath)` 读 Buffer → 返 `200` + `{ content: buf.toString('base64') }`（图片 viewer 前端拼 data URL；白名单校验与文本同一路径，安全面不变）；binary 缺失/非 `'1'` → `readFileSync(absPath, 'utf8')` → 返 `200` + `{ content }`（向后兼容）。读失败（权限/磁盘）→ `500`。
 
 **POST save** 流程：
 1. method 非 POST → `405`（带 `Allow: POST`）。
@@ -421,19 +440,26 @@ interface SaveFileBody {
 6. **路径白名单（MANDATORY）**：`whitelistResolve(realRoot, path)` → `traversal` → `400`；`not_found`（文件不存在，realpath 失败）→ `404`（**last-write-wins 不新建文件**，仅覆盖既有文件；新文件创建不在本端点语义内）。
 7. `writeFileSync(absPath, content, 'utf8')` 覆盖 → 返 `200` + `{ ok: true }`。写失败（权限/磁盘满）→ `500`。
 
-**安全（路径白名单 MANDATORY，与 §2.6.1/§2.6.2/§2.6.6 同款双层校验）**：
+**安全（路径白名单 MANDATORY，与 §2.6.1/§2.6.2 同款双层校验，v0.0.263 链式授权）**：
 - **step 1 字符串前缀**：`resolve(realRoot, path)` 必须在 `realRoot` 内（挡 `../` 和绝对路径注入）。
-- **step 2 realpath**：解析符号链接后必须仍在 `realRoot` 内（挡 workspace 内 symlink 指向外部，如 `ws/escape -> /etc`）。
-- 复用 `session-workspace.ts:53 whitelistResolve(realRoot, rel)` export（返 `WhitelistResult`），**不新写校验逻辑**。
+- **step 2 链式授权解析**：从 realRoot 出发**逐段** resolve——每段 `lstatSync` 判 symlink，命中则 `realpathSync` 授权该 symlink 目标为继续解析的根（**workspace 内存在的 symlink = 用户放置 = 授权**；symlink 文件读/写放行，目标可在 workspace 外）；无 symlink 段时与旧 `realpathSync` 等价。
+- 未授权越界（非 symlink 段 `../`、绝对路径注入、未先展开 symlink 就访问目标路径）→ `400`（穿越攻击语义不变）。
+- 复用 `app/server/src/handlers/session-workspace-path.ts whitelistResolve(realRoot, rel)` export（返 `WhitelistResult`），**不新写校验逻辑**。
 - **持续可打包护栏（BUG-004）**：路径展开经 `session.workspaceDir`（server 启动时 `resolveDataDir` 已展开为绝对路径落库）+ `realpathSync`，**禁字面 `~` / 禁相对路径拼接**（packaged cwd=`/` 不崩）。
 
 **冲突处理（last-write-wins，PRD §6.3 裁决）**：
 - 编辑过程中文件被外部（其他会话 / 外部编辑器 / watch 事件）修改，保存时**无 mtime 校验、无冲突提示**，`writeFileSync` 直接覆盖。
 - 对齐「保存即落盘」语义 + academy editor 最小改动原则；`.md` 外部并发编辑概率低，last-write-wins 简单直接可接受。
 
-**`.md` 大小写（PRD §6.4 裁决，前端拦截判定）**：
-- 拦截在 `section-workspace-panel.tsx handleOpen`：`node.type==='file' && node.path.toLowerCase().endsWith('.md')` → 走内置 editor；`.MD` / `.Md` 均命中（不区分大小写，匹配跨平台用户预期）。
-- 后端 file 读/存端点本身**不限制扩展名**（通用文本文件读/存，path 落在 workspaceDir 内即可）；`.md` 拦截纯前端判定。
+**[v0.0.269] 文件打开判定（前端 handleOpen，v0.0.263 本地/远程二元 → 五路分流）**：
+- 拦截在 `section-workspace-panel.tsx handleOpen`，顺序（MUST）：
+  1. `node.type !== 'file'`（文件夹，含 symlink→dir）→ `openWorkspaceItem`（`POST /workspace/open` kind=folder 系统文件管理器打开）。
+  2. `isRemoteLinkPath(node.path)`（`.url`，大小写不敏感）→ `openRemoteLink` 浏览器打开（嗅探失败降级 editor）。
+  3. `isImagePath(node.path)`（6 格式 png/jpg/jpeg/gif/webp/svg，大小写不敏感）→ **`setWsImageTarget` → `component-ws-image-viewer`**（只读图片查看，走 `?binary=1` 二进制通道）。
+  4. `getFileFormat(path) !== null`（12 格式文本）→ `setFileEditorTarget` → 内置 editor。
+  5. 其余（非 6 格式图片如 .bmp/.tiff / 未知扩展名）→ `openWorkspaceItem(kind='file')` 系统打开（**无占位 pill**——二进制无法预览的占位只在 editor 内防御，见下）。
+- editor 内 format 由 `getFileFormat(path) ?? 'txt'` 分流（md→markdown 渲染 / structured→pre / 其它→txt plain view）；**looksBinary 保留为 editor 内防御**（`.txt` 被改名成真二进制时 NUL/替换符占比 >5% → 占位 pill「二进制文件无法预览」，不渲染 editor modal——前置分流后正常进 editor 的都是文本，此分支仅兜底）。
+- 后端 file 读/存端点本身**不限制扩展名**（通用文件读/存，path 落在授权根内即可）；本地/远程/图片/文本/系统打开五路判定纯前端。
 
 **错误 codes**：
 - `400` body 非法 JSON / 缺 `path` / `content` 非 string（save）/ `path` 非法（read query）/ 路径白名单 traversal 拒绝。
@@ -444,9 +470,12 @@ interface SaveFileBody {
 **请求示例**：
 
 ```bash
-# 读
+# 读文本
 curl http://127.0.0.1:3710/session/01KV.../workspace/file?path=docs/notes.md
 # → 200 {"content":"# Notes\n\n..."}
+# [v0.0.269] 读二进制（图片 viewer 通道）
+curl "http://127.0.0.1:3710/session/01KV.../workspace/file?path=img/logo.png&binary=1"
+# → 200 {"content":"iVBORw0KGgoAAAANSUhEUg..."}  （base64）
 # 存（last-write-wins 覆盖）
 curl -X POST http://127.0.0.1:3710/session/01KV.../workspace/file/save \
   -H "Content-Type: application/json" \
@@ -1056,5 +1085,5 @@ AT 可测性补充端点（v0.0.151.t2_consolidate 引入，v0.0.190 保留）�
 
 ## 12. 版本
 
-version: 2.6（v0.0.231 修订：§2.1 Session 增 `pinned: boolean`（lazy 默认 false，无 migration）；§2.5 UpdateSessionBody 增 `pinned?: boolean`（非 boolean → 400，写后 metaBroadcaster.broadcast 多端归位；**pinned-only 更新不推进 updatedAt**——置顶是纯标记，用户裁决 2026-08-01）。置顶分组 = 前端展示层归位，GET /session 顺序契约不变。详见 `specs/tech/version_logs/v0.0.231/change_plan.md` + `specs/api/version_logs/v0.0.231/change_log.md`）。2.5（v0.0.192.delete_cleanup 修订：§2.4 `DELETE /session/:id` 加级联删子孙语义——删 parent 前先 `collectDescendants(id)` BFS 快照全部子孙 session（任意深度，基于 childrenIndex），子孙先删（每触发 `onSessionDestroyed` → 清内存 cron，堵潜伏调度）、parent 最后删；recycleSession/disconnect 仍仅 parent 维度（tab/连接器是 parent 维度，子孙无独立 tab）。堵「删 parent 后 child cron 继续烧 token」漏洞；机制不变（onSessionDestroyed 行为同 scheduling KB §8），只让级联路径每 descendant 走一次 deleteSession。详见 `specs/tech/version_logs/v0.0.192.delete_cleanup/change_plan.md`）。2.4（v0.0.190 修订：§13 Test-only 端点组删 `POST /test/llm-mode` + `/test/llm-mode/commit`——AT record/replay 基建整体删除（`app/server/src/testing/` 整目录 + misc-routes 路由块），对齐 v0.0.188 ET 真实跑范式；保留的 `POST /test/consolidation/run` 补入 §13.1。生产零影响（删除端点全 NODE_ENV=test 门控）。详见 `specs/api/version_logs/v0.0.190/change_log.md`）。2.3（v0.0.139 修订：workspace watcher 懒监听重构——§2.6.5 新增 `POST /session/:id/workspace/watch` + `/unwatch`（tab `clientId` + `path` 显式 acquire/release，一层非递归监听，幂等，`path` 省略=release-all-for-tab）；§2.5 切目录副作用 stop→set→start 改 `switchDir`=recycleSession→setDir（不重启，前端重新 watch 新根）；§2.4 DELETE 副作用 `stopWatch`→`recycleSession`。权威模型 `specs/tech/agent/session/[P0]session_workspace_manager.md`（v0.0.139 重写）+ 前端接线 `component-workspace-panel.md §4.3`）。2.2（v0.0.31 修订：§3.2 POST /messages 加「[v0.0.31·代码已落地]」注——内部从裸 enqueue(config)+activate(config) + buildSessionConfigFromDeps 收敛为 manager.deliverTo(sessionId, userMsg)（manager 内部 resolveConfigBySid 获取 config）；sender 形态对齐判别联合 `{source:'user'}`（无 agentName/agentId 扁平残留）；HTTP 契约不变（仅内部实现收敛 + 落库 message.sender 形态变化）。详见 `specs/api/version_logs/v0.0.31/change_log.md §3.2`）。2.1（v0.0.27 新增 `session_meta` 广播 topic——§4.2 SubscribeBody topic 注释加 `session_meta` / group 注释加 `_all` + 新增「[v0.0.27] session_meta topic（广播，会话列表订阅）」段（group=`_all` 共享广播 / payload=`SessionMetaView` 全量最新态 / 触发时机全集引用 / producer=session 层 `SessionMetaBroadcaster` / 白名单含 session_meta / replayable=false）；§4.3 错误合法集合加 session_meta；§11 文件变更清单新增 v0.0.27 meta 4 项（handlers/sse.ts ALLOWED_TOPICS 加 session_meta / bootstrap.ts registerTopic session_meta + broadcaster 装配 / 新建 session-meta-broadcast/session-meta-broadcaster.ts / session-unread-runtime.ts wrap 泛化 + markUnreadTrue 直调 / session-event-types.ts 加 SessionMetaUpdateEvent + SessionMetaView）。详见 `specs/tech/version_logs/v0.0.27/session-meta-broadcast-decision.md`）。2.0（v0.0.27 二次修订：**产生未读归属层**从「agent-loop」改为「**session 层**」自治——§2.3.1 step 5 注释 / §10 AT 路径 X/Z 措辞 / §11 文件变更清单全部同步：§11 删除「agent-loop.ts markIdle/markError 后调 isSessionActive + CAS unread」条目，新增「**session-unread-runtime.ts（session 层订阅者）**：订阅 session_status_update completion 信号 → 查 isSessionActive → CAS unread」+「agent-loop.ts/agent-manager.ts 删除 maybeMarkUnread + sseChannel/SessionPresenceProbe 注入（还原原始职责）」+「session-state-machine.ts 零改动（继续 emit session_status_update）」+「SseChannel.isSessionActive 消费方从 agent-loop 改到 session 层（实现不变）」。保留 explicit-bool / GET 纯读 / POST /read 唯一消除 / CAS 幂等不动）。1.9（v0.0.27：watermark→explicit-bool）。1.8（v0.0.25 rev2 修订：SSE error 事件再扩可选 `displayReason`+`errorDetail`（rev1 已加 `errorCategory`）；新增 `llm_attempt` SSE event（per-attempt retry/fallback 进度）；`GET /session/:id` 响应 `currentRun.error` / 历史 run error 携带 `RunErrorInfo = { errorCategory, displayReason, errorDetail? }`（eager-drain 落 RunRecord；ABORTED_BY_USER 走 interrupted 不填）；LlmErrorCategory 17→19 值（+MAX_TOKENS_TOO_HIGH/EMPTY_RESPONSE）。§10 路径 C 更新；详见 `02-llm-chat.md` §1 [v0.0.25 rev2 modified] + `specs/tech/version_logs/v0.0.25/llm_caller_rev2_changes.md`）。1.7（v0.0.17 修订：§2.1 workspaceDir 初始策略补 BUG-001 修复（caller 在 body 提供 workspaceDir 时校验 abs + exists + isDir 通过后用该值，**不**强制默认路径；缺省仍自动建 `<DATA_DIR>/workspaces/<sid>`）；新增 §2.6.4 `/api/workspace/*` ET seed 端点（test-only，NODE_ENV=test gate，非 test 404；3 个端点 ensure-dir / touch / ensure，仅供 ET seed fs；ensure 放宽白名单专供 switch_tc1 flow）。详见 `specs/api/version_logs/v0.0.17/change_log.md`）。1.6（v0.0.17 修订：§2.6.1 `GET /session/:id/workspace/tree` 改 lazy 加载——加 query param `parent?`（相对路径，缺省顶层）+ `depth?`（缺省 1，仅一层）；响应 `WsTreeNode` 用 `hasChildren` 替代 `children?`（不递归）；响应加 `parent: string|null` 字段；安全校验 `parent` resolve 后必须在 workspaceDir 内（防穿越）；§2.6.1 错误码加 400 parent 非法/depth 越界。详见 `specs/api/version_logs/v0.0.17/change_log.md`）。1.5（v0.0.17：§2.1 `CreateSessionBody` 加 `workspaceDir?`（缺省自动建 `<DATA_DIR>/workspaces/<sid>`）+ `Session` 响应加 `workspaceDir: string` 字段；新增 §2.5 `PUT /session/:id`（切换 workspaceDir，stop→set→start 顺序保证）；新增 §2.6 Workspace 端点组（`GET /session/:id/workspace/tree` + `POST /session/:id/workspace/open`（路径白名单防穿越）+ `POST /session/:id/workspace/pick-directory`（系统原生 dialog，支持新建文件夹））；§2.4 DELETE 触发 stopWatch。详见 `specs/api/version_logs/v0.0.17/change_log.md`）。1.4（v0.0.16：新增 `GET /session/:id/usage`（§6，返 SessionUsageView 含 ContextWindowUsage 7 字段 + 4 个 cacheRate 派生字段）+ `POST /session/:id/compact`（§7，手动触发 fire-and-forget 202，409 拒绝 running/interrupting）+ `POST /session/:id/clear`（§8，同步原子 200，前置 abort+markSummaryFailed）；§9 错误码表恢复 409（仅 compact 路径）；§10 新增 AT 路径 R-W；§11 文件变更清单补 v0.0.16 entries）。1.3（v0.0.16：§3.3 `POST /session/:id/abort` 请求体新增 `runId` + `modeKey` 必填；响应新增 `accepted: boolean` 区分真实中断与幂等 no-op；三参数缺一不可；新增请求示例）。1.2：v0.0.12 补 design 板块 3.4 cancel。1.1：v0.0.12 修订（Session 响应加 state/running/currentRunId；新增 abort；enqueue 排队 + interrupting 循环等待；移除 409）。1.0：v0.0.8 新建）。
+version: 2.7（v0.0.271 修订：§2.6.5 新增 `POST /session/:id/workspace/watch-set`（声明式替换该 tab 关注集合，body `{ clientId, paths: string[] }` 完整集合非增量，后端 diff 增删 + 不在新集合一律 close；paths 逐元素白名单校验，穿越 400 / 不存在静默跳过；缺 clientId 400；realRoot = realpathSync(workspaceDir) 三端点共用）。watch/unwatch 增量保留兼容（release-all 仍用），新前端不再调单 path。权威模型 `specs/tech/agent/session/[P0]session_workspace_manager.md`（v0.0.271 关注集合升级）+ 前端接线 `component-workspace-panel.md §4.3`）。2.6（v0.0.231 修订：§2.1 Session 增 `pinned: boolean`（lazy 默认 false，无 migration）；§2.5 UpdateSessionBody 增 `pinned?: boolean`（非 boolean → 400，写后 metaBroadcaster.broadcast 多端归位；**pinned-only 更新不推进 updatedAt**——置顶是纯标记，用户裁决 2026-08-01）。置顶分组 = 前端展示层归位，GET /session 顺序契约不变。详见 `specs/tech/version_logs/v0.0.231/change_plan.md` + `specs/api/version_logs/v0.0.231/change_log.md`）。2.5（v0.0.192.delete_cleanup 修订：§2.4 `DELETE /session/:id` 加级联删子孙语义——删 parent 前先 `collectDescendants(id)` BFS 快照全部子孙 session（任意深度，基于 childrenIndex），子孙先删（每触发 `onSessionDestroyed` → 清内存 cron，堵潜伏调度）、parent 最后删；recycleSession/disconnect 仍仅 parent 维度（tab/连接器是 parent 维度，子孙无独立 tab）。堵「删 parent 后 child cron 继续烧 token」漏洞；机制不变（onSessionDestroyed 行为同 scheduling KB §8），只让级联路径每 descendant 走一次 deleteSession。详见 `specs/tech/version_logs/v0.0.192.delete_cleanup/change_plan.md`）。2.4（v0.0.190 修订：§13 Test-only 端点组删 `POST /test/llm-mode` + `/test/llm-mode/commit`——AT record/replay 基建整体删除（`app/server/src/testing/` 整目录 + misc-routes 路由块），对齐 v0.0.188 ET 真实跑范式；保留的 `POST /test/consolidation/run` 补入 §13.1。生产零影响（删除端点全 NODE_ENV=test 门控）。详见 `specs/api/version_logs/v0.0.190/change_log.md`）。2.3（v0.0.139 修订：workspace watcher 懒监听重构——§2.6.5 新增 `POST /session/:id/workspace/watch` + `/unwatch`（tab `clientId` + `path` 显式 acquire/release，一层非递归监听，幂等，`path` 省略=release-all-for-tab）；§2.5 切目录副作用 stop→set→start 改 `switchDir`=recycleSession→setDir（不重启，前端重新 watch 新根）；§2.4 DELETE 副作用 `stopWatch`→`recycleSession`。权威模型 `specs/tech/agent/session/[P0]session_workspace_manager.md`（v0.0.139 重写）+ 前端接线 `component-workspace-panel.md §4.3`）。2.2（v0.0.31 修订：§3.2 POST /messages 加「[v0.0.31·代码已落地]」注——内部从裸 enqueue(config)+activate(config) + buildSessionConfigFromDeps 收敛为 manager.deliverTo(sessionId, userMsg)（manager 内部 resolveConfigBySid 获取 config）；sender 形态对齐判别联合 `{source:'user'}`（无 agentName/agentId 扁平残留）；HTTP 契约不变（仅内部实现收敛 + 落库 message.sender 形态变化）。详见 `specs/api/version_logs/v0.0.31/change_log.md §3.2`）。2.1（v0.0.27 新增 `session_meta` 广播 topic——§4.2 SubscribeBody topic 注释加 `session_meta` / group 注释加 `_all` + 新增「[v0.0.27] session_meta topic（广播，会话列表订阅）」段（group=`_all` 共享广播 / payload=`SessionMetaView` 全量最新态 / 触发时机全集引用 / producer=session 层 `SessionMetaBroadcaster` / 白名单含 session_meta / replayable=false）；§4.3 错误合法集合加 session_meta；§11 文件变更清单新增 v0.0.27 meta 4 项（handlers/sse.ts ALLOWED_TOPICS 加 session_meta / bootstrap.ts registerTopic session_meta + broadcaster 装配 / 新建 session-meta-broadcast/session-meta-broadcaster.ts / session-unread-runtime.ts wrap 泛化 + markUnreadTrue 直调 / session-event-types.ts 加 SessionMetaUpdateEvent + SessionMetaView）。详见 `specs/tech/version_logs/v0.0.27/session-meta-broadcast-decision.md`）。2.0（v0.0.27 二次修订：**产生未读归属层**从「agent-loop」改为「**session 层**」自治——§2.3.1 step 5 注释 / §10 AT 路径 X/Z 措辞 / §11 文件变更清单全部同步：§11 删除「agent-loop.ts markIdle/markError 后调 isSessionActive + CAS unread」条目，新增「**session-unread-runtime.ts（session 层订阅者）**：订阅 session_status_update completion 信号 → 查 isSessionActive → CAS unread」+「agent-loop.ts/agent-manager.ts 删除 maybeMarkUnread + sseChannel/SessionPresenceProbe 注入（还原原始职责）」+「session-state-machine.ts 零改动（继续 emit session_status_update）」+「SseChannel.isSessionActive 消费方从 agent-loop 改到 session 层（实现不变）」。保留 explicit-bool / GET 纯读 / POST /read 唯一消除 / CAS 幂等不动）。1.9（v0.0.27：watermark→explicit-bool）。1.8（v0.0.25 rev2 修订：SSE error 事件再扩可选 `displayReason`+`errorDetail`（rev1 已加 `errorCategory`）；新增 `llm_attempt` SSE event（per-attempt retry/fallback 进度）；`GET /session/:id` 响应 `currentRun.error` / 历史 run error 携带 `RunErrorInfo = { errorCategory, displayReason, errorDetail? }`（eager-drain 落 RunRecord；ABORTED_BY_USER 走 interrupted 不填）；LlmErrorCategory 17→19 值（+MAX_TOKENS_TOO_HIGH/EMPTY_RESPONSE）。§10 路径 C 更新；详见 `02-llm-chat.md` §1 [v0.0.25 rev2 modified] + `specs/tech/version_logs/v0.0.25/llm_caller_rev2_changes.md`）。1.7（v0.0.17 修订：§2.1 workspaceDir 初始策略补 BUG-001 修复（caller 在 body 提供 workspaceDir 时校验 abs + exists + isDir 通过后用该值，**不**强制默认路径；缺省仍自动建 `<DATA_DIR>/workspaces/<sid>`）；新增 §2.6.4 `/api/workspace/*` ET seed 端点（test-only，NODE_ENV=test gate，非 test 404；3 个端点 ensure-dir / touch / ensure，仅供 ET seed fs；ensure 放宽白名单专供 switch_tc1 flow）。详见 `specs/api/version_logs/v0.0.17/change_log.md`）。1.6（v0.0.17 修订：§2.6.1 `GET /session/:id/workspace/tree` 改 lazy 加载——加 query param `parent?`（相对路径，缺省顶层）+ `depth?`（缺省 1，仅一层）；响应 `WsTreeNode` 用 `hasChildren` 替代 `children?`（不递归）；响应加 `parent: string|null` 字段；安全校验 `parent` resolve 后必须在 workspaceDir 内（防穿越）；§2.6.1 错误码加 400 parent 非法/depth 越界。详见 `specs/api/version_logs/v0.0.17/change_log.md`）。1.5（v0.0.17：§2.1 `CreateSessionBody` 加 `workspaceDir?`（缺省自动建 `<DATA_DIR>/workspaces/<sid>`）+ `Session` 响应加 `workspaceDir: string` 字段；新增 §2.5 `PUT /session/:id`（切换 workspaceDir，stop→set→start 顺序保证）；新增 §2.6 Workspace 端点组（`GET /session/:id/workspace/tree` + `POST /session/:id/workspace/open`（路径白名单防穿越）+ `POST /session/:id/workspace/pick-directory`（系统原生 dialog，支持新建文件夹））；§2.4 DELETE 触发 stopWatch。详见 `specs/api/version_logs/v0.0.17/change_log.md`）。1.4（v0.0.16：新增 `GET /session/:id/usage`（§6，返 SessionUsageView 含 ContextWindowUsage 7 字段 + 4 个 cacheRate 派生字段）+ `POST /session/:id/compact`（§7，手动触发 fire-and-forget 202，409 拒绝 running/interrupting）+ `POST /session/:id/clear`（§8，同步原子 200，前置 abort+markSummaryFailed）；§9 错误码表恢复 409（仅 compact 路径）；§10 新增 AT 路径 R-W；§11 文件变更清单补 v0.0.16 entries）。1.3（v0.0.16：§3.3 `POST /session/:id/abort` 请求体新增 `runId` + `modeKey` 必填；响应新增 `accepted: boolean` 区分真实中断与幂等 no-op；三参数缺一不可；新增请求示例）。1.2：v0.0.12 补 design 板块 3.4 cancel。1.1：v0.0.12 修订（Session 响应加 state/running/currentRunId；新增 abort；enqueue 排队 + interrupting 循环等待；移除 409）。1.0：v0.0.8 新建）。
 > **v0.0.27 归属层决策史**：(1) agent-loop（maybeMarkUnread + SessionPresenceProbe 注入）——违反关注点分离，否决；(2) 状态机注入 SSE——违反纯粹原则，否决；(3) 最终：**session 层**自治（订阅 completion 信号 + 查 isSessionActive + CAS unread）。详见 `specs/tech/version_logs/v0.0.27/unread-model-decision.md` §6。

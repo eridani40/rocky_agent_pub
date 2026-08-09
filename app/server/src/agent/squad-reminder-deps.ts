@@ -30,7 +30,7 @@ export interface SquadReminderDeps {
     listMembers(squadId: string): Promise<unknown[]> | unknown[];
   };
   /**
-   * [v0.0.116] session running 状态查询（squad_team_status provider 用）。
+   * [v0.0.116] session running 状态查询（squad_agents_status provider 用）。
    * 口径：session.state==='running'（与 isSessionBusy 同 SessionStore 句柄）。
    */
   isSessionRunning(sessionId: string): Promise<boolean>;
@@ -63,7 +63,7 @@ export interface SquadContextService {
   getSquad(squadId: string): Promise<unknown>;
   listMembers(squadId: string): Promise<unknown[]>;
   /**
-   * [v0.0.116] session running 状态查询（squad_team_status provider 用）。
+   * [v0.0.116] session running 状态查询（squad_agents_status provider 用）。
    * 口径：session.state==='running'（bootstrap 注入）。
    */
   isSessionRunning(sessionId: string): Promise<boolean>;
@@ -93,7 +93,7 @@ export function makeSquadContextService(deps: SquadReminderDeps): SquadContextSe
   return {
     getSquad: (squadId: string) => Promise.resolve(deps.squadStore.getSquad(squadId)),
     listMembers: (squadId: string) => Promise.resolve(deps.memberStore.listMembers(squadId)),
-    // [v0.0.116] 透传 isSessionRunning（squad_team_status provider 用）
+    // [v0.0.116] 透传 isSessionRunning（squad_agents_status provider 用）
     isSessionRunning: (sessionId: string) => Promise.resolve(deps.isSessionRunning(sessionId)),
     // squad_task provider 数据源（panorama_builtin §5）
     listActiveTasks: (squadId: string, viewerMemberId: string | null) =>

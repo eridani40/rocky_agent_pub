@@ -39,7 +39,7 @@ interface SectionChatSessionProps {
   placeholder?: string;
   /** 空态内容（messages 空 && 无 run 时）；缺省渲通用空文案 */
   emptyStateSlot?: ReactNode;
-  /** mention pill 预填（studio 看板 @ 入口） */
+  /** mention pill 预填（studio 看板 @ 入口）；**v0.0.267 起仅在无草稿时注入**（草稿优先，见「输入区草稿」） */
   prefill?: MentionAttrs[];
   fadeIn?: boolean;
   rootTag?: 'section' | 'main';
@@ -63,7 +63,10 @@ interface SectionChatSessionProps {
 | ClearBtn + clear modal | `clear` | 隐藏 |
 | minimap + 右上悬浮菜单 | `minimap` / `floatMenu`（cron 项按 `cron`） | 保留 |
 | 群聊渲染策略（白名单 filter + a2a actor + max-w-760） | `groupRender`（配 members） | — |
+| member 单聊 a2a 信封折叠 | 恒有（member 单聊内置） | — |
 
+- **member 单聊 a2a 消息渲染**：member 单聊（非群聊）中，a2a inbox 消息走**左侧（assistant 侧）**，以信封折叠展示（收起态 = 信封 icon + senderName，展开态 = 灰色气泡正文，见 `component-a2a-envelope.md`）。`memberSideResolver` 不再将 a2a 特判到 user 侧。**[v0.0.301] a2a 信封行左侧头像为原 MemberAvatar 对象 invisible**（actor 解析 a2a 分支返回 `w-9 shrink-0 invisible` 包裹原头像，位置 100% 保真、信封不贴左；human user / 对端普通回复头像不受影响）。
+- **群聊 a2a 消息渲染**：群聊（`groupRender`）中 a2a inbox 消息同样走共享内核 `isA2aInbox` 分支，以信封折叠展示在左侧（与单聊同一 `component-a2a-envelope.md` 契约）。**[v0.0.301] 与单聊一致，a2a 信封行左侧头像为原 MemberAvatar 对象 invisible**（`resolveGroupActor` a2a 分支返回 `w-9 shrink-0 invisible` 包裹原头像，信封位置不动；human user 头像保留）。
 - 卡片/按钮出现消失不得引起输入区位移（`10-tool-permission.md §10.3` 占位固定口径）。
 - chrome loading 期间渲 BaseChatPage loading 占位；error → 空态 + console.warn。
 - 可见文案：全部沿用既有组件契约（pending-question-card / pending-approval-card / usage-panel / effort-picker / approval-mode-picker 各自 spec），本组件不新增文案。
@@ -77,6 +80,16 @@ interface SectionChatSessionProps {
 | academy 班主任 / 教练 | topbarLeft（avatar header）+ placeholder（教练另有 onMessagesChange） |
 | academy 学生版本会话 | topbarLeft + placeholder（minimap/usage 全内置，父级不再回收 messages） |
 | academy subagent 只读 | topbarLeft + onBack（chrome.readOnly 自动 true） |
+
+## 输入区草稿（v0.0.267）
+
+输入区（`ChatComposer`）内建**草稿缓存**：每个 session 的未发送输入内容按 `sessionId` 内存级缓存（`chat-slice.drafts`，无 persist），切走再切回完整恢复（文本 + mention pill + 多行）。接线在 ChatComposer 内部（`use-chat-draft.ts` hook），**本组件零改动**——7 页消费方单点生效：
+
+- **草稿 > prefill 优先级**：mount 时有草稿（`drafts[sessionId]` 非空）→ 恢复草稿、忽略 `prefill`；无草稿 → 走既有 prefill/initialContent 注入。草稿 = 用户未完成输入强意图，prefill = 外部跳转弱意图。
+- **编辑即写**：onUpdate 实时写缓存（含空内容清除）；**发送后清除**：handleSubmit 内 `onSend` 后显式 `clearDraft`（不残留已发送内容）。
+- **覆盖范围**：playground / studio 单聊群聊 / academy×4 全部经本组件接入的聊天页；subagent 只读页（readOnly）无输入区，不缓存不恢复。
+
+详见 `chat-composer.md`「输入草稿缓存」节 + `app/web/src/store/chat-slice.ts`（drafts/saveDraft/clearDraft）。
 
 ## 复用关系
 

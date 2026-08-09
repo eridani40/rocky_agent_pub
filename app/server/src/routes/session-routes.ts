@@ -35,7 +35,7 @@ import { handleSessionSummary } from '../handlers/session';
 import {
   handleWorkspaceTree, handleWorkspaceOpen, handleWorkspacePickDirectory,
 } from '../handlers/session-workspace';
-import { handleWorkspaceWatch, handleWorkspaceUnwatch } from '../handlers/session-workspace-watch';
+import { handleWorkspaceWatch, handleWorkspaceWatchSet, handleWorkspaceUnwatch } from '../handlers/session-workspace-watch';
 import { handleWorkspaceSaveImage } from '../handlers/session-workspace-save-image';
 import { handleWorkspaceFileRead, handleWorkspaceFileSave } from '../handlers/session-workspace-file';
 import { handleSessionDebugSystemPrompt } from '../handlers/session-debug';
@@ -143,6 +143,10 @@ export async function dispatchSessionRoutes(
     if (sessionMatch.sub === 'workspace_watch') {
       // [v0.0.139] POST /session/:id/workspace/watch（懒监听 acquire，api §2.6.5）
       return handleWorkspaceWatch(req, method, sessionMatch.id, deps);
+    }
+    if (sessionMatch.sub === 'workspace_watch-set') {
+      // [v0.0.271] POST /session/:id/workspace/watch-set（声明式替换关注集合，api §2.6.5）
+      return handleWorkspaceWatchSet(req, method, sessionMatch.id, deps);
     }
     if (sessionMatch.sub === 'workspace_unwatch') {
       // [v0.0.139] POST /session/:id/workspace/unwatch（懒监听 release，api §2.6.5）

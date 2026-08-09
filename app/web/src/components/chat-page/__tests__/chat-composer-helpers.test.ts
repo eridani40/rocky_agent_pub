@@ -11,19 +11,22 @@
  *   - 向后兼容：injectMentions(editor, items) 委托 injectInitialContent 走 array 分支
  */
 import { describe, it, expect, vi } from 'vitest';
-import { injectInitialContent, injectMentions } from '../chat-composer-helpers';
+import { injectInitialContent, injectMentions, restoreDraftContent } from '../chat-composer-helpers';
 import type { MentionAttrs } from '../chat-composer-extension';
+import type { TiptapNodeJSON } from '../mention-tag';
 
 /** 构造 mock chain：每个方法记录调用 + 返回自身以支持链式 */
 function makeChain() {
   const calls: string[] = [];
+  const insertContents: Array<string | TiptapNodeJSON[]> = [];
   const chain = {
     insertMention: vi.fn((attrs: MentionAttrs) => {
       calls.push(`insertMention:${attrs.type}:${attrs.label}`);
       return chain;
     }),
-    insertContent: vi.fn((content: string) => {
-      calls.push(`insertContent:${content}`);
+    insertContent: vi.fn((content: string | TiptapNodeJSON[]) => {
+      insertContents.push(content);
+      calls.push(`insertContent:${typeof content === 'string' ? content : `array(${content.length})`}`);
       return chain;
     }),
     focus: vi.fn(() => {
@@ -34,13 +37,13 @@ function makeChain() {
       calls.push('run');
     }),
   };
-  return { chain, calls };
+  return { chain, calls, insertContents };
 }
 
 /** 构造 mock editor：chain() 返回上面那个 chain */
 function makeEditor() {
-  const { chain, calls } = makeChain();
-  return { editor: { chain: () => chain }, chain, calls };
+  const { chain, calls, insertContents } = makeChain();
+  return { editor: { chain: () => chain }, chain, calls, insertContents };
 }
 
 describe('injectInitialContent（dispatcher）', () => {
@@ -86,5 +89,40 @@ describe('injectMentions（向后兼容委托）', () => {
     ];
     injectMentions(editor, items);
     expect(calls).toEqual(['insertMention:member:Rocky', 'run']);
+  });
+});
+
+describe('restoreDraftContent（v0.0.267 草稿恢复 dispatcher）', () => {
+  it('调 chain().focus().insertContent(paragraphs).run()（mention 保真反序列化）', () => {
+    const { editor, calls, insertContents } = makeEditor();
+    restoreDraftContent(
+      editor,
+      '第一行\n<mention type="member" id="m1" icon="member" label="张三"/> 你好',
+    );
+    // 顺序：focus → insertContent(paragraphs 数组) → run
+    expect(calls[0]).toBe('focus');
+    expect(calls[1]).toContain('insertContent:array(');
+    expect(calls[2]).toBe('run');
+    // paragraphs 为反序列化数组（mention 保真：deserializeContentToParagraphs 输出两段）
+    const paragraphs = insertContents[0] as TiptapNodeJSON[];
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]!.type).toBe('paragraph');
+    expect(paragraphs[0]!.content?.[0]!.type).toBe('text');
+    expect(paragraphs[1]!.content?.[0]!.type).toBe('mention');
+    expect(paragraphs[1]!.content?.[0]!.attrs).toMatchObject({
+      type: 'member',
+      id: 'm1',
+      icon: 'member',
+      label: '张三',
+    });
+  });
+
+  it('纯函数无状态：多次调用不残留（同一 editor 可重复恢复）', () => {
+    const { editor, insertContents } = makeEditor();
+    restoreDraftContent(editor, '一次');
+    restoreDraftContent(editor, '二次');
+    expect(insertContents).toHaveLength(2);
+    expect((insertContents[0] as TiptapNodeJSON[])[0]!.content?.[0]!.text).toBe('一次');
+    expect((insertContents[1] as TiptapNodeJSON[])[0]!.content?.[0]!.text).toBe('二次');
   });
 });

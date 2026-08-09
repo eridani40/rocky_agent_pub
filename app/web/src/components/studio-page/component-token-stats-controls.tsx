@@ -14,6 +14,7 @@
  * 单日粒度下额外显示日期选择。
  */
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Granularity, KindFilter, ViewMode, AvailableModel } from './component-token-stats-types';
 import { kindLabelCN } from './component-token-stats-helpers';
 import type { Member } from './squad-types';
@@ -78,7 +79,13 @@ function ChipGroup<T extends string>({
   );
 }
 
-/** 通用自定义下拉（无原生 select，符合 _conventions §10） */
+/** 通用自定义下拉（无原生 select，符合 _conventions §10）
+ *
+ * 面板层级机制（对齐 component-token-stats-tooltip 的 PortalTooltip）：
+ *   - 面板 createPortal 到 document.body + position:fixed（viewport 坐标）——脱离父 stacking
+ *     context，不被图表列（calendar cell / timeline bar 后绘制 + 自建 stacking context）压在下层。
+ *   - 定位：open 时取 trigger 的 getBoundingClientRect()，面板贴按钮下沿 4px、左对齐。
+ */
 function CustomDropdown({
   currentLabel,
   options,
@@ -92,16 +99,29 @@ function CustomDropdown({
   actionKey?: string;
 }) {
   const [open, setOpen] = useState(false);
-  // outside-close 判定锚点 = 整个 wrap 容器（含触发按钮 + 下拉列表）。
-  // 注意：列表是触发按钮的兄弟节点，若只对按钮做 contains 判定，点列表项的 mousedown
-  // 会被误判为「容器外」→ 列表在 click 派发前卸载 → item onClick 永不触发（v0.0.194 验收 bug）。
-  // 对齐 component-input-model-picker.tsx 的 wrapRef 模式。
-  const wrapRef = useRef<HTMLDivElement>(null);
+  /** 面板 fixed 坐标（open 时从 trigger rect 派生） */
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // outside-close 判定锚点 = 触发按钮 + 面板本体。
+  // 面板 Portal 到 body 后已脱离 trigger 的 DOM 分支，若只判 triggerRef.contains，点面板选项的
+  // mousedown 会被误判为「容器外」→ 面板在 click 派发前卸载 → 选项 onClick 永不触发（v0.0.194 同款 bug）。
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const toggle = () => {
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.left });
+    }
+    setOpen((v) => !v);
+  };
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     // 延迟一拍注册，躲开触发按钮同次事件冒泡关闭（memory dropdown-close-listener-defer-register）
@@ -117,35 +137,41 @@ function CustomDropdown({
   }, [open]);
 
   return (
-    <div ref={wrapRef} className="relative">
+    <>
       <button
+        ref={triggerRef}
         type="button"
         data-action-key={actionKey}
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] font-medium text-fg hover:bg-surface-2"
       >
         <span className="max-w-[160px] truncate">{currentLabel}</span>
         <span className="text-muted">▾</span>
       </button>
-      {open && (
-        <div
-          className="absolute left-0 top-[calc(100%+4px)] z-popover min-w-[160px] overflow-hidden rounded-md border border-border bg-surface shadow-md"
-        >
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              data-action-key={actionKey ? `${actionKey}-option` : undefined}
-              onClick={() => { onSelect(o.value); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-surface-2"
-            >
-              <span className="flex-1 truncate">{o.label}</span>
-              {o.hint && <span className="text-muted">{o.hint}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="fixed z-popover min-w-[160px] overflow-hidden rounded-md border border-border bg-surface shadow-md"
+            style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
+          >
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                data-action-key={actionKey ? `${actionKey}-option` : undefined}
+                onClick={() => { onSelect(o.value); setOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-surface-2"
+              >
+                <span className="flex-1 truncate">{o.label}</span>
+                {o.hint && <span className="text-muted">{o.hint}</span>}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

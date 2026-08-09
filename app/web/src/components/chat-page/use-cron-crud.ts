@@ -7,16 +7,18 @@
  *
  * 从 section-cron-panel 抽出的纯数据层 CRUD 逻辑（不含 UI）：
  *   - onInit：GET /session/:sid/cron → Collection<CronJobSummary>（keyOf=按 id 索引）+
- *     effect.startTimer({intervalMs:60000,...})（cron nextFireAt 分钟级漂移，无 SSE topic）
- *   - onTick：60s 到点重读 list 返新 ctx
+ *     subscribe('session_panel', 'session_id:'+sid)（SSE 主更新源）+
+ *     startTimer({intervalMs:300000,...})（5min 漂移兜底，SSE 是主更新源）
+ *   - onEvent：收到 session_cron_changed → 全量 refetch 返新 Collection（与 use-usage onEvent 同模式）
+ *   - onTick：5min 到点重读 list 返新 ctx（漂移兜底）
  *   - toggle/delete 写后 refetch（reload 命令式）
  *   - enabled=false（如 squad 群聊 float-menu hideCron 时）→ 零网络：onInit 直接返空 Collection，
- *     不调 startTimer / listCronJobs
+ *     不调 subscribe / startTimer / listCronJobs
  *
  * 被 component-chat-float-menu（badge 数据源，恒挂载）+ component-cron-modal（弹层列表，同一 hook
  * 实例复用）共用——badge 与弹层列表同源，写后 refetch 即时更新两处。
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   deleteCronJob,
   disableCronJob,
@@ -24,11 +26,12 @@ import {
   listCronJobs,
   type CronJobSummary,
 } from '../../lib/cron-api';
-import { useLifecycle } from '../../lib/use-lifecycle';
+import { useLifecycle, type LifecycleInitApi } from '../../lib/use-lifecycle';
 import { type Collection } from '../../lib/lifecycle-shapes';
+import type { SessionEvent } from '../../store/session-slice-reducer';
 
-/** 60s 轮询间隔（cron nextFireAt 分钟级漂移，无 SSE topic → poll 兜底，走 effect.startTimer） */
-const POLL_INTERVAL_MS = 60_000;
+/** 5min 漂移兜底间隔（SSE 是主更新源，timer 仅兜底 nextFireAt 分钟级漂移） */
+const POLL_INTERVAL_MS = 300_000;
 
 /** 新建表单 state（迁自 section-cron-panel，被 component-cron-new-form 复用，须 export） */
 export interface NewFormState {
@@ -86,26 +89,50 @@ export function useCronCrud(sessionId: string, opts: UseCronCrudOptions = {}): C
     loading,
     error: initError,
     reload,
-  } = useLifecycle<Collection<CronJobSummary>>({
-    onInit: async ({ signal, startTimer }) => {
+    mutateCtx,
+  } = useLifecycle<Collection<CronJobSummary>, SessionEvent>({
+    onInit: async ({ signal, startTimer, subscribe }: LifecycleInitApi) => {
       if (!enabled) return EMPTY_COLLECTION;
-      // 声明 60s poll（cron 无 SSE topic，poll 兜底须走 effect.startTimer 标准化）
+      // SSE 主更新源：订阅 session_panel，后端 cron 变更推 session_cron_changed
+      subscribe('session_panel', 'session_id:' + sessionId);
+      // 5min 漂移兜底（SSE 是主更新源，timer 仅兜底 nextFireAt 分钟级漂移）
       startTimer({
         intervalMs: POLL_INTERVAL_MS,
-        justification: 'cron nextFireAt 分钟级漂移，无 SSE topic',
+        justification: 'nextFireAt 漂移兜底（SSE 是主更新源）',
       });
       const items = await listCronJobs(sessionId);
       // 不变量②：fetch 后必须校验 signal.aborted 才能「生效」（杜绝 setState on unmounted）
       if (signal.aborted) throw new DOMException('aborted', 'AbortError');
       return { items, keyOf: (j: CronJobSummary) => j.id };
     },
-    // onTick: 60s 到点重读返新 ctx（enabled=false 时未 startTimer，本回调不会被调）
+    // onTick: 5min 到点重读返新 ctx（enabled=false 时未 startTimer，本回调不会被调）
     onTick: async () => {
       const items = await listCronJobs(sessionId);
       return { items, keyOf: (j: CronJobSummary) => j.id };
     },
+    // onEvent: 收到 session_cron_changed → 触发全量 refetch（通过 sseRefetchRef 闭包，
+    // 因为 onEvent 签名是同步的，不能直接 await fetch；用 ref 持 mutateCtx 驱动的更新函数）
+    onEvent: (ctx, event) => {
+      if (event.type !== 'session_cron_changed') return;
+      // enabled=false 时不应收到事件（未 subscribe），defensive skip
+      if (!enabled) return;
+      // fire-and-forget：同步触发 async refetch（sseRefetchRef 内部 fetch + mutateCtx 写回）
+      sseRefetchRef.current?.();
+    },
     deps: [sessionId, enabled],
   });
+
+  // SSE onEvent 触发的 refetch：fetch 新数据 → mutateCtx 写回（不重 init，不碰 timer/SSE 订阅）
+  const sseRefetchRef = useRef<(() => void) | null>(null);
+  sseRefetchRef.current = () => {
+    listCronJobs(sessionId)
+      .then((items) => {
+        mutateCtx(() => ({ items, keyOf: (j: CronJobSummary) => j.id }));
+      })
+      .catch(() => {
+        // fetch 失败保持旧 ctx，下次 tick / 用户操作 refetch 兜底
+      });
+  };
 
   // refetch：命令式刷新（清 mutError + 调 reload 重 init），保旧 refetch 行为（开始时清 error）
   const refetch = useCallback(async () => {

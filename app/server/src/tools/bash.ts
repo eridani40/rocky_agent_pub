@@ -69,7 +69,7 @@ export const bashTool: Tool = {
 
   /**
    * [v0.0.122] 权限检查钩子（INV-P3 纯判定无副作用）。
-   * 调 checkBashPermission 检测 ssh-read / rm-wildcard 两条策略。
+   * 调 checkBashPermission 检测 rm-wildcard 策略。
    * deny 优先于 ask（bash-policy.ts 保证）。
    */
   checkPermission(input: ToolInput): PermissionDecision {

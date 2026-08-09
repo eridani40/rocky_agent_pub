@@ -10,12 +10,15 @@
  *     - 子目录 ?parent=src lazy（只返该层直接子项，不递归）
  *     - parent 字段（顶层=null；子目录=相对路径）
  *     - 路径白名单 ?parent=../../etc → 400
+ *     - [v0.0.263] symlink 展开放行（?parent=escape → 200）+ isSymlink/linkTarget 字段 + 链式深层
+ *     - [v0.0.263] 绝对路径注入 ?parent=/etc → 400（step1 前缀检查回归）
  *     - depth 非 [1,10] → 400
  *     - 404 session 不存在
  *   POST open：
  *     - file/folder kind + 200（spawn 经 deps mock，不真实打开系统应用）
  *     - spawn 失败 → 500（mock 失败分支）
  *     - 路径白名单 ../etc/passwd → 400
+ *     - [v0.0.263] open symlink 目录（指向外部）→ 200（授权放行）
  *     - kind 非法 → 400
  *     - 路径不存在 → 404
  *   POST pick-directory：
@@ -30,7 +33,7 @@
  * 文件系统隔离：tmpdir + mkdtemp + afterEach rm。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompositeStore } from '../../persistence/composite';
@@ -244,7 +247,7 @@ describe('GET /session/:id/workspace/tree', () => {
     }
   });
 
-  it('?parent=escape（workspace 内 symlink 指向外部）→ 400（防 symlink 穿越攻击）', async () => {
+  it('[v0.0.263] ?parent=escape（workspace 内 symlink 指向外部）→ 200 返回目标内容（授权放行，UC-2）', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'oobt-ws-symlink-'));
     const outside = mkdtempSync(join(tmpdir(), 'oobt-ws-outside-'));
     try {
@@ -257,15 +260,99 @@ describe('GET /session/:id/workspace/tree', () => {
         sid,
         makeDeps(),
       );
-      expect(res.status).toBe(400);
+      // 本版本行为变更：workspace 内存在的 symlink = 用户放置 = 授权 → 展开返回目标内容（非 400）
+      expect(res.status).toBe(200);
       const b = await body(res);
-      expect(b.error).toMatch(/traversal|out of workspace/i);
-      // 不能泄露外部目录内容
-      const names = (b.tree ?? []).map((n: any) => n.name);
-      expect(names).not.toContain('secret.txt');
+      const names = b.tree.map((n: any) => n.name);
+      expect(names).toContain('secret.txt'); // 外部目录内容可见
+      // 子节点 path 保留 symlink 段（前端可继续链式展开/打开）
+      const secret = b.tree.find((n: any) => n.name === 'secret.txt');
+      expect(secret.path).toBe('escape/secret.txt');
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('[v0.0.263] 顶层 tree 对 symlink 节点返回 isSymlink:true + linkTarget（type 保持真实类型）', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'oobt-ws-symlink-field-'));
+    const outsideDir = mkdtempSync(join(tmpdir(), 'oobt-ws-outdir-'));
+    const outsideFile = join(tmpdir(), `oobt-ws-outfile-${Date.now()}.txt`);
+    try {
+      mkdirSync(join(outsideDir, 'nested'), { recursive: true }); // 让 symlink→dir hasChildren=true
+      writeFileSync(outsideFile, 'x');
+      symlinkSync(outsideDir, join(ws, 'linkdir')); // symlink → dir
+      symlinkSync(outsideFile, join(ws, 'linkfile')); // symlink → file
+      writeFileSync(join(ws, 'plain.ts'), 'y'); // 普通文件（无字段）
+      const sid = await newSessionWithWorkspace(ws);
+      const res = await handleWorkspaceTree(
+        new Request(`http://x/session/${sid}/workspace/tree`),
+        'GET',
+        sid,
+        makeDeps(),
+      );
+      expect(res.status).toBe(200);
+      const b = await body(res);
+      const linkdir = b.tree.find((n: any) => n.name === 'linkdir');
+      expect(linkdir.isSymlink).toBe(true);
+      // realpath 绝对路径（macOS /var → /private/var，linkTarget 是 realpath 后值）
+      expect(linkdir.linkTarget).toBe(realpathSync(outsideDir));
+      expect(linkdir.type).toBe('dir'); // statSync 跟随后的真实类型
+      expect(linkdir.hasChildren).toBe(true); // symlink→dir 沿用 dirHasChildren
+      const linkfile = b.tree.find((n: any) => n.name === 'linkfile');
+      expect(linkfile.isSymlink).toBe(true);
+      expect(linkfile.linkTarget).toBe(realpathSync(outsideFile));
+      expect(linkfile.type).toBe('file');
+      const plain = b.tree.find((n: any) => n.name === 'plain.ts');
+      expect(plain.isSymlink).toBeUndefined(); // 非 symlink 缺省（旧响应零差异）
+      expect(plain.linkTarget).toBeUndefined();
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+      rmSync(outsideFile, { force: true });
+    }
+  });
+
+  it('[v0.0.263] 链式深层：?parent=escape/sub（symlink 目录内子目录）→ 200（UC-3）', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'oobt-ws-symlink-chain-'));
+    const outside = mkdtempSync(join(tmpdir(), 'oobt-ws-chain-out-'));
+    try {
+      mkdirSync(join(outside, 'sub'), { recursive: true });
+      writeFileSync(join(outside, 'sub', 'inner.txt'), 'inner');
+      symlinkSync(outside, join(ws, 'escape')); // ws/escape -> outside
+      const sid = await newSessionWithWorkspace(ws);
+      const res = await handleWorkspaceTree(
+        new Request(`http://x/session/${sid}/workspace/tree?parent=escape/sub`),
+        'GET',
+        sid,
+        makeDeps(),
+      );
+      expect(res.status).toBe(200);
+      const b = await body(res);
+      const names = b.tree.map((n: any) => n.name);
+      expect(names).toContain('inner.txt');
+      expect(b.tree.find((n: any) => n.name === 'inner.txt').path).toBe('escape/sub/inner.txt');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('[v0.0.263] 未授权越界回归：绝对路径注入 ?parent=/etc → 400（step1 前缀检查）', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'oobt-ws-white-abs-'));
+    try {
+      const sid = await newSessionWithWorkspace(ws);
+      const res = await handleWorkspaceTree(
+        new Request(`http://x/session/${sid}/workspace/tree?parent=/etc`),
+        'GET',
+        sid,
+        makeDeps(),
+      );
+      expect(res.status).toBe(400);
+      const b = await body(res);
+      expect(b.error).toMatch(/traversal|out of workspace/i);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   });
 
@@ -388,7 +475,7 @@ describe('POST /session/:id/workspace/open', () => {
     }
   });
 
-  it('路径通过 symlink 穿越外部 → 400（防 symlink 穿越攻击打开外部文件）', async () => {
+  it('[v0.0.263] open symlink 目录（指向外部）→ 200（授权放行，UC-5，spawn mock）', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'oobt-ws-open-symlink-'));
     const outside = mkdtempSync(join(tmpdir(), 'oobt-ws-open-outside-'));
     try {
@@ -403,11 +490,12 @@ describe('POST /session/:id/workspace/open', () => {
         }),
         'POST',
         sid,
-        makeDeps(),
+        makeDeps(), // spawn mock → 不真实打开 Finder
       );
-      expect(res.status).toBe(400);
+      // 本版本行为变更：workspace 内 symlink = 授权 → open 放行（非 400）
+      expect(res.status).toBe(200);
       const b = await body(res);
-      expect(b.error).toMatch(/traversal|out of workspace/i);
+      expect(b.ok).toBe(true);
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

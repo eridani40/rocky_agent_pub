@@ -3,7 +3,7 @@ type: design
 title: Cache Control (Prompt Caching Breakpoint)
 priority: P0
 status: active
-updated: 2026-07-23
+updated: 2026-08-07
 since: v0.0.3
 related: [[P0]llm_protocol_interface.md, anthropic_impl.md, ../context/[P0]system_reminder.md]
 ---
@@ -73,8 +73,8 @@ encode 各 message 时，按「是否最后一条 message」分支（**[修正 2
 
 要点：
 
-- **保留最末 reminder**：当前 turn 的 reminder 仍要发给 LLM（环境/时间/工具错误等上下文 LLM 需要看见）。
-- **drop 历史 reminder**：历史 reminder 在 wire 层不再发（避免历史段不稳 + 节省 token）；transcript 仍持久化（context 层，见 §5），不丢数据。
+- **保留最末 reminder**：当前 turn 的 reminder 仍要发给 LLM（环境/时间/工具错误等上下文 LLM 需要看见）。v0.0.274 起最末 message 可为 tool_result（`role:'tool'`，wire 映射为 user）——tool 循环中当轮 tool_result 携带的 reminder 同样保留发给 LLM（LLM 在工具循环中后期也看到最新团队状态）。
+- **drop 历史 reminder**：历史 reminder 在 wire 层不再发（避免历史段不稳 + 节省 token）；transcript 仍持久化（context 层，见 §5），不丢数据。v0.0.274 起 tool 消息也注入 reminder，**wire 层非最末 tool 消息的 reminder 同样被 drop**——LLM 上下文每轮只见最末一个聚合 reminder（不堆积）。
 - **过滤时机**：必须在 encode（canonical → wire）层做，**不能在 assemble reducer 做**——assemble 改的是 canonical transcript（破坏隐式缓存 fallback + 违反「transcript 完整」语义），encode 改的是 wire 一次性产物（每轮重新生成，不影响 transcript）。
 
 ### 3.4 效果
@@ -99,6 +99,19 @@ cache_control breakpoint（`cache_control:{type:"ephemeral"}`）是 **Anthropic 
 **为什么不抽公共 `supportsCacheControl` 能力位**：cache_control 是 Anthropic 特有 wire 字段，不同 protocol 的 cache 机制不通用（openai 隐式 prefix vs anthropic 显式 breakpoint）。把 §3 三步（Anthropic wire 格式）提到公共 encode 按「能力位分支」不现实——每个 protocol 的 encode 独立（`encodeAnthropicMessages` 是 anthropic 专属函数），cache_control 逻辑留在 anthropic_messages encode 内最自然。其他 protocol 未来加入时，各自 encode 决定 cache 机制（或不实现 = 自然全传 fallback）。
 
 > 当前仓库仅 `anthropic_messages` impl 实现。`anthropic_impl.md §4` 是 anthropic encode 落地细节。
+
+### 4.1 reminder 密度分级（v0.0.274 记录方向，不实现）
+
+**密度策略按 protocol 的 cache_control 能力分级**（老板 2026-08-07 拍板记录，详见 `../version_logs/v0.0.274/reminder-cache-design-discussion.md §五`）——对未来新增不支持 cache_control 的 protocol 有支撑，本版本只记录方向、不实现：
+
+| protocol cache 能力 | reminder 注入策略 | 为什么 |
+|---|---|---|
+| **支持 cache_control**（Anthropic，当前唯一）| user + tool_result 都注入（v0.0.274 起）| bp#2 落在最后非 reminder block（§3.2），reminder 恒在 cache 段外（动态段）；wire 层每轮只见最末一个（§3.3）→ 密度天然收敛，注入不破缓存 |
+| **不支持 cache_control**（未来 openai_chat_completions 等）| 无显式 breakpoint，只有隐式 prefix matching → reminder 频繁注入会崩隐式 cache → 需密度控制预案 | 预案 A：**清理 run 内非首个 reminder**（run 开始只留第一个，后续全 drop）；预案 B：**每 10 个保留第一个**（保持密度上限，兼顾 LLM 看到近期团队状态） |
+
+**三层自洽性（老板确认）**：tool 上加 reminder（context 层 ingest）+ 清理保留最末（protocol 层 wire）+ cache 截止 reminder 前（bp#2 落点）三者自洽——Anthropic 下注入密度由 wire 层天然收敛，不需要额外密度控制；只有不支持 cache_control 的 protocol 才需要显式密度预案（预案 A/B 在**该 protocol 的 encode 内部**实现，不污染 context 层 ingest，也不动 anthropic encode）。
+
+**未来扩展锚点**：新增 protocol 时，在 `LlmProtocol` 接口（`../providers_and_models/[P0]llm_protocol_interface.md`）加 `supportsCacheControl` 能力标志 → 各 protocol 的 encode 按能力标志分派密度策略：支持 → 沿用 Anthropic 模式（注入 + wire 收敛）；不支持 → 应用预案 A/B。当前 anthropic_messages 不抽公共能力位（本 spec §4 前述），该标志仅对未来多 protocol 场景有约束力。
 
 ## 5. 与 context 层关系（两层独立）
 
@@ -130,7 +143,7 @@ reminder 的处理跨两层，**两层职责正交、互不干扰**：
 
 > 历史偏差根因（v0.0.8 引入 reminder 时 encode 未同步 reminder 标记 + bp#2 仍按「最后 block」落点）已记录在 `log.md` v0.0.52 条目，不在正文保留版本史。
 >
-> 注：cache_control 是 anthropic_messages encode 专属（§4），不抽公共 `supportsCacheControl` 能力位——不同 protocol 的 cache 机制不通用（anthropic 显式 breakpoint vs openai 隐式 prefix），抽公共能力位按「分支」不现实。故 v0.0.52 改动只在 `encodeAnthropicMessages` 内，不动 `LlmProtocol` 接口；其他 protocol 未来加入时各自 encode 决定 cache 机制（不实现则自然全传 reminder，fallback）。
+> 注：cache_control 是 anthropic_messages encode 专属（§4），不抽公共 `supportsCacheControl` 能力位——不同 protocol 的 cache 机制不通用（anthropic 显式 breakpoint vs openai 隐式 prefix），抽公共能力位按「分支」不现实。故 v0.0.52 改动只在 `encodeAnthropicMessages` 内，不动 `LlmProtocol` 接口；其他 protocol 未来加入时各自 encode 决定 cache 机制（不实现则自然全传 reminder，fallback）。未来多 protocol 场景的密度分派预案见 §4.1。
 
 ## 7. 边界
 

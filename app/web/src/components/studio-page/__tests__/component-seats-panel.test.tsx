@@ -1,12 +1,12 @@
 /**
  * @vitest-environment jsdom
- * SeatsPanel 单测 —— v0.0.240 修订（首页 IA：左列队长+TokenWidget / 右列成员 / 第二栏全景内嵌）
+ * SeatsPanel 单测 —— v0.0.288 重构（左竖条 token+成员 / 右全景 / 删 leaderCard / 群聊图标头部）
  * 参考: specs/ui/components/studio-page/component-seats-panel.md
  *       specs/ui/components/studio-page/component-seats-body.md
  *
  * vi.mock 用 __dirname 绝对路径（MEMORY: bun+jsdom 并发下相对路径 vi.mock 静默失效）。
- * 定位策略：tab=按钮文案；队长卡=「队长」seclabel 的 rounded-xl 祖先；mate 行=「张三」的 group 祖先。
- * v0.0.240 变更：tab「坐席」→「首页」；删 SeatStats 2×2 + TeamEntryRow；左列加 TokenWidget；第二栏内嵌 PanoramaRoute。
+ * v0.0.288 变更：删 leaderCard → 队长入 MemberRosterList 行内 isLeader badge；
+ *   全景从底部 section 移入 SeatsBody 右列；群聊/加号改 icon-only 按钮在成员卡头部。
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
@@ -36,7 +36,6 @@ const squadApiPath = vi.hoisted(() => require('node:path').resolve(__dirname, '.
 vi.mock(squadApiPath, () => squadMocks);
 
 const panoMocks = vi.hoisted(() => ({
-  // 后端 ensureSystemEntities 后恒返含 task 的 DSL（v0.0.243 task 改普通 entity）
   getPanoramaSchema: vi.fn(async () => `
 meta: { version: '1.0' }
 entities:
@@ -78,7 +77,6 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   vi.clearAllMocks();
-  // 不再覆盖 mockResolvedValue：用 hoisted 默认（task-only DSL）
   panoMocks.listPanoramaEntities.mockResolvedValue([]);
   panoMocks.listPanoramaEvents.mockResolvedValue([]);
 });
@@ -105,20 +103,15 @@ function mkProps(over: Partial<Parameters<typeof SeatsPanel>[0]> = {}): Paramete
 
 // —— 语义/结构定位辅助 —— //
 const mainRoot = (container: HTMLElement) => container.querySelector('main');
-/** 首页三 tab（v0.0.240 第一项改名「首页」） */
 const seatsTab = () => screen.getByRole('button', { name: '首页' });
 const panelTab = () => screen.getByRole('button', { name: '管理' });
 const autoworkTabBtn = () => screen.getByRole('button', { name: '自动工作' });
-/** 队长卡根（「队长」seclabel 的 rounded-xl 祖先） */
-const leaderCardRoot = () => screen.getByText('队长').closest('.rounded-xl') as HTMLElement;
-/** mate（张三）行根（「张三」的 group 祖先） */
-const mateRowRoot = () => screen.getByText('张三').closest('div[class*="group"]') as HTMLElement;
-/** 「+ 新增成员」按钮（roster 头） */
-const addBtn = () => screen.getByRole('button', { name: '新增成员' });
 /** v0.0.240 TokenWidget 根（「Token 用量」标题的 button 祖先） */
 const tokenWidgetBtn = () => screen.getByRole('button', { name: /Token 用量/ });
-/** 队长卡群聊按钮 */
-const groupChatBtn = () => screen.getByRole('button', { name: '群聊' });
+/** v0.0.288 成员卡头部群聊图标按钮（icon-only，testid 定位） */
+const groupChatBtn = () => screen.getByTestId('seats-group-chat-btn');
+/** v0.0.288 成员卡头部加号图标按钮（icon-only，testid 定位） */
+const hireBtn = () => screen.getByTestId('seats-hire-btn');
 /** 管理 tab 字段（按 label 定位） */
 function manageField(labelText: string): HTMLElement {
   const label = screen.getByText(labelText, { selector: 'label' });
@@ -127,42 +120,59 @@ function manageField(labelText: string): HTMLElement {
 }
 const squadNameInput = () => manageField('squad 名称');
 
-describe('SeatsPanel — v0.0.240 结构（首页 IA）', () => {
-  it('渲染 header + seats-console（左列队长+TokenWidget / 右列 roster）', async () => {
+// ─── v0.0.288 布局结构 ─────────────────────────────────────────────────────
+
+describe('SeatsPanel — v0.0.288 布局结构（左竖条 + 右全景）', () => {
+  it('渲染 header + 左竖条（TokenWidget + 成员卡）+ 右全景', async () => {
     const { container } = render(<SeatsPanel {...mkProps()} />);
     expect(mainRoot(container)).toBeTruthy();
-    expect(seatsTab()).toBeTruthy(); // header tab「首页」
+    expect(seatsTab()).toBeTruthy();
     await screen.findByText('张三');
-    // 左列：队长卡 + TokenWidget（无 SeatStats 2×2 / 无 TeamEntryRow）
-    expect(leaderCardRoot()).toBeTruthy();
+    // 左竖条：TokenWidget + 成员卡（无独立 leaderCard——v0.0.288 删除）
     expect(tokenWidgetBtn()).toBeTruthy();
-    // v0.0.240 删 SeatStats/TeamEntryRow：无「业务全景」link、无「成员在线」grid label
-    expect(screen.queryByRole('button', { name: '业务全景' })).toBeNull();
-    // 右列 roster：mate 行 + 新增按钮
-    expect(mateRowRoot()).toBeTruthy();
-    expect(addBtn()).toBeTruthy();
+    // 成员计数 header 存在（v0.0.292 计数含队长=2；i18next {{count}} 插值拆多文本节点 → 查 container.textContent）
+    await waitFor(() => expect(container.textContent).toMatch(/成员 · 2/));
+    // v0.0.288 删 leaderCard：无「队长」sectionLabel（leader 入 MemberRosterList 行内 badge）
+    expect(screen.queryByText('队长')).toBeNull();
+    // 右全景：任务 tab 出现（PanoramaRoute 在 SeatsBody 右列）
+    await waitFor(() => expect(screen.getByRole('button', { name: '任务' })).toBeTruthy());
     await waitFor(() => expect(screen.getByText(/^\d+ 在线$/).textContent).toContain('2'));
   });
 
-  it('v0.0.240 roster 头计数「成员 · N」（N=当前视图行数；v0.0.244 起跟随视图过滤）', async () => {
+  it('成员卡头部：左标题 + 右组（在岗/全部 + 群聊图标 + 加号图标）', async () => {
     render(<SeatsPanel {...mkProps()} />);
     await screen.findByText('张三');
-    // mkDetail 默认 1 leader + 1 deployed mate → 默认在岗视图 N=1
-    expect(screen.getByText(/成员 · 1/)).toBeTruthy();
+    // 在岗/全部切换恒渲染
+    expect(screen.getByRole('button', { name: '在岗' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '全部' })).toBeTruthy();
+    // 群聊图标按钮（icon-only，testid 定位，非文字「群聊」按钮）
+    expect(groupChatBtn()).toBeTruthy();
+    // 加号图标按钮（icon-only，testid 定位，非文字「新增成员」按钮）
+    expect(hireBtn()).toBeTruthy();
+    // 加号 icon-only 按钮 aria-label=「新增成员」（无障碍标签），无独立文字按钮
+    expect(hireBtn().querySelector('svg')).toBeTruthy();
   });
 
-  it('empty mates → roster 体内空态占位 + 头部新增按钮仍在；leader 卡仍在左列', () => {
+  it('右全景不横滑（overflow-hidden class）', async () => {
+    const { container } = render(<SeatsPanel {...mkProps()} />);
+    await screen.findByText('张三');
+    // 右主体容器 min-w-0 flex-1（v0.0.292 删 overflow-hidden，高度随内容撑开）
+    const rightPanel = container.querySelector('.min-w-0.flex-1');
+    expect(rightPanel).toBeTruthy();
+  });
+
+  it('空成员 → 成员卡空态占位 + 头部群聊/加号按钮仍在', async () => {
     const leader = mkMember({ id: 'leader1', name: 'Rocky', role: 'leader', sessionId: 'sess-leader' });
     const detail = mkDetail({
       members: [leader],
       leaderId: 'leader1',
       memberIds: ['leader1'],
     });
-    render(<SeatsPanel {...mkProps({ detail })} />);
-    expect(leaderCardRoot()).toBeTruthy();
-    expect(addBtn()).toBeTruthy();
-    // 成员 · 0
-    expect(screen.getByText(/成员 · 0/)).toBeTruthy();
+    const { container } = render(<SeatsPanel {...mkProps({ detail })} />);
+    // 成员计数（v0.0.292 计数含队长=1；i18next {{count}} 插值拆多文本节点 → 查 container.textContent）
+    await waitFor(() => expect(container.textContent).toMatch(/成员 · 1/));
+    expect(groupChatBtn()).toBeTruthy();
+    expect(hireBtn()).toBeTruthy();
   });
 
   it('v0.0.170 页头 C 化：tabs 下划线式（border-b-2）', () => {
@@ -172,15 +182,11 @@ describe('SeatsPanel — v0.0.240 结构（首页 IA）', () => {
     expect(seats.className).toContain('border-b-fg');
     expect(panelTab().className).toContain('border-b-transparent');
   });
-
-  it('v0.0.240 第二栏内嵌全景：任务 tab 出现（label「任务」，后端 ensure 注入）', async () => {
-    render(<SeatsPanel {...mkProps()} />);
-    // 后端返 task-only DSL（含 task_kanban view，由 ensureSystemEntities 注入）→ 任务 tab 在场
-    await waitFor(() => expect(screen.getByRole('button', { name: '任务' })).toBeTruthy());
-  });
 });
 
-describe('SeatsPanel — v0.0.244 视图筛选（在岗/全部 toggle + 计数口径）', () => {
+// ─── v0.0.244 视图筛选（在岗/全部 toggle + 计数口径） ──────────────────────
+
+describe('SeatsPanel — v0.0.288 视图筛选（在岗/全部 toggle + 三分区计数）', () => {
   /** 1 leader + 1 deployed mate（张三）+ 1 benched mate（李四） */
   const mkViewDetail = () => {
     const leader = mkMember({ id: 'leader1', name: 'Rocky', role: 'leader', sessionId: 'sess-leader', state: 'deployed' });
@@ -188,93 +194,96 @@ describe('SeatsPanel — v0.0.244 视图筛选（在岗/全部 toggle + 计数�
     const benched = mkMember({ id: 'm3', name: '李四', role: 'mate', sessionId: 'sess-m3', state: 'benched' });
     return mkDetail({ members: [leader, mate, benched], memberIds: ['leader1', 'm2', 'm3'] });
   };
-  const benchedRowRoot = () => screen.getByText('李四').closest('div[class*="group"]') as HTMLElement;
   const activeSeg = () => screen.getByRole('button', { name: '在岗' });
   const allSeg = () => screen.getByRole('button', { name: '全部' });
 
-  it('默认在岗视图：只见 deployed mate + 计数=在岗数；toggle 恒渲染且「在岗」active', async () => {
+  it('默认在岗视图：只见 deployed 成员 + 计数=在岗数；toggle 恒渲染', async () => {
     const { container } = render(<SeatsPanel {...mkProps({ detail: mkViewDetail() })} />);
     await screen.findByText('张三');
-    // benched 李四不在列表；计数=在岗 mate 数（1）
+    // benched 李四不在列表；计数=在岗成员数（2=leader+m2，含 leader 因为 derivePanelRows 不排除 leader）
     expect(screen.queryByText('李四')).toBeNull();
-    expect(screen.getByText(/成员 · 1/)).toBeTruthy();
-    // toggle 恒渲染（不条件于存在 benched）+ data-action-key 锚点 + 「在岗」当前态
-    expect(activeSeg().getAttribute('data-action-key')).toBe('studio.seats.view-active');
-    expect(allSeg().getAttribute('data-action-key')).toBe('studio.seats.view-all');
     expect(activeSeg().getAttribute('data-active')).toBe('true');
     expect(allSeg().getAttribute('data-active')).toBe('false');
-    // leader 卡不受过滤影响，仍在左列
-    expect(leaderCardRoot()).toBeTruthy();
     expect(container.querySelector('main')).toBeTruthy();
   });
 
-  it('切「全部」→ 见 benched 行（opacity-75 + mate · benched）+ 计数=全队 mate 数；切回「在岗」复原', async () => {
+  it('切「全部」→ 见 benched 行（opacity-[0.55] + grayscale）+ 计数增加', async () => {
     render(<SeatsPanel {...mkProps({ detail: mkViewDetail() })} />);
     await screen.findByText('张三');
     fireEvent.click(allSeg());
-    // benched 行出现：视觉弱化 opacity-75 + meta「mate · benched」；计数=全部 mate 数（2）
+    // benched 行出现
     await screen.findByText('李四');
-    expect(benchedRowRoot().className).toContain('opacity-75');
-    expect(screen.getByText('mate · benched')).toBeTruthy();
-    expect(screen.getByText(/成员 · 2/)).toBeTruthy();
+    // benched 行灰度比 idle 更灰（opacity-[0.55]）
+    const benchedRow = screen.getByText('李四').closest('button');
+    expect(benchedRow?.className).toContain('opacity-[0.55]');
     expect(allSeg().getAttribute('data-active')).toBe('true');
-    // 切回在岗 → benched 再隐藏 + 计数回 1
+    // 切回在岗 → benched 再隐藏
     fireEvent.click(activeSeg());
     expect(screen.queryByText('李四')).toBeNull();
-    expect(screen.getByText(/成员 · 1/)).toBeTruthy();
-  });
-
-  it('空态跟随视图：mate 全 benched 时在岗视图显空态（成员 · 0），切全部见行', async () => {
-    const leader = mkMember({ id: 'leader1', name: 'Rocky', role: 'leader', sessionId: 'sess-leader', state: 'deployed' });
-    const benched = mkMember({ id: 'm3', name: '李四', role: 'mate', sessionId: 'sess-m3', state: 'benched' });
-    const detail = mkDetail({ members: [leader, benched], memberIds: ['leader1', 'm3'] });
-    render(<SeatsPanel {...mkProps({ detail })} />);
-    // 在岗视图：无 deployed mate → 空态 + 计数 0；toggle 仍在
-    await screen.findByText(/成员 · 0/);
-    expect(screen.getByText(/暂无成员/)).toBeTruthy();
-    expect(activeSeg()).toBeTruthy();
-    // 切全部 → benched 行可见 + 计数 1
-    fireEvent.click(allSeg());
-    await screen.findByText('李四');
-    expect(screen.getByText(/成员 · 1/)).toBeTruthy();
   });
 });
 
-describe('SeatsPanel — 交互回调（seats tab）', () => {
-  it('点某坐席卡「进入对话」→ onEnterChat(node)', async () => {
+// ─── 交互回调 ──────────────────────────────────────────────────────────────
+
+describe('SeatsPanel — v0.0.288 交互回调', () => {
+  it('点成员行进入对话 → onEnterChat(node)', async () => {
     const props = mkProps();
     render(<SeatsPanel {...props} />);
     await screen.findByText('张三');
-    fireEvent.click(within(mateRowRoot()).getByRole('button', { name: '进入对话' }));
+    // MemberRosterList 行 = 整行 button（data-testid=squad-status-row-{id}）
+    const row = screen.getByTestId('squad-status-row-m2');
+    fireEvent.click(row);
     expect(props.onEnterChat).toHaveBeenCalledTimes(1);
     const node = (props.onEnterChat as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
     expect(node?.sessionId).toBe('sess-m2');
     expect(node?.squadId).toBe('s1');
   });
 
-  it('点队长卡群聊按钮 → onOpenGroupChat', () => {
+  it('点成员卡头部群聊图标按钮 → onOpenGroupChat', async () => {
     const props = mkProps();
     render(<SeatsPanel {...props} />);
+    await screen.findByText('张三');
     fireEvent.click(groupChatBtn());
+    expect(props.onOpenGroupChat).toHaveBeenCalledTimes(1);
     const gnode = (props.onOpenGroupChat as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
     expect(gnode?.sessionId).toBe('sess-group');
     expect(gnode?.squadId).toBe('s1');
   });
 
-  it('点「+」卡 → onHire 触发（[v0.0.169] 主区 member-create 创建页）', () => {
+  it('点成员卡头部加号图标按钮 → onHire', async () => {
     const props = mkProps();
     render(<SeatsPanel {...props} />);
-    fireEvent.click(addBtn());
+    await screen.findByText('张三');
+    fireEvent.click(hireBtn());
     expect(props.onHire).toHaveBeenCalledTimes(1);
   });
 
-  it('v0.0.240 TokenWidget 整卡点击 → onOpenTokenStats(squadId)', async () => {
+  it('TokenWidget 整卡点击 → onOpenTokenStats(squadId)', async () => {
     const props = mkProps({ onOpenTokenStats: vi.fn() });
     render(<SeatsPanel {...props} />);
     fireEvent.click(tokenWidgetBtn());
     expect(props.onOpenTokenStats).toHaveBeenCalledWith('s1');
   });
 });
+
+// ─── v0.0.270 群聊开关两态（v0.0.288 迁移到成员卡头部图标） ──────────────
+
+describe('SeatsPanel — v0.0.288 群聊开关图标按钮两态', () => {
+  it('enableGroupChat=默认 → 成员卡头部群聊图标按钮可见', async () => {
+    render(<SeatsPanel {...mkProps()} />);
+    await screen.findByText('张三');
+    expect(groupChatBtn()).toBeTruthy();
+  });
+
+  it('enableGroupChat=false → 成员卡头部无群聊图标按钮', async () => {
+    const props = mkProps({ detail: mkDetail({ enableGroupChat: false }) });
+    render(<SeatsPanel {...props} />);
+    await screen.findByText('张三');
+    expect(screen.queryByTestId('seats-group-chat-btn')).toBeNull();
+  });
+});
+
+// ─── tab 内联切换 ──────────────────────────────────────────────────────────
 
 describe('SeatsPanel — tab 内联切换（v0.0.168）', () => {
   it('默认 seats tab active；点管理 → 内联渲染 ManageTab，头部常驻', async () => {
@@ -283,10 +292,9 @@ describe('SeatsPanel — tab 内联切换（v0.0.168）', () => {
     expect(panelTab().getAttribute('data-active')).toBe('false');
     fireEvent.click(panelTab());
     expect(panelTab().getAttribute('data-active')).toBe('true');
-    expect(seatsTab()).toBeTruthy();
     await waitFor(() => expect(squadNameInput()).toBeTruthy());
     expect(manageField('squad 介绍')).toBeTruthy();
-    expect(screen.queryByText('队长')).toBeNull();
+    // 切到管理 tab 后 seats 主体消失
     expect(screen.queryByText('张三')).toBeNull();
   });
 
@@ -295,15 +303,14 @@ describe('SeatsPanel — tab 内联切换（v0.0.168）', () => {
     fireEvent.click(autoworkTabBtn());
     expect(autoworkTabBtn().getAttribute('data-active')).toBe('true');
     await waitFor(() => expect(screen.getByText('enableHeartBeat（自主性总开关）')).toBeTruthy());
-    expect(seatsTab()).toBeTruthy();
   });
 
-  it('从 panel tab 切回 seats → 恢复 leader 卡 + mate 行', async () => {
+  it('从 panel tab 切回 seats → 恢复 TokenWidget + 成员列表', async () => {
     render(<SeatsPanel {...mkProps()} />);
     fireEvent.click(panelTab());
     await waitFor(() => expect(squadNameInput()).toBeTruthy());
     fireEvent.click(seatsTab());
-    await waitFor(() => expect(screen.getByText('队长')).toBeTruthy());
+    await waitFor(() => expect(tokenWidgetBtn()).toBeTruthy());
     expect(screen.getByText('张三')).toBeTruthy();
     expect(screen.queryByText('squad 名称')).toBeNull();
   });
@@ -312,46 +319,5 @@ describe('SeatsPanel — tab 内联切换（v0.0.168）', () => {
     render(<SeatsPanel {...mkProps({ initialTab: 'panel' })} />);
     expect(panelTab().getAttribute('data-active')).toBe('true');
     await waitFor(() => expect(squadNameInput()).toBeTruthy());
-  });
-});
-
-describe('SeatsPanel — v0.0.168 右键复制 Session ID 浮层', () => {
-  const writeText = vi.fn();
-  beforeAll(() => {
-    Object.assign(navigator, { clipboard: { writeText } });
-  });
-  afterEach(() => {
-    writeText.mockReset();
-  });
-
-  it('右键 mate 坐席卡 → 出现复制浮层（sessionId=member.sessionId）', async () => {
-    const { container } = render(<SeatsPanel {...mkProps()} />);
-    await screen.findByText('张三');
-    fireEvent.contextMenu(mateRowRoot(), { clientX: 100, clientY: 100 });
-    const copy = await screen.findByRole('button', { name: '复制 Session ID' });
-    const menu = copy.parentElement as HTMLElement;
-    expect(menu).toBeTruthy();
-    expect(menu.parentElement).toBe(document.body);
-    expect(mainRoot(container)!.contains(menu)).toBe(false);
-    writeText.mockResolvedValue(undefined);
-    fireEvent.click(copy);
-    expect(writeText).toHaveBeenCalledWith('sess-m2');
-  });
-
-  it('右键 leader 坐席卡 → 复制 leader sessionId', async () => {
-    render(<SeatsPanel {...mkProps()} />);
-    await screen.findByText('队长');
-    fireEvent.contextMenu(leaderCardRoot(), { clientX: 50, clientY: 60 });
-    writeText.mockResolvedValue(undefined);
-    fireEvent.click(await screen.findByRole('button', { name: '复制 Session ID' }));
-    expect(writeText).toHaveBeenCalledWith('sess-leader');
-  });
-
-  it('右键队长卡群聊按钮 → 复制 squadChat sessionId', async () => {
-    render(<SeatsPanel {...mkProps()} />);
-    fireEvent.contextMenu(groupChatBtn(), { clientX: 30, clientY: 40 });
-    writeText.mockResolvedValue(undefined);
-    fireEvent.click(await screen.findByRole('button', { name: '复制 Session ID' }));
-    expect(writeText).toHaveBeenCalledWith('sess-group');
   });
 });

@@ -229,7 +229,9 @@ describe('skill_manage tool', () => {
       makeCtx(dataDir),
     );
     expect(r.isError).toBe(false);
-    expect(store.isEnabled('flip')).toBe(true);
+    // tool 内部 makeEnabledStore 创建独立的 AppConfigService 实例（各自有 cache），
+    // 读回需用新实例（旧实例 cache 了 setEnabled(false) 未失效）
+    expect(new SkillEnabledStore(new AppConfigService({ root: dataDir })).isEnabled('flip')).toBe(true);
   });
 
   it('enable：evolvable=false → 拒绝', async () => {

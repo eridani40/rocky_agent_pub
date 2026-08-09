@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FileFormat } from '../../lib/file-format';
+import { looksBinary } from '../../lib/file-format';
 import { ComponentModalMdEditor } from '../common/component-modal-md-editor';
 import { readWorkspaceFile, saveWorkspaceFile } from '../../lib/chat-api';
 
@@ -44,6 +45,8 @@ export function ComponentWsFileEditor({ sessionId, target, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // [v0.0.263] 二进制检测（读内容后 looksBinary；true → 占位 pill 不渲染 editor modal）
+  const [binary, setBinary] = useState(false);
   // 标记是否已有读请求在飞；避免竞态（target 快速切换时旧请求覆盖新值）
   const reqIdRef = useRef(0);
 
@@ -59,6 +62,7 @@ export function ComponentWsFileEditor({ sessionId, target, onClose }: Props) {
       setContent('');
       setError(null);
       setLoading(false);
+      setBinary(false);
       return;
     }
     const myId = ++reqIdRef.current;
@@ -68,6 +72,7 @@ export function ComponentWsFileEditor({ sessionId, target, onClose }: Props) {
       .then((res) => {
         if (myId !== reqIdRef.current) return; // 过期响应丢弃
         setContent(res.content);
+        setBinary(looksBinary(res.content));
         setLoading(false);
       })
       .catch((e) => {
@@ -99,6 +104,15 @@ export function ComponentWsFileEditor({ sessionId, target, onClose }: Props) {
     );
   }
 
+  // [v0.0.263] 二进制降级：内容含 NUL/替换符 → 占位 pill（复用 statusMsg pill 范式），不渲染 editor modal
+  if (binary) {
+    return (
+      <div className="fixed bottom-6 left-1/2 z-[var(--z-modal)] -translate-x-1/2 bg-fg px-4 py-2.5 rounded-lg text-[12.5px] text-surface shadow-xl">
+        {t('workspace.mdEditor.binaryUnsupported')}
+      </div>
+    );
+  }
+
   return (
     <>
       <ComponentModalMdEditor
@@ -109,6 +123,8 @@ export function ComponentWsFileEditor({ sessionId, target, onClose }: Props) {
         versionLabel={target.fileName}
         hint={t('workspace.mdEditor.hint')}
         format={target.format}
+        filePath={target.path}
+        sessionId={sessionId}
         onSave={handleSave}
         onClose={onClose}
       />

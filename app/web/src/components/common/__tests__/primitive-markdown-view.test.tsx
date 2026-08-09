@@ -14,7 +14,7 @@
  *   - 现有 block（代码块 / 列表 / 段落）回归不破坏
  */
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
-import { render, cleanup, fireEvent } from '@testing-library/react';
+import { render, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { PrimitiveMarkdownView } from '../primitive-markdown-view';
 
 afterEach(() => cleanup());
@@ -469,5 +469,89 @@ describe('PrimitiveMarkdownView — 飞书文档综合片段（v0.0.145 回归�
     const anchor = container.querySelector('a');
     expect(anchor?.getAttribute('href')).toBe('https://open.feishu.cn/');
     expect(anchor?.getAttribute('target')).toBe('_blank');
+  });
+});
+
+describe('PrimitiveMarkdownView — block 级图片渲染（v0.0.286）', () => {
+  beforeEach(() => {
+    // mock rockyShell.readFileBinary（block 图片分支用）
+    (window as unknown as { rockyShell: unknown }).rockyShell = {
+      readFileBinary: vi.fn(async () => ({ ok: true, content: 'aGVsbG8=' })),
+    };
+  });
+  afterEach(() => {
+    delete (window as unknown as { rockyShell?: unknown }).rockyShell;
+  });
+
+  it('独立行 web 图片 → 渲染 MarkdownImage loaded', async () => {
+    const md = '![示例图](https://example.com/test.png)';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+    // web 图片同步直渲
+    const img = container.querySelector('[data-testid="md-image-loaded"]') as HTMLImageElement | null;
+    expect(img).toBeTruthy();
+    expect(img?.getAttribute('src')).toBe('https://example.com/test.png');
+    expect(img?.getAttribute('alt')).toBe('示例图');
+  });
+
+  it('独立行 data:image/ 图片 → 直渲', () => {
+    const md = '![inline](data:image/png;base64,iVBOR)';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+    const img = container.querySelector('[data-testid="md-image-loaded"]') as HTMLImageElement | null;
+    expect(img).toBeTruthy();
+    expect(img?.getAttribute('src')).toBe('data:image/png;base64,iVBOR');
+  });
+
+  it('独立行危险协议 javascript: → 降级 error', async () => {
+    // URL 不含 ) 以匹配 BLOCK_IMAGE_RE（含 ) 的 URL 走段落路径，不是图片）
+    const md = '![xss](javascript:alert)';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="md-image-error"]')).toBeTruthy();
+    });
+  });
+
+  it('图片 + 段落混合：图片不侵入段落', () => {
+    const md = [
+      '这是一段文字。',
+      '',
+      '![图](https://example.com/a.png)',
+      '',
+      '另一段文字。',
+    ].join('\n');
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+    // 两段文字
+    const paragraphs = container.querySelectorAll('p');
+    expect(paragraphs.length).toBe(2);
+    // 图片独立 block
+    const img = container.querySelector('[data-testid="md-image-loaded"]');
+    expect(img).toBeTruthy();
+  });
+
+  it('无 baseDir + 相对路径图 → 降级 error（chat 气泡场景）', () => {
+    const md = '![相对图](img/local.png)';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+    // 无 baseDir → relative 无 resolvedPath → error 降级
+    const error = container.querySelector('[data-testid="md-image-error"]');
+    expect(error).toBeTruthy();
+  });
+
+  it('有 baseDir + absolute 路径图 → readFileBinary IPC 调用', async () => {
+    const api = (window as unknown as { rockyShell: { readFileBinary: ReturnType<typeof vi.fn> } }).rockyShell;
+    const md = '![本地图](/abs/path/local.png)';
+    render(<PrimitiveMarkdownView source={md} />);
+    // 等 effect → readFileBinary
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.readFileBinary).toHaveBeenCalledWith('/abs/path/local.png');
+  });
+
+  it('inline 文本中嵌入 ![alt](url) 不渲染为图片（仅 block 级）', () => {
+    const md = '这是行内 ![小图](https://example.com/inline.png) 文字';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+    // 整行不是独立图片行 → 走段落 renderInline → 无 md-image-loaded
+    const img = container.querySelector('[data-testid="md-image-loaded"]');
+    expect(img).toBeFalsy();
+    // 段落正常渲染
+    const p = container.querySelector('p');
+    expect(p).toBeTruthy();
   });
 });

@@ -127,6 +127,59 @@ describe('WorkspaceWatchRegistry — refInc/refDec 引用计数（红线④⑤�
   });
 });
 
+describe('WorkspaceWatchRegistry — setTabSet 全量替换 diff（v0.0.271 声明式 watch-set）', () => {
+  it('首次 setTabSet → 全部 added、removed 空（新集合相对空旧集合）', () => {
+    const { added, removed } = registry.setTabSet('s1', 'c1', ['/ws/a', '/ws/b']);
+    expect(added.sort()).toEqual(['/ws/a', '/ws/b']);
+    expect(removed).toEqual([]);
+    expect(registry.hasTabDir('s1', 'c1', '/ws/a')).toBe(true);
+    expect(registry.hasTabDir('s1', 'c1', '/ws/b')).toBe(true);
+  });
+
+  it('全量替换：新增路径进 added、移除路径进 removed、交集不动', () => {
+    registry.setTabSet('s1', 'c1', ['/ws/a', '/ws/b', '/ws/c']);
+    const { added, removed } = registry.setTabSet('s1', 'c1', ['/ws/b', '/ws/d']);
+    expect(added).toEqual(['/ws/d']); // 新增 d
+    expect(removed.sort()).toEqual(['/ws/a', '/ws/c']); // 移除 a、c
+    // 交集 b 保持持有
+    expect(registry.hasTabDir('s1', 'c1', '/ws/b')).toBe(true);
+    expect(registry.hasTabDir('s1', 'c1', '/ws/a')).toBe(false);
+    expect(registry.hasTabDir('s1', 'c1', '/ws/d')).toBe(true);
+  });
+
+  it('幂等：同集合再调 → added/removed 全空（不重复记账）', () => {
+    registry.setTabSet('s1', 'c1', ['/ws/a']);
+    const { added, removed } = registry.setTabSet('s1', 'c1', ['/ws/a']);
+    expect(added).toEqual([]);
+    expect(removed).toEqual([]);
+    expect(registry.hasTabDir('s1', 'c1', '/ws/a')).toBe(true);
+  });
+
+  it('空集合 → 清 key（该 tab 全部移除，removed 返回旧集合）', () => {
+    registry.setTabSet('s1', 'c1', ['/ws/a', '/ws/b']);
+    const { added, removed } = registry.setTabSet('s1', 'c1', []);
+    expect(added).toEqual([]);
+    expect(removed.sort()).toEqual(['/ws/a', '/ws/b']);
+    expect(registry.hasTabDir('s1', 'c1', '/ws/a')).toBe(false);
+    expect(registry.takeTabDirs('s1', 'c1')).toEqual([]); // key 已清
+  });
+
+  it('路径去重：重复传入同路径 → 集合内唯一（Set 语义）', () => {
+    const { added } = registry.setTabSet('s1', 'c1', ['/ws/a', '/ws/a', '/ws/b']);
+    expect(added.sort()).toEqual(['/ws/a', '/ws/b']);
+    expect(registry.takeTabDirs('s1', 'c1').sort()).toEqual(['/ws/a', '/ws/b']);
+  });
+
+  it('不直接改 refcount：setTabSet 后 refcount 仍为空（caller 负责 refInc/refDec）', () => {
+    registry.setTabSet('s1', 'c1', ['/ws/a']);
+    expect(registry.listSessionDirs('s1')).toEqual([]);
+    // caller 模式：added → refInc；removed → refDec
+    const { added, removed } = registry.setTabSet('s1', 'c1', ['/ws/b']);
+    expect(added).toEqual(['/ws/b']);
+    expect(removed).toEqual(['/ws/a']);
+  });
+});
+
 describe('WorkspaceWatchRegistry — listSessions / clear（release-all / stopAll 支撑）', () => {
   it('listSessions 返回当前持有 refcount 记录的全部 sessionId', () => {
     registry.refInc('s1', '/ws/a');

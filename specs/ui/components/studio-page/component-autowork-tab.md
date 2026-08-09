@@ -2,6 +2,7 @@
 
 > 层级: component（squad-panel「自动工作」tab 内容容器；v0.0.57 新建）
 > 文件: app/web/src/components/studio-page/component-autowork-tab.tsx
+> **[v0.0.292] GroupChatToggle 迁出**：群聊可见性开关从本 tab 删除，挪入 manage-tab（元信息编辑区后、危险操作区前）。本 tab 从五块→四块。
 
 ## 职责
 squad-panel「自动工作」tab 的**组合容器**：垂直堆叠四块——`squad-autonomy-toggle`（总开关）+ `heartbeat-config`（squad 级心跳配置：间隔/时段/范围）+ `budget-meter`（预算配置 + 实时仪表）+ `auto-work-history`（心跳唤醒历史）。
@@ -18,10 +19,11 @@ squad-panel「自动工作」tab 的**组合容器**：垂直堆叠四块——`
 - 无本地态。容器只组合（**四块**）：
 
 ## 视觉基线
-- 容器：（三块垂直堆叠，块间距 20px）。
-- 三块视觉零改。
+- 容器：（五块垂直堆叠，块间距 20px）。
+- 五块视觉零改。
 - demo 是方向原型（非设计师权威稿），不强制自动 vision_check compare；用户 E2E 自测代替（test-plan §3 / §5）。
 
 ## 复用关系
 - **被组合**：`component-seats-panel`（首页 SeatsPanel `activeTab === 'autowork'` 分支直接渲
 - **交叉引用**：与 `component-manage-tab`（管理 tab）平级；`onSaveMeta` 与 manage-tab 共用（PATCH
+- **组合（child）**：`component-squad-autonomy-toggle`（v0.0.33.4）+ `heartbeat-config` + `budget-meter` + `auto-work-history`。（**[v0.0.292] GroupChatToggle 迁出到 manage-tab**）

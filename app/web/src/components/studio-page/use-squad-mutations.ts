@@ -31,7 +31,6 @@ import type {
   SquadDetail,
   SquadSummary,
 } from './squad-types';
-
 /** hook 消费方传入的 state setters + 派生 handler（page-studio 提供） */
 export interface UseSquadMutationsDeps {
   selectedSquadId: string | null;
@@ -43,6 +42,8 @@ export interface UseSquadMutationsDeps {
   setModalClose: () => void;
   /** 关闭 chat/member 主区，回落到首页 seats（mutation 后统一收敛，也用于 squad 删除） */
   fallbackToHome: () => void;
+  /** 选 squad 并跳 seats 首页（创建 squad 后自动选中 + 跳转） */
+  onSelectSquad: (id: string) => void;
   flash: (msg: string) => void;
   t: TFunction;
 }
@@ -68,7 +69,7 @@ export function useSquadMutations(deps: UseSquadMutationsDeps): SquadMutations {
   const {
     selectedSquadId, detail,
     setSquads, overwriteSquads, setSelectedSquadId, setDetail,
-    setModalClose, fallbackToHome,
+    setModalClose, fallbackToHome, onSelectSquad,
     flash, t,
   } = deps;
 
@@ -90,7 +91,7 @@ export function useSquadMutations(deps: UseSquadMutationsDeps): SquadMutations {
     ]);
   }, [selectedSquadId, reloadDetail, reloadSquads]);
 
-  /** POST /squad → 选中新 squad + 刷新（回落首页 seats） */
+  /** POST /squad → 选中新 squad + 刷新 + 跳新 squad seats 首页 */
   const handleCreateSquad = useCallback(
     async (body: CreateSquadBody) => {
       const created = await createSquad(body);
@@ -98,10 +99,11 @@ export function useSquadMutations(deps: UseSquadMutationsDeps): SquadMutations {
       await reloadSquads();
       setSelectedSquadId(created.id);
       setDetail(created);
-      fallbackToHome();
+      // v0.0.304 创建成功直接跳新 squad 的 seats 页（不依赖异步 selectedSquadId 更新）
+      onSelectSquad(created.id);
       flash(t('studio:toast.squadCreated', { name: created.name }));
     },
-    [reloadSquads, setModalClose, setSelectedSquadId, setDetail, fallbackToHome, flash, t],
+    [reloadSquads, setModalClose, setSelectedSquadId, setDetail, onSelectSquad, flash, t],
   );
 
   /** POST /squad/:id/member */

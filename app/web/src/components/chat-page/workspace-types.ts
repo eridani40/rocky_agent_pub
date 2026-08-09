@@ -13,10 +13,14 @@ export interface WsTreeNode {
   name: string;
   /** 相对 workspaceDir 的路径（唯一 key + POST open 入参；如 "src/auth/login.ts"） */
   path: string;
-  /** 节点类型 */
+  /** 节点类型（真实类型，statSync 跟随 symlink 后判定） */
   type: 'file' | 'dir';
   /** dir 才有意义：是否有子项（控制 twisty 是否显示）；lazy 模式不递归 children */
   hasChildren: boolean;
+  /** [v0.0.263] 是否为 symlink 节点（lstatSync 判定；缺省 undefined = 非 symlink，旧响应零差异） */
+  isSymlink?: boolean;
+  /** [v0.0.263] symlink 目标绝对路径（realpath 解析；仅 isSymlink=true 时有意义） */
+  linkTarget?: string;
 }
 
 /** GET /session/:id/workspace/tree 响应（§3.1） */
@@ -44,6 +48,8 @@ export interface WorkspaceState {
   loadingChildren: Record<string, boolean>;
   /** 被 watch event 标记 stale 的子目录 path（下次展开时清缓存重拉） */
   stalePaths: Set<string>;
+  /** [v0.0.275] 结构性变化（addDir/unlinkDir）的父目录 path 集合——结构刷新 effect 消费（未展开目录 twisty 刷新）；与 stalePaths 并存不互斥 */
+  structuralStalePaths: Set<string>;
   /** GET 顶层 tree loading（禁用刷新按钮） */
   loading: boolean;
 }

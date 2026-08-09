@@ -127,15 +127,16 @@ describe('deriveMinimapBars — a2a inbox side 判定（MUST NOT 按 kind 裸判
     expect(bars[0]!.messageId).toBe('u1');
   });
 
-  it('单聊传 memberSideResolver → a2a inbox 产 bar（右侧，与真人 user 同侧）', () => {
+  it('单聊传 memberSideResolver → a2a inbox 不产 bar（v0.0.295：a2a 改回左侧，与群聊对齐）', () => {
     const messages = [userMsg('u1', '真人问题'), a2aMsg('a2a1', 'leader 转发消息')];
     const elements = flattenMessages(messages);
     // memberSideResolver 签名 (msg: Message)=>...（不接受 undefined），deriveMinimapBars 的
     // SideResolver 类型是 (msg: Message|undefined)=>...（防御 msgById 查不到）；与生产代码
     // section-chat-session 同款内联适配器包一层（纯类型层面适配，undefined 分支理论不可达）
     const bars = deriveMinimapBars(elements, messages, (msg) => (msg ? memberSideResolver(msg) : 'assistant'));
-    expect(bars).toHaveLength(2);
-    expect(bars.map((b) => b.messageId)).toEqual(['u1', 'a2a1']);
+    // [v0.0.295] memberSideResolver 改为直透 sideOfMessage → a2a=assistant（左侧），不产 bar
+    expect(bars).toHaveLength(1);
+    expect(bars[0]!.messageId).toBe('u1');
   });
 });
 

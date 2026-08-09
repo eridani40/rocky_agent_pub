@@ -16,6 +16,7 @@
  */
 import type { BootstrapResult } from '../bootstrap';
 import { handleSquadRoute, type SquadHandlerDeps } from '../handlers/squad';
+import { handleSquadTemplateRoute } from '../handlers/squad-template-handler';
 import { handleMemberRoute } from '../handlers/member';
 import { handleBudgetUsageRoute } from '../handlers/squad-budget-handler';
 // [v0.0.194] token-stats 子路径分发
@@ -40,6 +41,12 @@ export async function dispatchSquadRoutes(
   bs: BootstrapResult,
   dataDir: string,
 ): Promise<Response | null> {
+  // /squad-templates 前缀分发——MUST 在 /squad 匹配之前
+  //（`/squad-templates` startsWith `/squad` 会被下方 /squad CRUD 吞掉返 404）
+  if (path === '/squad-templates') {
+    return handleSquadTemplateRoute(method, dataDir);
+  }
+
   if (path !== '/squad' && !path.startsWith('/squad/')) {
     return null;
   }

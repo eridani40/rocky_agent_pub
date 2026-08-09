@@ -107,7 +107,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 | `dedup` | 2 | — | 同 fragment.id 去重；同上 |
 | `budget_truncate` | 3 | ✅ §4.5 | token 预算裁剪（仅裁 context/volatile 动态段）；同上 §3/§7 |
 
-### 3.6 `system_reminder`（9 个 = 5 通用 + 4 squad-scoped）
+### 3.6 `system_reminder`（8 个 = 5 通用 + 3 squad-scoped）
 
 | implId | 登记序（补位用） | configSchema | 职责（出处） |
 |---|---|---|---|
@@ -116,10 +116,9 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 | `workspace` | 3 | — | 工作目录、git 状态；同上 |
 | `tool_error` | 4 | — | 上轮工具错误；同上 |
 | `todo` | 5 | — | task 进度（**[D1.1] 依赖 task_tools 缺失 → no-op 返回空**）；同上 |
-| `reachable_agents` | 6 | — | **squad-scoped**：squad clique 可达对象；`../../squad/[P1]prompt_sections.md` |
-| `squad_charter` | 7 | — | **squad-scoped**：charter 动态 reminder；同上 |
-| `squad_tasks` | 8 | — | **squad-scoped**：工作项进度 reminder；同上 |
-| `squad_board` | 9 | — | **squad-scoped**：board 视图 reminder；同上 |
+| `squad_agents_status` | 6 | — | **squad-scoped**：统一全员状态块（可达对象 + running/idle + presence；[v0.0.273] 三合一取代 reachable_agents + squad_team_status）；`../../squad/[P1]prompt_sections.md` |
+| `squad_workspace` | 7 | — | **squad-scoped**：squad 工作目录 reminder；同上 |
+| `squad_task` | 8 | — | **squad-scoped**：工作项进度 reminder；同上 |
 
 ### 3.7 `context_should_compact` + `context_do_compact`（4 个，v0.0.40）
 
@@ -311,7 +310,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 
 ## 5. `rocky_context` plugin manifest 结构
 
-单 plugin，目录 `app/plugins/builtins/rocky_context/`，manifest 文件 `plugin.json`。`extImpls[]` 装 57 个 impl（31 通用 + 1 sink（v0.0.49 `store_sink`）+ 1 search 旁路（v0.0.126 `search_indexing`）+ 1 side_run_builder + 4 compact + 2 post-compact（v0.0.51）+ 2 session_store（v0.0.66 `persistent_session_store`/`in_memory_session_store`）+ 15 squad/academy-scoped），每个 impl 一个模块文件（导出类，非 activate；见 `plugin_manager_interface.md §3.4`）。impl 模块路径相对 plugin 目录。squad-scoped impl（`squad_role`/`team_roster`/`parent_task`/`reachable_agents`/`squad_charter`/`squad_tasks`/`squad_board`）的契约文档归 squad KB（`../../squad/[P1]prompt_sections.md`），manifest 仅登记 impl 模块路径。compact impl（`threshold_should_compact`/`reject_should_compact`/`summary_do_compact`/`noop_do_compact`）契约归 `[P0]context_compact_detail.md §2c`；post-compact impl（`memory_skill_consolidation`/`noop_post_compact`）契约归 `[P0]context_compact_detail.md §2d`；session_store impl（`persistent_session_store`/`in_memory_session_store`）契约归 `[P0]context_engine.md §3.6`。
+单 plugin，目录 `app/plugins/builtins/rocky_context/`，manifest 文件 `plugin.json`。`extImpls[]` 装 57 个 impl（31 通用 + 1 sink（v0.0.49 `store_sink`）+ 1 search 旁路（v0.0.126 `search_indexing`）+ 1 side_run_builder + 4 compact + 2 post-compact（v0.0.51）+ 2 session_store（v0.0.66 `persistent_session_store`/`in_memory_session_store`）+ 15 squad/academy-scoped），每个 impl 一个模块文件（导出类，非 activate；见 `plugin_manager_interface.md §3.4`）。impl 模块路径相对 plugin 目录。squad-scoped impl（`squad_role`/`team_roster`/`parent_task`/`squad_agents_status`/`squad_workspace`/`squad_task`）的契约文档归 squad KB（`../../squad/[P1]prompt_sections.md`），manifest 仅登记 impl 模块路径。compact impl（`threshold_should_compact`/`reject_should_compact`/`summary_do_compact`/`noop_do_compact`）契约归 `[P0]context_compact_detail.md §2c`；post-compact impl（`memory_skill_consolidation`/`noop_post_compact`）契约归 `[P0]context_compact_detail.md §2d`；session_store impl（`persistent_session_store`/`in_memory_session_store`）契约归 `[P0]context_engine.md §3.6`。
 
 ```jsonc
 {

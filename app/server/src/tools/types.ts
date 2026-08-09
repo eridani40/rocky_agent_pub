@@ -133,6 +133,11 @@ export interface ToolSessionConfigLike {
    */
   browserDriverRegistry?: unknown;
   /**
+   * BrowserInstanceManager 引用（browser tool headless/managed-profile 常驻实例管理）。
+   * 由 session-config 构造期注入；缺省 undefined → browser 非 attach 报「未注册」isError。
+   */
+  browserInstanceManager?: unknown;
+  /**
    * agent 工具运行时上下文（spawn/query/abort + send_message 用）。
    * 由 agent-loop 注入；agent-tool / send-message-tool 经 ctx.config.agentToolContext 读。
    * 类型用 unknown（结构化类型由 agent/tools/runtime-context.ts 权威定义，本文件不耦合 agent 模块）。

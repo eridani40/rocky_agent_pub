@@ -10,7 +10,7 @@ since: v0.0.33.2
 # SessionConfig studio 字段消费契约（4 scope 接 AgentLoop）
 
 > 定位：定义 SessionConfig 的 5 个 studio 新字段**消费契约** + `buildSessionConfigFromDeps` studio 分支对 `systemPrompt/tools/skills/modelId/workdir` 5 字段**取法表**。
-> 参考：`specs/tech/version_logs/v0.0.33.2/change_log.md §2.B`（权威源）；`[P1]data_model.md §1.1/§1.2`（Squad/Member entity）；`[P1]prompt_sections.md`（studioContext 被 team_roster/reachable_agents/squad_role mapper 消费）；`[P1]squad_workspace.md §1`（workdir 目录结构）；`[P1]agent_squad_chat.md §2`（硬编码路由器 prompt）；`../agent/context/[P0]system_prompt.md`（config.systemPrompt 透传给 mapper）。
+> 参考：`specs/tech/version_logs/v0.0.33.2/change_log.md §2.B`（权威源）；`[P1]data_model.md §1.1/§1.2`（Squad/Member entity）；`[P1]prompt_sections.md`（studioContext 被 team_roster/squad_role mapper 消费；squad_agents_status 用 squadContext——见 `[P1]squad_reminder_providers.md §1`）；`[P1]squad_workspace.md §1`（workdir 目录结构）；`[P1]agent_squad_chat.md §2`（硬编码路由器 prompt）；`../agent/context/[P0]system_prompt.md`（config.systemPrompt 透传给 mapper）。
 > 命名：role / session.type 一律 **mate**（非 member）；Member entity 字段名（member.systemPrompt/tools/skillConfig）保留——那是 entity 字段非 role。**v0.0.155：member.model 已硬删**（member 退管理概念，不持运行配置；model/effort/approval 全跟 session）。
 
 ---
@@ -30,9 +30,9 @@ v0.0.33.2 把 studio 4 scope（squad/leader/mate/subagent）接进 v0.0.31 已�
 | 字段 | 类型 | 来源 | 消费者 |
 |---|---|---|---|
 | `kind` | `SessionKind` | **[v0.0.56]** `store.getSessionKind(sid)` 产出（替代旧 `sessionType`/`bizType` 镜像） | 所有 mapper（`kind.role`/`kind.isStudio`/`kind.isSubagent`）+ systemPrompt 分流 + tools resolve |
-| `squadId` | `string \| undefined` | session record 镜像 | T5 send_message squad clique 校验 + reachable_agents 派生 |
+| `squadId` | `string \| undefined` | session record 镜像 | T5 send_message squad clique 校验 + squad_agents_status 派生 |
 | `memberId` | `string \| undefined` | session record 镜像（仅 leader/mate 有） | workdir 取法 + studioContext.member 取法 |
-| `studioContext` | `{ squad?: Squad; member?: Member } \| undefined` | **bootstrap 注入**（非镜像） | team_roster/reachable_agents/squad_role mapper 数据源（见 `[P1]prompt_sections.md §3/§4/§5`） |
+| `studioContext` | `{ squad?: Squad; member?: Member } \| undefined` | **bootstrap 注入**（非镜像） | team_roster/squad_role mapper 数据源（见 `[P1]prompt_sections.md §3/§4`）；squad_agents_status 不读它（用 squadContext，见 `[P1]squad_reminder_providers.md §1`） |
 
 **前 4 字段从 session record 镜像**：session store 已落这些字段（v0.0.33.1 增量），buildSessionConfigFromDeps 直接透传。
 

@@ -289,7 +289,7 @@ send_message({
 ```
 send_message({ target, content, needReply, inReplyTo? }):
   → resolve target → AgentRef（按 a2a_protocol §2.2 别名解析优先级：sessionId / "parent" / "squadchat" / "leader" / 角色 name）
-  → 校验 target ∈ caller.reachable_agents（按 a2a_protocol §6 身份逻辑）
+  → 校验 target ∈ caller.squad_agents_status（按 a2a_protocol §6 身份逻辑）
   → 构造 msg.sender = { source: "agent", agent: { ref: caller.ref, inReplyTo, needReply } }
   → manager.deliverTo(target.sessionId, msg)        // ★ 统一投递（enqueue + activate），只需 sessionId
   → 返回 { messageId }（fire-and-forget；忽略 deliverTo 返回的 run）
@@ -299,7 +299,7 @@ target.loop drain 看到 `sender.source = "agent"` → 按 a2a_protocol §4.1 �
 
 ### 5.3 拓扑编码
 
-sub-agent 的 `send_message` 可达目标 = `[parent]`（工具层校验收窄到 parent；别名 `"parent"`）。child 结构上无法编址其他 agent。详见 a2a_protocol §3 reachable_agents 表。与 side run 的 `allowedTools` 同一机制。
+sub-agent 的 `send_message` 可达目标 = `[parent]`（工具层校验收窄到 parent；别名 `"parent"`）。child 结构上无法编址其他 agent。详见 a2a_protocol §3 squad_agents_status 表。与 side run 的 `allowedTools` 同一机制。
 
 ---
 

@@ -29,7 +29,8 @@ multi_agent = **一个 agent 如何派生 sub-agent** + **agent 间如何通信�
 | 管 | 不管（→ 别的 KB） |
 |---|---|
 | sub-agent 派生原语（`agent` 工具 spawn/query/abort action） | AgentLoop 本体 / prompt builder EP（→ `../agent/`） |
-| a2a 通信协议（AgentRef + reachable_agents + needReply + 回复规则） | session store 通用 schema / SessionState 五态机（→ `../agent/session/`） |
+| a2a 通信协议（AgentRef + squad_agents_status + needReply + 回复规则） | session store 通用 schema / SessionState 五态机（→ `../agent/session/`） |
+| [v0.0.270] enableGroupChat 群聊门控：squad_agents_status SquadChat 行构造 `!== false`（一处管 system prompt+system_reminder）+ resolveSquadAlias 'squadchat' `=== false` 返 null（关态 send_message 报错） | squad entity 字段 / UI 入口 / 协作规则段（→ `../squad/`） |
 | [v0.0.56] session 派生字段语义（role/derivation/biz/parentSessionId/subAgentConfig/origin） | session_usage 递归 sub 上报机制（→ `../agent/session/ session_usage §6.2`） |
 | sub-agent 模板（结构 + app_config 存储 + explorer + D8 model resolution） | scope 体系通用机制 / config 后端（→ `../config/`） |
 | swarm 语义（children 集合 + UI 三段展示） | squad / 角色 / 团队层 / charter / budget（→ `../squad/`） |
@@ -72,7 +73,7 @@ multi_agent = **一个 agent 如何派生 sub-agent** + **agent 间如何通信�
 |---|---|---|
 | **派生 / 工具** | | |
 | `[P1]subagent_derivation.md` | 派生契约：session schema（type/scope/parentSessionId/subAgentConfig）+ `agent` 工具（spawn/query/abort）+ 生命周期 + 并发上限 + abort 级联 + usage + 复用重激活 | [link]([P1]subagent_derivation.md) |
-| `[P1]a2a_protocol.md` | a2a 通信协议：AgentRef 寻址 + 别名解析 + reachable_agents + 回复规则（消息从哪来到哪去）+ needReply + scope 校验 | [link]([P1]a2a_protocol.md) |
+| `[P1]a2a_protocol.md` | a2a 通信协议：AgentRef 寻址 + 别名解析 + squad_agents_status（[v0.0.273] 统一全员状态块，曾名 reachable_agents）+ 回复规则（消息从哪来到哪去）+ needReply + scope 校验 | [link]([P1]a2a_protocol.md) |
 | `[P1]subagent_templates.md` | sub-agent 模板：结构（含 modelId + v0.0.204 role/derivation spawn 泛化字段）+ D8 model resolution + app_config 存储 + explorer / knowledge_learning_trainer 预配 | [link]([P1]subagent_templates.md) |
 | **决策日志** | | |
 | `design.md` | 决策日志：D1-D8 全决议 + §5a v0.0.28 增量（D8 二次修订 / scope=EP / 工具归属迁回 / swarm / 模板存储 / 真 LLM AT 避坑点） | [link](design.md) |

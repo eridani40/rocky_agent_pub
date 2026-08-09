@@ -16,7 +16,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { ulid } from '../../../../server/src/config/ulid';
-import type { ContentBlock, Message } from '../../../../server/src/message/types';
+import type { ContentBlock, Message, MessageSender, TextBlock } from '../../../../server/src/message/types';
 import BaseBuilderReducer from '../assemble/base_builder';
 import OrphanToolCallReducer from '../assemble/orphan_tool_call';
 import ThinkRemoveReducer from '../assemble/think_remove';
@@ -574,6 +574,101 @@ describe('assemble_reducer — role_merge', () => {
       { config: fakeConfig(), prevSnapshot: null },
     );
     expect(out).toHaveLength(2);
+  });
+
+  // [v0.0.294] sender 下沉到 block 层测试
+  it('合并 2 条同 role 不同 sender → 被合并 block 带 sender + message.sender 清空', () => {
+    const senderA: MessageSender = { source: 'user' };
+    const senderB: MessageSender = {
+      source: 'agent',
+      agent: { ref: { type: 'mate', sessionId: 's1', name: 'coder' }, needReply: false },
+    };
+    const input = [
+      { ...msg('user', 'hello', 'm1'), sender: senderA },
+      { ...msg('user', 'world', 'm2'), sender: senderB },
+    ];
+    const out = new RoleMergeReducer('role_merge', {}).reduce(
+      emptyData,
+      input,
+      { config: fakeConfig(), prevSnapshot: null },
+    );
+    expect(out).toHaveLength(1);
+    // 合并后 message.sender 清空
+    expect(out[0]!.sender).toBeUndefined();
+    // 首块（来自 m1，first 没被合并注入——last 是 first 本身，不注入）
+    expect(out[0]!.content).toHaveLength(2);
+    // 第二块（来自 m2，被 clone + 注入 senderB）
+    const block1 = out[0]!.content[1] as TextBlock;
+    expect(block1.sender).toEqual(senderB);
+    // 原始入参 block 不被 mutate
+    expect((input[1]!.content[0] as TextBlock).sender).toBeUndefined();
+  });
+
+  it('合并 3 条同 role → 全部被合并 block 带 sender + message.sender 清空', () => {
+    const s1: MessageSender = { source: 'user' };
+    const s2: MessageSender = { source: 'system', system: { kind: 'reminder' } };
+    const s3: MessageSender = { source: 'approval', approval: { toolCallId: 'tc1', decision: 'allow' } };
+    const input = [
+      { ...msg('user', 'first', 'm1'), sender: s1 },
+      { ...msg('user', 'second', 'm2'), sender: s2 },
+      { ...msg('user', 'third', 'm3'), sender: s3 },
+    ];
+    const out = new RoleMergeReducer('role_merge', {}).reduce(
+      emptyData,
+      input,
+      { config: fakeConfig(), prevSnapshot: null },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.sender).toBeUndefined();
+    expect(out[0]!.content).toHaveLength(3);
+    // m1 是 first（last 初始）→ 不注入 sender（last 本身不动）
+    // m2、m3 被合并 → clone + 注入各自 sender
+    expect((out[0]!.content[1] as TextBlock).sender).toEqual(s2);
+    expect((out[0]!.content[2] as TextBlock).sender).toEqual(s3);
+  });
+
+  it('未合并的 message → block 无 sender、message.sender 保留', () => {
+    const sender: MessageSender = { source: 'user' };
+    const input = [
+      { ...msg('user', 'hello', 'm1'), sender },
+      { ...msg('assistant', 'reply', 'm2') }, // 不同 role → 不合并
+    ];
+    const out = new RoleMergeReducer('role_merge', {}).reduce(
+      emptyData,
+      input,
+      { config: fakeConfig(), prevSnapshot: null },
+    );
+    expect(out).toHaveLength(2);
+    // 第一条 user：独立 push（无前序同 role），sender 保留
+    expect(out[0]!.sender).toEqual(sender);
+    expect((out[0]!.content[0] as TextBlock).sender).toBeUndefined();
+    // 第二条 assistant：独立 push
+    expect(out[1]!.sender).toBeUndefined();
+    expect((out[1]!.content[0] as TextBlock).sender).toBeUndefined();
+  });
+
+  it('混合 block 类型（TextBlock + ToolCallBlock）合并 → 都注入 sender', () => {
+    const senderB: MessageSender = { source: 'user' };
+    const m1 = msg('user', [{ type: 'text', text: 'a' }], 'm1');
+    const m2: Message = {
+      ...msg('user', [
+        { type: 'text', text: 'b' },
+        { type: 'tool_call', id: 'c1', name: 'bash', arguments: {} },
+      ], 'm2'),
+      sender: senderB,
+    };
+    const input = [m1, m2];
+    const out = new RoleMergeReducer('role_merge', {}).reduce(
+      emptyData,
+      input,
+      { config: fakeConfig(), prevSnapshot: null },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.sender).toBeUndefined();
+    expect(out[0]!.content).toHaveLength(3);
+    // m2 的两个 block 都应注入 sender（text + tool_call）
+    expect((out[0]!.content[1] as TextBlock).sender).toEqual(senderB);
+    expect((out[0]!.content[2] as TextBlock).sender).toEqual(senderB);
   });
 });
 

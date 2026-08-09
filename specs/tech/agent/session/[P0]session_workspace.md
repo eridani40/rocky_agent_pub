@@ -3,7 +3,7 @@ type: interface
 title: Session Workspace（workspaceDir 字段 + 切换）
 priority: P0
 status: active
-updated: 2026-07-14
+updated: 2026-08-06
 since: v0.0.17
 ---
 
@@ -139,15 +139,19 @@ if (!session.workspaceDir) {
 ## 6. 安全
 
 - **workspaceDir 必须是绝对路径**（createSession 时 `path.resolve` 规范化）。
-- **打开文件/文件夹**（POST /session/:id/workspace/open）：`path.resolve(workspaceDir, relPath)` 后必须 `startsWith(workspaceDir)`，防目录穿越（详见 api spec）。
+- **打开文件/文件夹**（POST /session/:id/workspace/open）与 **tree 展开 / watch / file 读存**（4 处共用 `whitelistResolve`，v0.0.263 迁到 `session-workspace-path.ts`）：`resolve(workspaceDir, relPath)` 后按**链式授权解析**校验（详见 api spec §2.6.1 安全段）：
+  - **step 1 字符串前缀**：`resolve(realRoot, rel)` 必须在 `realRoot` 内（挡 `../` + 绝对路径注入）。
+  - **step 2 链式授权解析**：从 realRoot 出发**逐段** resolve——每段 `lstatSync` 判 symlink，命中则 `realpathSync` 授权该 symlink 目标为继续解析的根。**workspace 内存在的 symlink = 用户放置 = 用户显式浏览意图 = 授权**（目标可在 workspace 外）；无 symlink 段时与旧 `realpathSync` 等价（普通路径零行为变化）。
+  - **未授权越界仍拒绝**：非 symlink 段的 `../`、绝对路径注入、未先展开 symlink 就访问其目标路径 → `400`（穿越攻击语义不变——被动路径穿越全拒，主动浏览用户自己创建的 symlink 放行）。
 - **切换目录**（§4.1）：newDir 必须存在且是目录（防用户手输错误路径；系统 dialog 选出的天然合法）。
-- **fs watch**：仅监听 workspaceDir 内（chokidar root = workspaceDir，ignore `node_modules`/`.git`），不监听任意路径。
+- **fs watch**：仅监听 workspaceDir 内（chokidar root = workspaceDir，ignore `node_modules`/`.git`），不监听任意路径；symlink 目录经链式授权放行（见 `session_workspace_manager.md` watch symlink 策略）。
 
 ## 7. 边界
 
 | 零件 | 归属 |
 |---|---|
 | `workspaceDir` 字段定义 + 初始目录策略 + 切换语义 + 历史兼容 | 本文 ✅ |
+| 路径白名单校验实现（`whitelistResolve` 链式授权，v0.0.263 起） | `app/server/src/handlers/session-workspace-path.ts`（本文 §6 定义语义）+ api spec §2.6 各端点安全段 |
 | Session interface / createSession 入参 / SessionStore | `session_store.md §2/§4`（加字段 + setWorkspaceDir） |
 | fs watcher 生命周期 + chokidar + event 发射 | `session_workspace_manager.md` |
 | workspace reminder provider 实现（读 config.workdir） | `../context/[P0]system_reminder.md §3`（不改 provider 实现，只接线） |

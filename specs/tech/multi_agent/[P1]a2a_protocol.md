@@ -3,14 +3,14 @@ type: spec
 title: Agent 间通信协议（a2a_protocol）
 priority: P1
 status: active
-updated: 2026-08-04
+updated: 2026-08-07
 since: v0.0.28
 related: [subagent_derivation.md, design.md, ../agent/message/[P0]agent_message_interface.md, ../squad/squad_definition.md]
 ---
 
-# Agent 间通信协议（AgentRef + 回复规则 + reachable_agents）
+# Agent 间通信协议（AgentRef + 回复规则 + squad_agents_status）
 
-> 定位：定义 a2a 通信的**协议层**——**寻址结构**（AgentRef）+ **回复规则**（基于 sender.source）+ **可达集**（reachable_agents）。
+> 定位：定义 a2a 通信的**协议层**——**寻址结构**（AgentRef）+ **回复规则**（基于 sender.source）+ **可达集**（squad_agents_status，[v0.0.273] 统一全员状态块，曾名 reachable_agents）。
 > 范围：跨 multi_agent（subagent）与 squad（角色）两层共享。
 > 参考：`agent/message/[P0]agent_message_interface.md §5`（MessageSender schema）、`multi_agent/[P1]subagent_derivation.md §4/§5`（spawn_agent/send_message）、`../squad/squad_definition.md`、`../squad/agent_squad_chat.md` / `agent_leader.md` / `agent_member.md`（各角色 rules）。
 
@@ -91,15 +91,15 @@ LLM 调 `send_message(target, ...)` 时，`target` 可填：
 ### 2.3 跨 squad / 顶层 standalone
 
 - **跨 squad 寻址**：当前**不支持**（一个 agent 只跟自己 squad / 自己 parent 通信，拓扑硬约束）。将来如需，加 squadId 前缀（待定）。
-- **standalone session**（顶层非-squad）：reachable_agents 为空，无 a2a 对端。
+- **standalone session**（顶层非-squad）：squad_agents_status 为空，无 a2a 对端。
 
 ---
 
-## 3. reachable_agents（曾名 reachable_peers）— [v0.0.56] 改读 SessionKind
+## 3. squad_agents_status（曾名 reachable_agents / reachable_peers）— 统一全员状态块
 
-每次 prompt assemble 时由 context engine 动态构建并注入。**按 caller SessionKind 派生**：
+每次 prompt assemble 时由 context engine 动态构建并注入（[v0.0.273] 起由 `squad_agents_status` reminder provider 产出，取代旧 `reachable_agents` + `squad_team_status`；可达性语义不变——name + sessionId 仍在统一块）。**按 caller SessionKind 派生**：
 
-| caller SessionKind | reachable_agents 列表 | 备注 |
+| caller SessionKind | squad_agents_status 列表 | 备注 |
 |---|---|---|
 | **derivation='subagent'** | `[parent]` | 仅 parent，拓扑硬约束（multi_agent） |
 | **role='squad'**（SquadChat） | `[leader, ...all mates]` | 群聊路由对端 |
@@ -107,19 +107,23 @@ LLM 调 `send_message(target, ...)` 时，`target` 可填：
 | **role='mate'** | `[squadchat, leader, ...peers]` | 含同 squad 其他 mate（peer 协作 Q2）+ 自己派的 sub-agent（agent 工具内对接）。mate（B 方案：原 member，避免与 squad member entity 名撞） |
 | **role='rocky', derivation='main'** | `[]` | 顶层独立 session 无 a2a 对端 |
 
-**重要约束**：**user 不在任何 reachable_agents 列表里**——agent ↔ user 不走 send_message（user 在每个 session UI 旁；agent 想答 user 出 final text，agent 想主动找 user 看 §1 群聊路径）。
+**[v0.0.270] enableGroupChat 门控**：`role='leader'` / `role='mate'` 行中的 `squadchat` 条目由 `squad_agents_status.ts deriveSquadScoped()` 的 squadChatEnabled 构造门控——`squad.enableGroupChat === false` → SquadChat 行不渲染（compact 自动过滤）→ **system prompt + system_reminder 两头同时无 SquadChat 条目**（同一 provider 一处管两头，无第二注入点）。`!== false` 语义：undefined（旧 record）视为开，与 api toDetail `?? true` 一致。关态下 send_message('squadchat') → `resolveSquadAlias` 返 null → cannot resolve target（不静默投递）；'leader'/member name 私聊解析不受影响（全私聊语义）。
 
-**板块格式**（注入 system message）：
+**重要约束**：**user 不在任何 squad_agents_status 列表里**——agent ↔ user 不走 send_message（user 在每个 session UI 旁；agent 想答 user 出 final text，agent 想主动找 user 看 §1 群聊路径）。
+
+**[v0.0.273] 全员列出（统一块新增语义）**：running + idle 都保留（旧 `squad_team_status` 只列 running 已合并进统一块，做完的 mate 不消失；presence 有但 run 不在跑 = 疑似卡住可见）。benched 成员过滤（`state !== 'benched'`，同 team_roster 判据）。
+
+**板块格式**（注入 system message / reminder）：
 ```
-[Reachable agents — you can `send_message` to:]
-- leader: <leaderName> (sessionId: <id>)
-- members: <m1Name> (id1), <m2Name> (id2), ...
-- squadchat: SquadChat (sessionId: <id>)
+[squad:agents] 团队当前状态：
+- SquadChat (squad, sessionId: <id>) · 群聊   ← [v0.0.270] enableGroupChat=false 或空 squad 时不渲染此行
+- {name} ({role}, sessionId: <id>) · {running|idle} · presence: {text|(无 presence)}
+- ...
 （sub-agent 场景仅 parent；standalone 场景为空）
 ```
 
 - **不持久化到 RoleSpec**——团队人员变动（hire/bench/edit）下次 assemble 即生效。
-- 注入位置：作为 system_prompt 的固定 section（每次重组），或作为 system reminder 高频更新（参考 v0.0.22 prompt builder section 体系）。
+- 注入位置：作为 system_prompt 的固定 section（每次重组），或作为 system reminder 高频更新（参考 v0.0.22 prompt builder section 体系）。[v0.0.273] 起实际由 `squad_agents_status` reminder provider 注入（含状态 + presence 动态数据）。
 
 ---
 
@@ -211,7 +215,7 @@ sendMessage(caller, target, ...):
 > **[v0.0.56 hotfix 现状对齐]** 旧 `caller.scope`（session 持久化字段）已删除（v0.0.48 后实质废弃）。实现层 `app/server/src/agent/tools/send-message-tool.ts` 改读 `rtc.parentScope === 'subagent'`（parentScope = caller `kind.derivation` 经 runtime context 透传，值同 `'subagent'`/`'session'`/undefined）。校验维度权威是 **`kind.isSubagent`**（= `derivation === 'subagent'`）——`derivation` 取代了旧的 `scope` + `type='subagent'` 双字段。
 
 - 无须 RoleSpec 字段记录可达集——动态查 caller.kind（+ squad 层补 caller.kind.role / squad.members）即可。
-- 校验 = 软兜底；reachable_agents 板块（§3）已让 LLM 知道合法目标。
+- 校验 = 软兜底；squad_agents_status 板块（§3）已让 LLM 知道合法目标。
 
 ---
 
@@ -219,7 +223,7 @@ sendMessage(caller, target, ...):
 
 | section 名 | 角色可见 | 内容来源 |
 |---|---|---|
-| `reachable_agents` | 全员（含 subagent） | 本文 §3 |
+| `squad_agents_status`（[v0.0.273] 统一全员状态块，曾名 reachable_agents） | 全员（含 subagent） | 本文 §3 |
 | `charter` | 仅 leader | `squad_definition.md §5` |
 | `tasks`（含 source 血缘） | 仅 member | `squad_workitems.md` |
 | `team_roster`（花名册） | squad / leader / member | members.yaml |
@@ -232,7 +236,7 @@ sendMessage(caller, target, ...):
 
 | 零件 | 归属 |
 |---|---|
-| AgentRef 结构 + 别名解析 + reachable_agents + 回复规则 + needReply 语义 | 本文 ✅ |
+| AgentRef 结构 + 别名解析 + squad_agents_status + 回复规则 + needReply 语义 | 本文 ✅ |
 | MessageSender schema（含 sender.agent 子结构）| `agent/message/[P0]agent_message_interface.md §5` |
 | send_message 工具 schema（含 needReply 入参） | `multi_agent/[P1]subagent_derivation.md §5` / `squad/[P1]squad_tools.md`（队级别工具入口） |
 | spawn_agent sync 模式实现（deliverTo + run.promise） | `multi_agent/[P1]subagent_derivation.md §4` |
@@ -249,5 +253,5 @@ sendMessage(caller, target, ...):
 ## 9. 待定
 
 - 角色 `name` 字段唯一性（squad 内）强约束实现层 + 命名冲突报错。
-- `reachable_agents` 大团队（10+ members）列表过长是否需要裁剪/分组。
+- `squad_agents_status` 大团队（10+ members）列表过长是否需要裁剪/分组。
 - 跨 squad 寻址（squadId 前缀）何时引入。

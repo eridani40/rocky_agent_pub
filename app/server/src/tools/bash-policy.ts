@@ -3,8 +3,7 @@
  * 参考: specs/tech/agent/tools/[P0]bash_tools.md §5
  *       specs/tech/version_logs/v0.0.122/change_plan.md 模块 G
  *
- * 实现两条内置策略：
- *   - ssh-read：命令文本引用 ~/.ssh / $HOME/.ssh / /Users/USERNAME/.ssh → deny（参数级 best-effort）
+ * 实现一条内置策略：
  *   - rm-wildcard（D1）：rm 命令且参数含字面 * → ask（需用户批准）
  *
  * deny 优先于 ask：先扫全部 policy，任一 deny 即返；无 deny 有 ask 返首个 ask；都不命中返 allow。
@@ -32,29 +31,6 @@ interface BashPermissionPolicy {
 // ============================================================
 // 2. 单条策略检测函数（导出供 UT）
 // ============================================================
-
-/**
- * 检测命令是否引用 ~/.ssh / $HOME/.ssh / /Users/USERNAME/.ssh 目录（参数级 best-effort）。
- *
- * 命中 → deny reason=「禁止访问 ~/.ssh 敏感目录」
- * 未命中 → null
- *
- * 设计边界（MANDATORY）：
- *   - 只匹配字面路径形式（~/.ssh / $HOME/.ssh / /Users/xxx/.ssh）
- *   - 间接拼接（如变量拼接形式）不命中（交执行层 seatbelt 拦截）
- *   - AT case `approval_sandbox_tc1` 用间接拼接验证沙箱兜底，此策略不应误报
- */
-export function detectSshRead(command: string): PermissionDecision | null {
-  // 匹配三种 .ssh 路径字面形式
-  //   1. ~/
-  //   2. $HOME/
-  //   3. /Users/<任意用户名>/
-  const sshPattern = /(?:~|\$HOME|\/Users\/[^/\s"'`]+)\/\.ssh(?:\/|$|\s|['"])/;
-  if (sshPattern.test(command)) {
-    return { behavior: 'deny', reason: '禁止访问 ~/.ssh 敏感目录' };
-  }
-  return null;
-}
 
 /**
  * 检测命令是否包含 rm 通配删除（参数级 best-effort，D1）。
@@ -104,10 +80,6 @@ export function detectRmWildcard(command: string): PermissionDecision | null {
 
 /** 内置策略列表（按 deny-first 排列，便于 checkBashPermission 扫描） */
 const POLICIES: BashPermissionPolicy[] = [
-  {
-    id: 'ssh-read',
-    check: detectSshRead,
-  },
   {
     id: 'rm-wildcard',
     check: detectRmWildcard,

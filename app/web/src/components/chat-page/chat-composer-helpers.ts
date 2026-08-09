@@ -5,6 +5,7 @@
  * 组件侧负责 ref guard 与 queueMicrotask 推迟；helpers 仅做无副作用的纯计算 / editor 命令封装。
  */
 import type { MentionAttrs } from './chat-composer-extension';
+import { deserializeContentToParagraphs, type TiptapNodeJSON } from './mention-tag';
 
 /** editor 入参最小形状（detectMentionTrigger 用） */
 interface EditorLike {
@@ -14,10 +15,10 @@ interface EditorLike {
   };
 }
 
-/** editor chain 形状（insertMention for pill / insertContent for text node） */
+/** editor chain 形状（insertMention for pill / insertContent for text node / TiptapNodeJSON[] for 草稿恢复） */
 interface Chain {
   insertMention: (attrs: MentionAttrs) => Chain;
-  insertContent: (content: string) => Chain;
+  insertContent: (content: string | TiptapNodeJSON[]) => Chain;
   focus: () => Chain;
   run: () => unknown;
 }
@@ -63,5 +64,16 @@ export function injectInitialContent(editor: ChainableEditor, initial: MentionAt
 /** 向后兼容包装：委托 injectInitialContent（mention 数组分支，签名沿用）。 */
 export function injectMentions(editor: ChainableEditor, items: MentionAttrs[]): void {
   injectInitialContent(editor, items);
+}
+
+/**
+ * 草稿恢复专用 dispatcher：deserializeContentToParagraphs（mention pill 保真）→ insertContent。
+ * 与 injectInitialContent 并列（职责 = editor 命令封装）；ref guard / queueMicrotask 推迟由 useChatDraft 负责。
+ * MUST 走 deserializeContentToParagraphs（mention 保真，非 string 分支纯 text 注入）；
+ * 不解析实时手打 `<mention/>`（沿用 mention-tag.ts 注入路径语义）；纯函数无状态。
+ */
+export function restoreDraftContent(editor: ChainableEditor, content: string): void {
+  const paragraphs = deserializeContentToParagraphs(content);
+  editor.chain().focus().insertContent(paragraphs).run();
 }
 

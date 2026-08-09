@@ -1,0 +1,47 @@
+{
+  "env": {},
+  "attribution": {
+    "commit": ""
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(pwd)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(chmod +x *)",
+      "Bash(sleep *)",
+      "Bash(kill *)",
+      "Bash(curl *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(tail *)",
+      "Bash(head *)",
+      "Bash(wc *)",
+      "Bash(export *)",
+      "Bash(source *)",
+      "Bash(cd *)",
+      "Read(**/*)",
+      "Write(**/*)",
+      "Edit(**/*)",
+      "Glob(**/*)",
+      "Grep(**/*)",
+      "WebSearch"
+    ],
+    "deny": [
+      "Read(.env*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.key)",
+      "Read(**/*.pem)",
+      "Bash(rm -rf /)",
+      "Bash(sudo rm *)",
+      "Bash(sudo shutdown *)",
+      "Bash(sudo reboot *)"
+    ],
+    "defaultMode": "bypassPermissions"
+  }
+}

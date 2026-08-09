@@ -3,7 +3,7 @@ type: spec
 title: Agent Loop — Unified Skeleton（统一 ReAct 骨架）
 priority: P0
 status: active
-updated: 2026-08-04
+updated: 2026-08-07
 since: v0.0.40
 ---
 
@@ -119,13 +119,15 @@ runReActLoop(spec):
 
 | hook | main | summary / consolidate |
 |---|---|---|
-| onRunEnd | persistRun + markIdle/markError(CAS)；**其后追加回报兜底**（仅装配 replySettle 的 subagent main run：tool_pending→stash 未决请求不代发，其余 reason→`settleAgentReplyFallback` 系统代发，见下「replySettle 装配」） | noop |
+| onRunEnd | persistRun + markIdle/markError(CAS)；**其后追加回报兜底**（仅装配 replySettle 的 subagent main run：tool_pending→stash 未决请求不代发，其余 reason→`settleAgentReplyFallback` 系统代发，见下「replySettle 装配」）；**再追加 mate 退出通知**（仅装配 mateExitNotify 的 mate main run：通知 leader，见下「mateExitNotify 装配」） | noop |
 | onUsage | accumulate(sid, "current", u) + notify | accumulate(sid, "forked", u) early return / noop（caller 按 run 结束总量累计，见 `agent_loop_side_run.md §5`） |
-| onInterrupted | 默认 noop（abort api 4 步接管）；**装配 replySettle 的 subagent main run 开「代发旁路」**（interrupted→结局通知；transcript 收尾/emit 仍归 abort api 4 步，本 hook 不碰） | noop（buffer 随 RunState GC + RunLoopHandle finally 回收 in_memory 桶） |
+| onInterrupted | 默认 noop（abort api 4 步接管）；**装配 replySettle 的 subagent main run 开「代发旁路」**（interrupted→结局通知；transcript 收尾/emit 仍归 abort api 4 步，本 hook 不碰）；**装配 mateExitNotify 的 mate main run 也开「退出通知旁路」**（interrupted→通知 leader，仍在 settle 之后、主链已完成） | noop（buffer 随 RunState GC + RunLoopHandle finally 回收 in_memory 桶） |
 
 > **store UsagePartition 桶名说明**：v0.0.204 起 runKind 四值（main/summary/consolidate/sub）但 store UsagePartition 仍是三分区桶（current/sub/forked）。mapUsagePartition 映射：main→current / sub→sub / summary+consolidate→forked（同桶）。store 桶名保留是 v0.0.204 决策（不破坏持久化数据），未来 spec 升级再扩 UsagePartition 类型。
 
 **replySettle 装配（async subagent 回报兜底）**：`buildRunDeps` 仅对 `isMain && kind.isSubagent`（且 manager 经 `activate` 注入 `a2aReplyTracker`/`deliverToFn` 两窄口；旁路 `executeSideRun` 不注入）装配 `replySettle = { deliverTo, tracker, baseline: tracker.deliveryEpoch(), carried: tracker.takePending(sid) }`——baseline 在装配点快照（本 run 的投递 mark 全部晚于它），carried 取出上一 run tool_pending stash 的跨 run 未决请求（take 即清）。顶层/squad/旁路 run 不装配 → 全链路 noop（deps 缺省，旧行为不变）。**结算对象** = `state.agentReplyRequests`：`drainAndPartition` 对本 run drain 批里 `sender.source='agent' && needReply=true` 的消息收集 `{messageId: drain reissue 后新 id, fromSessionId}`（reissue id 让代发的 inReplyTo 指得回 transcript 真身），`prepareStage` 跨多轮 drain 只增不判地累积入 LoopState。**onRunEnd 分派**（persistRun/CAS 之后）：`tool_pending` → `tracker.stashPending(sid, [...carried, ...state.agentReplyRequests])`（非空才 stash）；其余 reason → `settleAgentReplyFallback(state, deps, reason)`（carried+state 合并、按 sender 去重取最新 M.id → 判据 A `hasDeliverySince` 已履约跳过 → 以 child 身份代发，成功=final text / 失败=结局通知，needReply=false）；settle 异常 catch 吞掉不阻断收尾主链。机制语义权威（判据 A / needReply=false / 代发内容契约）见 `../../multi_agent/[P1]a2a_protocol.md §4.2`「系统代发兜底」。
+
+**mateExitNotify 装配（mate run 退出通知 leader hook）**：`buildRunDeps` 仅对 `isMain && kind.role==='mate' && kind.derivation==='parent' && opts.deliverToFn && opts.config.sessionContext?.squadId` 装配 `mateExitNotify = { squadId }`（其余 → undefined，全链路 noop 零通知）。**触发过滤语义**：leader（role≠mate）/ subagent（derivation≠parent）/ 非 squad（无 squadId）/ 旁路 run（非 isMain）全部不装配 → 零通知。**执行**：onRunEnd（persistRun/CAS/replySettle 之后）带 `state.stopReason`（6 种正常：no_tool_call/no_new_messages/max_iterations/doom_loop/error/tool_pending）；onInterrupted（settle 之后）固定 `interrupted`——7 种 stopReason 全覆盖。**通知内容**：`state.lastAssistantContent` block 摘要（type ∈ {text, tool_call, tool_result, tool_reply, image}，排除 reasoning/usage；每块前后各 500 截断）+ 耗时（RunLifecyclePort 构造记 startedAt → 退出 diff）+ tool_pending 时读 `Session.pendingToolCalls` 摘要。**投递形态**：Message 仿 send-message-tool 信封（`sender.source='agent'` + `selfAgentRef` + `needReply:false`）→ `deliverTo(leaderSid, msg)`；leader sessionId 两跳解析（`squadStore.getSquad(squadId).leaderId` → `memberStore.getMember(squadId, leaderId).sessionId`，仿 resolveSquadAlias 'leader'）；失败双层 try/catch 仅 warn 不阻断主链。机制语义权威（块过滤 / 两跳解析 / needReply=false）见 `mate-exit-notify.ts` + `../../multi_agent/[P1]a2a_protocol.md §4.2`（系统代发兜底同款投递范式）。
 
 **emit**：main → bus groupKey `session_id:<sid>_amt:main`（额外发 enqueue 级事件）；summary/consolidate → `session_id:<sid>_amt:<runKind>` 或 noop（`emit:false` 时）。emit 是普通闭包注入，不进 PluginManager EP（热路径 + runKind 内聚策略，不需运行时可配）。
 
@@ -140,11 +142,11 @@ runReActLoop(spec):
 **中断模型**：`controller.aborted` 单一布尔位（外部 abort api 设置）。骨架在 iteration 边界 + LLM 调用后两处检查。v0.0.130.hang 增加 run 级子进程 sweep：`childRegistry.killAll()` 确保工具子进程不泄漏。
 
 **中断退出**：
-- main：`RunLifecyclePort.onInterrupted` 默认 noop——收尾由 abort api 4 步接管（half-data 补全 + clearReplay + emit run_stop + markIdle），骨架不重复做。**唯一例外** = 装配 replySettle 的 subagent main run：此 hook 开「系统代发回报」旁路（interrupted→结局通知，见 §3.2），仍不做 transcript 收尾/emit。
+- main：`RunLifecyclePort.onInterrupted` 默认 noop——收尾由 abort api 4 步接管（half-data 补全 + clearReplay + emit run_stop + markIdle），骨架不重复做。**例外** = 装配 replySettle 的 subagent main run（此 hook 开「系统代发回报」旁路：interrupted→结局通知，见 §3.2）+ 装配 mateExitNotify 的 mate main run（此 hook 开「退出通知」旁路：interrupted→通知 leader，见 §3.2）；两者仍不做 transcript 收尾/emit。
 - 旁路 run：noop。in_memory buffer 桶由 RunLoopHandle finally 块 `clearScopeSession(scopeId, sid, { runId })` 回收，无持久化副作用可收。
 
 **正常退出**：
-- main：`onRunEnd` = persistRun（写 run 记录）+ markIdle/markError（五态机 CAS 转换）+ emit `run_end`；装配 replySettle 的 subagent main run 在 persistRun/CAS 后追加回报兜底（tool_pending 只 stash 不代发，其余 reason 系统代发，见 §3.2）。
+- main：`onRunEnd` = persistRun（写 run 记录）+ markIdle/markError（五态机 CAS 转换）+ emit `run_end`；装配 replySettle 的 subagent main run 在 persistRun/CAS 后追加回报兜底（tool_pending 只 stash 不代发，其余 reason 系统代发，见 §3.2）；装配 mateExitNotify 的 mate main run 在 persistRun/CAS/回报后追加退出通知（见 §3.2）。
 - 旁路 run：noop（旁路无持久化，不碰 session state；caller 拿 result 自行处理，如 summary caller 调 setSummary）。
 
 **usage 分区隔离**：`onUsage` 按 store 桶标签（"current" / "forked"）分别累计，互不干扰。五态机 + 幂等是 main 专属——markRunning 在 manager.activate 入口（CAS），旁路 run 不碰 session state。

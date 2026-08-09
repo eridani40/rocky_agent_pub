@@ -122,6 +122,9 @@ function createStdioTransport(Ctor: any, opts: StdioTransportOptions, onStderr?:
     command: opts.command,
     args: opts.args,
     stderr: opts.stderr ?? 'pipe',
+    // env 仅在有值时传（packaged Electron 注入 ELECTRON_RUN_AS_NODE=1）；
+    // 不传时 SDK 用默认环境，dev 行为不回归
+    ...(opts.env ? { env: opts.env } : {}),
   });
   if (onStderr && opts.stderr !== 'inherit') {
     // SDK transport 启动 child 后暴露 _process.stderr；延迟监听（start 时才有）

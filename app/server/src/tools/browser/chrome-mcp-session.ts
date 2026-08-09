@@ -115,7 +115,8 @@ export class ChromeMcpSession implements BrowserSession {
   async close(): Promise<void> {
     // no-op: attach 模式不杀用户 chrome（attach 语义）。
     // chrome-devtools-mcp 不暴露显式 detach tool，真正的关闭（transport.close）由
-    // driver.disconnect() 在 ConnectorManager toggle off 时调用——这里仅占位以满足
+    // AttachModeImpl.close 调 driver.disconnect() 完成（v0.0.266 起 attach 生命周期
+    // 归 InstanceManager/impl，ConnectorManager 不再负责）——这里仅占位以满足
     // BrowserSession 协议，避免误杀用户已打开的浏览器进程。
   }
 

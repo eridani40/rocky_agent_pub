@@ -1,18 +1,11 @@
 /**
  * NodeWorkerDriver —— BrowserDriver 实现（mode ① headless / ② managed-profile）
- *
- * Bun 主进程不直接调 playwright.connectOverCDP（永久 hang），
- * 改 spawn node 子进程（browser-worker.cjs）执行 connectOverCDP + action + cleanup。
- *
- * 设计：
- *   - executeOnce(opts, action, params, signal)：spawn worker → 写任务 JSON 到 stdin →
- *     读 stdout 第一行结果 JSON → 返回 {ok,text?,error?}
- *   - 三流分离：stdin 任务 / stdout 结果（单行）/ stderr 诊断
- *   - 超时（30s）+ AbortSignal 取消（abort → kill worker 进程组，防 hang）
- *   - worker 路径：resolveWorkerPath 双路径探测（packaged=同目录 worker-entry.js tsc 产物；
- *     dev=browser-worker.cjs bundle），node 从脚本位置向上找 node_modules
- *
- * connect(opts) 不实现（headless/managed-profile 不走长 session；attach 由 ChromeMcpDriver）。
+ * Bun 主进程不直接调 playwright.connectOverCDP（永久 hang），改 spawn node 子进程
+ * （browser-worker.cjs）执行 connectOverCDP + action + cleanup。
+ * 设计：executeOnce 一次性执行（spawn worker → 写任务 JSON → 读 stdout 第一行结果 JSON →
+ * 返回 {ok,text?,error?}）；三流分离（stdin 任务 / stdout 结果单行 / stderr 诊断）；超时 30s +
+ * AbortSignal 取消；worker 路径 resolveWorkerPath 双路径探测（packaged=worker-entry.js tsc 产物 /
+ * dev=browser-worker.cjs bundle）。connect(opts) 不实现（attach 由 ChromeMcpDriver）。
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -35,10 +28,7 @@ export const WORKER_TIMEOUT_MS = 30_000;
 
 /** 可注入依赖（测试 mock spawn / sleep 用）。spawn 类型与 chrome-launcher.LaunchDeps 对齐 */
 export interface WorkerSpawnDeps {
-  /**
-   * spawn 注入点（测试用）。生产用 node child_process.spawn。
-   * mock 时返回可 emit stdout/stderr/exit 的假 ChildProcess。
-   */
+  /** spawn 注入点（测试 mock 返回可 emit stdout/stderr/exit 的假 ChildProcess） */
   spawn?: (
     cmd: string,
     args: string[],
@@ -48,17 +38,14 @@ export interface WorkerSpawnDeps {
 
 /** NodeWorkerDriver 构造参数（同 PlaywrightDriverOptions） */
 export interface NodeWorkerDriverOptions {
-  /** app dataDir（resolveUserDataDir 用，profile 目录解析） */
-  dataDir: string;
-  /** 端口占用探测（默认 netPortBusy，per-profile 端口段分配） */
-  portBusy?: PortBusyFn;
-  /** spawn 注入（测试 mock） */
-  spawnDeps?: WorkerSpawnDeps;
+  dataDir: string; // app dataDir（resolveUserDataDir 用，profile 目录解析）
+  portBusy?: PortBusyFn; // 端口占用探测（默认 netPortBusy）
+  spawnDeps?: WorkerSpawnDeps; // spawn 注入（测试 mock）
 }
 
 /**
- * NodeWorkerDriver（mode ① + ② 共用实例）。
- * 每次 executeOnce 全新 spawn worker，per-call 端口 + userDataDir 解析（与 PlaywrightDriver.connect 同口径）。
+ * NodeWorkerDriver（mode ① + ② 共用实例）。每次 executeOnce 全新 spawn worker，
+ * per-call 端口 + userDataDir 解析（与 PlaywrightDriver.connect 同口径）。
  */
 export class NodeWorkerDriver implements BrowserDriver {
   readonly mode = 'headless' as const; // 实际 mode 按 opts 推断（与 PlaywrightDriver 一致）
@@ -88,7 +75,6 @@ export class NodeWorkerDriver implements BrowserDriver {
    * 一次性执行：spawn node worker → 写任务 → 读结果 → 清理。
    * @param opts 连接选项（profileName/headless/executablePath/userDataDir）
    * @param action navigate/snapshot/click/type/evaluate/listPages/selectPage/screenshot
-   * @param params action 参数
    * @param signal 取消信号（abort → kill worker 进程组）
    */
   async executeOnce(
@@ -107,17 +93,15 @@ export class NodeWorkerDriver implements BrowserDriver {
         : mkdtempSync(join(tmpdir(), 'rocky-browser-worker-')));
     const cdpPort = await allocateCdpPort(this.usedPorts, this.portBusy);
     this.usedPorts.add(cdpPort);
-
     const task = {
       executablePath: opts.executablePath,
       userDataDir,
       cdpPort,
       headless: persistent ? opts.headless : opts.headless ?? true,
-      persistent,
+      persistent, // 连接模式标记（持久 profile → ensureProfileFree）；不传 loop → worker 单次路径（action 执行）
       action,
       params,
     };
-
     return this.runWorker(task, signal);
   }
 
@@ -129,30 +113,31 @@ export class NodeWorkerDriver implements BrowserDriver {
     task: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<BrowserExecuteResult> {
-    const workerPath = resolveWorkerPath();
-    // cwd 设为 worktree 根（node 从 cjs 向上找 node_modules，worktree 根有 node_modules/playwright）
-    const cwd = process.cwd();
-    const child = this.spawnFn('node', [workerPath], {
-      cwd,
-      env: { ...process.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
+    let worker: { child: ChildProcess; stderrBuf: () => string };
+    try {
+      worker = spawnWorker(this.spawnFn, task);
+    } catch (e) {
+      // spawnWorker 已 kill 进程组（stdin 写失败场景）；这里转错误结果
+      return { ok: false, error: { message: `worker spawn 失败: ${errMsg(e)}` } };
+    }
+    const { child } = worker;
+    const readStderr = worker.stderrBuf;
     // 共享状态：resolved 防多次 resolve；finishResolver 用于 abort/超时主动 resolve
     let resolved = false;
-    let stderrBuf = '';
     let timer: NodeJS.Timeout | undefined;
     let finishResolver: ((r: BrowserExecuteResult) => void) | undefined;
-
     /** 统一收尾：kill 进程组 + 拼 stderr + resolve promise */
     const finish = (r: BrowserExecuteResult): void => {
       if (resolved) return;
       resolved = true;
       if (timer) clearTimeout(timer);
       // stderr 拼进失败 message 利排障（成功时丢弃）
-      if (!r.ok && stderrBuf.trim()) {
-        r.error = r.error ?? { message: '' };
-        r.error.message = `${r.error.message}（worker stderr: ${stderrBuf.slice(-500).trim()}）`;
+      if (!r.ok) {
+        const stderr = readStderr();
+        if (stderr.trim()) {
+          r.error = r.error ?? { message: '' };
+          r.error.message = `${r.error.message}（worker stderr: ${stderr.slice(-500).trim()}）`;
+        }
       }
       try {
         killProcessGroup(child); // 进程组 SIGKILL（chrome-launcher 复用）
@@ -161,7 +146,6 @@ export class NodeWorkerDriver implements BrowserDriver {
       }
       finishResolver?.(r);
     };
-
     // AbortSignal 取消：abort → 主动 finish（kill + resolve 取消结果，防 hang）
     if (signal) {
       if (signal.aborted) {
@@ -177,26 +161,10 @@ export class NodeWorkerDriver implements BrowserDriver {
         { once: true },
       );
     }
-
-    // 写任务 JSON + 换行到 stdin，结束 stdin（worker 读到一行即开始）
-    try {
-      child.stdin?.write(JSON.stringify(task) + '\n');
-      child.stdin?.end();
-    } catch (e) {
-      // stdin 写失败 → cleanup worker 进程组（防孤儿）后返回错误
-      try {
-        killProcessGroup(child);
-      } catch {
-        /* ignore */
-      }
-      return { ok: false, error: { message: `worker stdin 写失败: ${errMsg(e)}` } };
-    }
-
-    // 读 stdout（取第一行 = 结果 JSON），stderr 收诊断
+    // 读 stdout（取第一行 = 结果 JSON），stderr 已由 spawnWorker 收集
     return new Promise<BrowserExecuteResult>((resolve) => {
       finishResolver = resolve;
       let stdoutBuf = '';
-
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
         if (resolved) return;
@@ -213,13 +181,6 @@ export class NodeWorkerDriver implements BrowserDriver {
           finish(parsed);
         }
       });
-
-      child.stderr?.setEncoding('utf8');
-      child.stderr?.on('data', (chunk: string) => {
-        stderrBuf += chunk;
-        if (stderrBuf.length > 8 * 1024) stderrBuf = stderrBuf.slice(-8 * 1024);
-      });
-
       // 超时：worker 在 WORKER_TIMEOUT_MS 内未输出结果 → kill + 超时错误
       timer = setTimeout(
         () =>
@@ -229,7 +190,6 @@ export class NodeWorkerDriver implements BrowserDriver {
           }),
         WORKER_TIMEOUT_MS,
       );
-
       // worker 进程意外退出（exit 非 0 / 未输出结果）→ 按失败处理
       child.on('exit', (code, sig) => {
         if (resolved) return;
@@ -243,7 +203,6 @@ export class NodeWorkerDriver implements BrowserDriver {
           });
         }
       });
-
       child.on('error', (e) => {
         if (resolved) return;
         finish({ ok: false, error: { message: `worker spawn error: ${e.message}` } });
@@ -253,10 +212,53 @@ export class NodeWorkerDriver implements BrowserDriver {
 }
 
 /**
- * 默认 spawn：node + worker.cjs（cwd/env 由调用方设）。
- * packaged Electron 下 server 进程内跑、process.env 无 PATH → 字面 'node' 崩 ENOENT，
- * 故检测 process.versions.electron 改用 process.execPath + ELECTRON_RUN_AS_NODE=1（纯 node 语义）；dev 走原 'node'。
- * 参考: memory `packaged-spawn-external-binary-exec-path`、CLAUDE.md「持续可打包护栏」③
+ * 公共 spawn worker helper（v0.0.264 从 executeOnce 抽出；InstanceManager 复用）。
+ * 与 executeOnce 现 spawn 行为逐字节一致：worker 路径双路径探测 + cwd=worktree 根 + env 透传 +
+ * stdio 三流 + detached（defaultSpawn 内）。stderr 缓冲收集供调用方拼诊断。
+ * @param spawnFn 注入 spawn（测试 mock）；生产 defaultSpawn（node 子进程，绝 Bun 直跑 BUG-001）
+ * @param opts.keepStdinOpen 常驻模式（InstanceManager）：写首行 launch 帧后不 end stdin，后续 action
+ *                          行继续写；单次模式（executeOnce）缺省 end stdin（worker 读完即开始）。
+ */
+export function spawnWorker(
+  spawnFn: NonNullable<WorkerSpawnDeps['spawn']>,
+  task: Record<string, unknown>,
+  opts: { keepStdinOpen?: boolean } = {},
+): { child: ChildProcess; stderrBuf: () => string } {
+  const workerPath = resolveWorkerPath();
+  // cwd 设为 worktree 根（node 从 cjs 向上找 node_modules，worktree 根有 node_modules/playwright）
+  const cwd = process.cwd();
+  const child = spawnFn('node', [workerPath], {
+    cwd,
+    env: { ...process.env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stderrBuf = '';
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => {
+    stderrBuf += chunk;
+    if (stderrBuf.length > 8 * 1024) stderrBuf = stderrBuf.slice(-8 * 1024);
+  });
+
+  // 写任务 JSON + 换行到 stdin；单次模式 end（worker 读到一行即开始），常驻模式保持打开
+  try {
+    child.stdin?.write(JSON.stringify(task) + '\n');
+    if (!opts.keepStdinOpen) child.stdin?.end();
+  } catch (e) {
+    // stdin 写失败 → cleanup worker 进程组（防孤儿）后重新抛出（caller 转错误结果）
+    try {
+      killProcessGroup(child);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`worker stdin 写失败: ${errMsg(e)}`);
+  }
+  return { child, stderrBuf: () => stderrBuf };
+}
+
+/**
+ * 默认 spawn：node + worker.cjs（cwd/env 由调用方设）。packaged Electron（server 进程内跑、
+ * process.env 无 PATH → 字面 'node' 崩 ENOENT）改用 process.execPath + ELECTRON_RUN_AS_NODE=1；
+ * dev 走原 'node'。参考: memory `packaged-spawn-external-binary-exec-path`。
  */
 export function defaultSpawn(
   cmd: string,
@@ -277,11 +279,8 @@ export function defaultSpawn(
 
 /**
  * 解析 worker 脚本绝对路径（本文件同目录），双路径 existsSync 探测：
- *   - 优先 worker-entry.js：tsc 编译产物，packaged（dist/ 同目录）真实命中，
- *     其 require('./chrome-launcher'/'./snapshot-ref'/'playwright') 在 dist 均可解析。
- *   - 否则 browser-worker.cjs：dev bundle（__dirname=src 时命中；tsc 不把 .cjs 拷进 dist，
- *     packaged 下无此文件 → 不探测会直接 spawn ENOENT）。
- * 两者同源（worker-entry.ts），通信协议一致（stdin task / stdout result）。
+ * 优先 worker-entry.js（tsc 产物，packaged dist/ 真实命中）；否则 browser-worker.cjs
+ * （dev bundle，__dirname=src 时命中）。两者同源（worker-entry.ts），协议一致。
  */
 function resolveWorkerPath(): string {
   // __dirname 在 bun build 产物（cjs）+ ts 源码（tsx/vitest）下都可用

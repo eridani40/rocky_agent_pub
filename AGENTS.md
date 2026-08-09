@@ -102,7 +102,7 @@ Project phase 由所有 task 状态自动派生，不手动维护。
 - **基于已有概念**：先确认 `specs/ui/` + `specs/tech/` 概念就绪 → PRD 引用对齐 → 编码
 - **引入新概念**：新概念**先落 `specs/ui/` 或 `specs/tech/`**（架构/UI 契约层定义）→ 再进 PRD 引用 → 编码。禁止 PRD 先发明概念、ui/tech spec 事后追认
 - **PRD 确认前**，orchestrator 必须核对 PRD ↔ `specs/ui/` + `specs/tech/` 对齐（组件命名、布局、数据概念、接口语义）。不一致时：以已有概念为准让 PRD 对齐，或新概念先补 ui/tech spec
-- **设计稿 = 视觉契约（MANDATORY）**：版本带设计稿（`reqs/v{N}.{M}/*.html` 原型/设计图）时，设计稿不仅是交互参考，更是**视觉权威源**——定义组件「长什么样」（字体/尺寸/布局/边框/配色，规范见 `specs/ui/components/_conventions.md` §9）。**功能正确 ≠ 视觉还原，二者都是验收门槛**。coder 实现前按设计稿填组件 spec「视觉基线」字段；验证须跑 `vision_check.py compare` 逐维度比对（见「验证体系」）。无设计稿时此项跳过。
+- **设计稿 = 视觉契约（MANDATORY）**：版本带设计稿（`reqs/v{N}.{M}/*.html` 原型/设计图）时，设计稿不仅是交互参考，更是**视觉权威源**——定义组件「长什么样」（字体/尺寸/布局/边框/配色，规范见 `specs/ui/components/_conventions.md` §9）。**功能正确 ≠ 视觉还原，二者都是验收门槛**。coder 实现前按设计稿填组件 spec「视觉基线」字段；验证须用 see_image 工具逐维度比对（见「验证体系」）。无设计稿时此项跳过。
 
 **硬性规则**：
 1. **PRD 未通过确认 → 禁止进入架构设计**
@@ -212,7 +212,7 @@ tests/
 └── e2e/                   # ET 框架（v0.0.188 agent 玩 app 范式）
     ├── env.sh             # 单 case 环境一键启停：start <cid> [--mode=headless|electron] / stop <cid> / case-data-dir <cid>
     ├── run.sh             # 编排入口：list + 顺序遍历 playground-*/case.md，每 case env.sh start → 提示委派 executor → stop
-    ├── vision_check.py    # 视觉判定 CLI 工具（单图 + compare），executor 按需调用
+    ├── （视觉判定用 see_image 工具，无独立脚本）
     └── playground-<case>/case.md   # 纯自然语言 case（Use Case + 编号操作目标 + 验收口径，零断言零录制零 testid 预定义）
 ```
 
@@ -230,7 +230,7 @@ tests/
 - **每 case 独立 DATA_DIR**：`~/.rocky_agent_et_<case_id>`，stop 时清理（不跨 case 复用）
 - **不录制不回放真调 LLM**：minimax 优先；case 顺序跑（不并行）；端口段 ET API 3800-3899 / WEB 8900-8999 / CDP 9222-9299（与 AT 隔离）
 - **判定三态自由心证**：pass / small / blocking；不再有 dom_asserts / hard_fail / conflict / recording_drift 等机械分类
-- **vision_check.py 作工具**（不绑框架）：executor 按需 `python3 tests/e2e/vision_check.py ...` 做视觉辅助判定；不再走 designer 预定义 compares[] + run_all 自动跑
+- **see_image 工具作视觉判定**（不绑框架）：executor 按需调 see_image 工具做视觉判定（已配 app_config key，不增加额外配置）
 - 权威实现 + 留证 schema + 判定细节见 `specs/tech/testing/et-framework.md` + `.qoder/agents/e2e-test-executor.md` + `.qoder/skills/playwright-cli/references/executor-workflow.md`
 
 ## 测试计划 + 用例创建（阶段 2.5 — MANDATORY）
@@ -251,7 +251,7 @@ tests/
 1. **路径→case 映射表**：PRD 每条用户路径对应 `tests/` 中哪些已有 case（编号 + 描述）
 2. **新 case 清单**：本版本新增功能需要创建哪些 case（注明是新增到 `tests/` 的）
 3. **不覆盖项**：明确排除的范围及原因（E2E 不覆盖需说明理由并获用户确认）
-4. **视觉保真度比对清单（有设计稿时 MANDATORY）**：对每个有设计稿的页面/组件，列一组 compare checks（覆盖 layout/font/border/color 四基础维度 + brand 等关键元素），作为 E2E 视觉保真度最低覆盖要求。executor 跑 case 时按需调 `python3 tests/e2e/vision_check.py compare <impl> <design> '<checks_json>'`（design 文件路径 + impl 截图路径 + checks）。无设计稿则本项省略并注明。
+4. **视觉保真度比对清单（有设计稿时 MANDATORY）**：对每个有设计稿的页面/组件，列一组 compare checks（覆盖 layout/font/border/color 四基础维度 + brand 等关键元素），作为 E2E 视觉保真度最低覆盖要求。executor 跑 case 时按需调 see_image 工具（text=对比检查项, imagePaths=[实现截图, 设计稿]）。无设计稿则本项省略并注明。
 
 **Step 2: 创建测试用例文件**（委派 test-designer / coder 写 case.md — MANDATORY，**与阶段 3/4 的规划、编码并行**）
 
@@ -286,7 +286,7 @@ executor 按 orchestrator 给的指令执行：AT 按 `CASES=` 白名单跑 `tes
    - **无 designer 角色**：case.md 由 PRD「关键用户路径」维护（orchestrator 或 coder 照 send-message 样例模板写，纯自然语言）
    - **e2e-test-executor**：orchestrator 委派 → `tests/e2e/env.sh start <cid>` → executor 用 playwright-cli 按 case.md + `specs/ui/overall/00-app-guide.md` 操作 app → 每步留证 4 件套（screenshot+dom.html+snapshot.yml+meta.json）→ 自由心证 blocking/small/pass → `tests/e2e/env.sh stop <cid>`
 
-**视觉保真度比对（有设计稿时 MANDATORY）**：executor 跑 case 时按需调 `python3 tests/e2e/vision_check.py compare <impl> <design> '<checks_json>'` 逐维度（layout/font/border/color）判定。口径：整体风格基本一致 = PASS；明显偏差 = FAIL → 建 `BUG-xxx-[open].md` 标 `视觉保真`。详见 `.qoder/skills/playwright-cli/references/executor-workflow.md`。
+**视觉保真度比对（有设计稿时 MANDATORY）**：executor 跑 case 时按需调 see_image 工具（text=对比检查项, imagePaths=[impl 截图, design 文件]）逐维度（layout/font/border/color）判定。口径：整体风格基本一致 = PASS；明显偏差 = FAIL → 建 `BUG-xxx-[open].md` 标 `视觉保真`。详见 `.qoder/skills/playwright-cli/references/executor-workflow.md`。
 
 > verify-reviewer 仅在 orchestrator 判断有必要时启用，不作为默认层级。
 
@@ -321,14 +321,14 @@ case 直接在 `tests/` 持久化库——AT 走 designer 设计 + executor 跑 
 - ❌ 不调用 API / 不真调 LLM 就说测试通过（ET 不录制不回放，minimax 真调）
 - ❌ 只看 executor 汇报不核实产出文件（AT last_run / ET steps+verdict.json 实际内容）
 - ❌ 响应体用 `...` 省略
-- ❌ 不经 vision_check 就说视觉验证通过
+- ❌ 不经 see_image 就说视觉验证通过
 - ❌ 做用户没有要求的工作和需求，或者查探，修改其他worktree的工作。用户会明确要求你当下干什么。
 
-### 视觉判定 — 一律用 vision_check.py 脚本（禁 MCP / 禁 Read 看图）
+### 视觉判定 — 用 see_image 工具（禁 Read 直接加载图片）
 
-**当需要视觉判定时**（视觉呈现无法用 snapshot.yml 判定 + 视觉保真 compare）**必须用 `tests/e2e/vision_check.py` 脚本**，executor 按需调用：
-- 单图功能判定：`python3 tests/e2e/vision_check.py <screenshot> '<checks_json>'` → `[{id,pass,note}]`
-- 视觉保真 compare：`python3 tests/e2e/vision_check.py compare <impl> <design> '<checks_json>'` → `[{id,pass,note}]`
+**当需要视觉判定时**（视觉呈现无法用 snapshot.yml 判定 + 视觉保真 compare）**用 see_image 工具**，executor 按需调用：
+- 单图功能判定：see_image 工具（text=检查项, imagePaths=[截图]）→ 视觉理解文字
+- 视觉保真 compare：see_image 工具（text=对比检查项, imagePaths=[实现截图, 设计稿]）→ 视觉理解文字
 
 **禁止**：用 `mcp__*__understand_image` MCP、用 Read 工具直接加载图片。orchestrator 也不看截图，只读 executor 产出的 JSON 结果 / meta.json。
 
@@ -506,7 +506,7 @@ ET **功能验证以 executor 自由心证三态判定**：
 1. **ET blocking case > 0**（executor 走不下去 = 真功能问题；case.md 操作目标本身不合理除外，由 orchestrator 裁决）
 2. API 出现 5xx / schema 不合规 / 契约断言 hard fail
 3. **PRD 关键用户路径任意 case fail**（不论 ET blocking / AT hard fail / api）
-4. 视觉保真度 compare fail（有设计稿时，executor 按需跑 `vision_check.py compare`；除非已建 BUG 并经用户确认可带 known-issue 合并）
+4. 视觉保真度 compare fail（有设计稿时，executor 按需用 see_image 工具 compare；除非已建 BUG 并经用户确认可带 known-issue 合并）
 
 **达阈值 + 有遗留 fail 时**（MANDATORY）：orchestrator 向用户汇报遗留 case 清单（case_id / 模块 / 失败类型 / 根因 / BUG 号），同步写入 task-board.md「遗留 case」小节，遗留 case 转 `BUG-xxx-[open].md`；用户确认「可带遗留合并」后才进合并流程。未达阈值则继续增量修复，禁止走合并。
 
@@ -521,7 +521,7 @@ ET **功能验证以 executor 自由心证三态判定**：
 4. 测试用例覆盖 PRD 全部用户路径（orchestrator 逐条确认）
 5. task-board.md 有完整的测试 Check 记录
 6. doc-modifier 已完成 overall 文档同步（MANDATORY — 不可跳过）
-7. **视觉保真度门禁（有设计稿时 MANDATORY）**：test-plan 中列出的所有 compare checks 已由 executor 用 `vision_check.py compare` 执行，全部 PASS（或已建 `BUG-xxx` 并经用户确认可带 known-issue 合并）。本版本有设计稿却未跑视觉保真度比对 → 禁止合并
+7. **视觉保真度门禁（有设计稿时 MANDATORY）**：test-plan 中列出的所有 compare checks 已由 executor 用 see_image 工具执行，全部 PASS（或已建 `BUG-xxx` 并经用户确认可带 known-issue 合并）。本版本有设计稿却未跑视觉保真度比对 → 禁止合并
 8. **遗留 case 已报告用户并获确认**（MANDATORY，当条款 2/3 达阈值但有 fail/small 时）：orchestrator 已在 task-board.md「遗留 case」小节列全 fail/small case（case_id / 模块 / 失败类型 / 根因 / BUG 号），并向用户汇报获得「可带遗留合并」确认
 
 **Orchestrator 自检清单**：在执行 `git merge` 之前，必须逐项确认上述条件。如果任何一项未完成，**立即停止合并，先完成缺失的验证步骤。**
@@ -557,7 +557,7 @@ ET **功能验证以 executor 自由心证三态判定**：
 4. PRD/架构必须用户确认
 5. 编码阶段全自动
 6. **质量三关（MANDATORY）：coding → code-review → api/e2e 测试** — 每一关都不可跳过。AT = api-test-designer 设计 case + api-test-executor 跑 run_all；ET = e2e-test-executor 按 case.md + app-guide 真实玩 app（无 designer，case.md 由 PRD 维护）。verify-review 按需启用
-7. **禁止查看截图** — 视觉判定一律走 `vision_check.py` 脚本（executor 按需调用）；orchestrator/executor 都不用 Read 加载图片，不调 MCP。ET executor 靠 snapshot.yml（text accessibility tree）导航
+7. **禁止查看截图** — 视觉判定用 see_image 工具（executor 按需调用，已配 app_config key）；仍禁 Read 直接加载图片文件。ET executor 靠 snapshot.yml（text accessibility tree）导航
 8. **禁止在 AGENTS.md 中粘贴 agent 输出日志**
 9. **禁止跳过测试** — 无论用户是否要求简化流程，API 测试始终是必须的
 10. **先理解再动手（MANDATORY）** — 分析问题、设计方案时，必须先查看之前的 specs（specs/prd/overall、specs/tech/ 各子系统 OKF KB 的 index.md/log.md、specs/tech/version_logs/）和相关源码，了解清楚确切问题和上下文才可以开始工作。禁止凭印象或猜测做设计决策。核心设计原则必须记录在 specs 文档中（tech=index.md ④核心设计原则 + 单文件 §3；如 message ID 在 agent loop 首次分配、chat 组件以 message+part 为 key 查找更新而非顺序创建）。
@@ -565,7 +565,7 @@ ET **功能验证以 executor 自由心证三态判定**：
 12. **功能完成后必须更新 specs + 验证代码-spec 一致（MANDATORY）** — 每个版本的功能开发完成后，必须通过 doc-modifier 同步更新 `specs/`（tech 各子系统 OKF KB：index.md/log.md/frontmatter；prd/api/ui 的 overall），确保 specs 与代码保持一致。**doc-modifier 必须验证「代码实现 == spec 契约」：不只更新 spec 描述新功能，还要逐项检查代码有没有偏离 spec（spec 声明走 X 链路/机制，代码不能绕过 X 走 Y）**。代码静默偏离 spec 而 spec 不记录 = 死代码 + spec 失去权威性，下游 agent 读 spec 会被连锁误导——比「过时的 spec」更危险（教训 v0.0.49：`context_engine §3.6` 声明 forked 走 contextEngine impl 链，但代码 `ForkedContextPort` 绕过直接 `buffer.push`，spec 没同步，导致 forked ext impl 成死代码、用户以为 ext 没必要）。过时的 specs 比没有 specs 更危险；**代码静默偏离 spec 是最危险的**。
 13. **发现 specs 不准确时立即修正（MANDATORY）** — agent 读完 specs 后再去读代码，如果发现 specs 信息不对、不全或过时，必须当即完善 specs，而不是忽略或绕过。specs 是所有 agent 了解项目的生命线，任何不准确都会连锁误导后续 agent。
 14. **概念先行 + PRD 对齐 ui/tech spec（MANDATORY）** — `specs/ui/`（UI 契约 + `specs/ui/components/` 组件 spec）+ `specs/tech/` 是概念权威源。**先有概念，才有需求**：PRD 必须对齐已有概念（引用的组件/布局/接口与 spec 一致）；新概念先落 ui/tech spec 再进 PRD。PRD 确认前 orchestrator 核对 PRD ↔ ui/tech spec 对齐。
-15. **设计稿 = 视觉契约（MANDATORY）** — 版本带设计稿时，**功能 PASS ≠ 视觉还原**。必须有「视觉保真度比对」一关：`vision_check.py compare` 逐维度（layout/font/border/color）对照实现截图与设计稿，明显偏差建 `BUG`（规范见 `specs/ui/components/_conventions.md` §9）。否则视觉保真全程无人把关——v0.0.5 配置中心「整体 UI 对齐程度非常差」即此关缺失的教训。无设计稿时本原则跳过。
+15. **设计稿 = 视觉契约（MANDATORY）** — 版本带设计稿时，**功能 PASS ≠ 视觉还原**。必须有「视觉保真度比对」一关：see_image 工具逐维度（layout/font/border/color）对照实现截图与设计稿，明显偏差建 `BUG`（规范见 `specs/ui/components/_conventions.md` §9）。否则视觉保真全程无人把关——v0.0.5 配置中心「整体 UI 对齐程度非常差」即此关缺失的教训。无设计稿时本原则跳过。
 16. **变更计划书 = method 级 review 合同（MANDATORY）** — 架构期冻结于 `specs/tech/version_logs/v{N}.{M}/change_plan.md`，行=函数/符号，8 列（模块/文件/函数·符号/类型/变更内容/约束/参考/影响行）。**architect 产出 change_plan 后顺带切 task**（读 planner.md 原则；仅未顺带/重规划时才独立委派 planner），按「最粗 owning 级别」填 `coversModules/coversFiles/coversMethods`；code-reviewer 按它查偏离（清单 G）。它是编码前置硬阻断（不存在/不完整 → 禁止编码）。
     - **coder 与 change_plan 的关系（参考 + 决策权 + 汇报偏离）**：coder **参考** change_plan + PRD + 设计（UI spec）+ 相关 tech spec 实现——它们是**参考契约给方向和约束，不是僵硬规范**。coder 对**实现细节有最终技术决策权**：发现更优实现、约束已变、或表中标「coder 定位」的开放点时，可合理偏离 change_plan 的具体行，不必机械照抄。**但任何偏离必须向 orchestrator 汇报**（偏离项 + 理由 + 影响范围：是否触发 spec/测试/change_plan 同步），由 orchestrator 裁决后续。**核心约束不可擅自偏离**：架构原则、invariants、PRD 关键用户路径、安全/契约约束——这些须先报 orchestrator 确认再实现。无理由偏离核心约束 → 退 coder；2 次仍违反 → 退 architect。
     - **spec↔code 双向对齐（spec 落后是常态，不是缺陷）**：change_plan 基于 spec，但 spec 可能与代码实际不符（API/方法/enum/路径漂移）。coder 实现时按**代码实际**调整 + 汇报偏离 → orchestrator 把偏离记入 task-board「doc-sync 待办」+ task.json decisions → **doc-modifier 阶段 5 统一修 spec 对齐到代码**。这是健壮弹性机制（不要求 spec 永远 100% 准确，但要求**偏离可见 + 最终对齐**）；绝不因 spec 落后就跳过 spec 或让偏离静默。教训 v0.0.68：spec 写「SquadStore.getSquad().members / BoardStore.getBoard」概念表达，实际 store API 是 `MemberStore.listMembers` / `listGoals+buildAncestorView`——coder 按实际实现 + 汇报，doc-modifier 统一改 spec。
@@ -596,7 +596,7 @@ ET **功能验证以 executor 自由心证三态判定**：
 | ET 编排入口（v0.0.188，env 生命周期 + case 调度） | `bash tests/e2e/run.sh [case_id...]` / `bash tests/e2e/run.sh list` / `--mode=electron` |
 | ET 单 case 环境启停（v0.0.188） | `bash tests/e2e/env.sh start <cid> [--mode=headless\|electron]` / `stop <cid>` |
 | ET 跑单 case（v0.0.188，委派 executor agent） | orchestrator 委派 e2e-test-executor，executor 用 playwright-cli 按 case.md + app-guide 玩，留证 + 心证 |
-| ET 视觉判定工具（v0.0.188，按需） | `python3 tests/e2e/vision_check.py <shot> '<checks_json>'` / `python3 tests/e2e/vision_check.py compare <impl> <design> '<checks_json>'` |
+| ET 视觉判定工具 | see_image 工具（text=检查项, imagePaths=[截图]）；视觉保真 compare: see_image（imagePaths=[impl, design]） |
 
 **严禁使用的命令**：
 - ❌ `bun test` — 这是 bun 内置测试器，会扫描 refs/ 等无关目录，与 vitest 无关
