@@ -186,6 +186,53 @@
       "loading": "Loading…",
       "loadFail": "Failed to load image",
       "close": "Close"
+    },
+    "preview": {
+      "empty": "Open a file to preview",
+      "loading": "Loading…",
+      "edit": "Edit",
+      "openInBrowser": "Open in Browser",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "undo": "Discard",
+      "saved": "Saved",
+      "retry": "Retry",
+      "expand": "Expand preview panel",
+      "collapse": "Collapse preview panel",
+      "doorLeft": "Slide door left: focus document",
+      "doorRight": "Slide door right: focus chat",
+      "doorCenter": "Restore split view",
+      "closeTab": "Close {{name}}",
+      "tabLeft": "Scroll left",
+      "tabRight": "Scroll right",
+      "dirtyTitle": "Unsaved changes in \"{{name}}\"",
+      "dirtyBody": "Choose before switching: Save & switch / Discard / Cancel",
+      "dirtySaveSwitch": "Save & switch",
+      "dirtyDiscard": "Discard changes",
+      "dirtyCancel": "Cancel",
+      "conflictTitle": "File modified externally",
+      "conflictBody": "\"{{name}}\" was modified by another process. Cancel = reload, Overwrite = force write",
+      "conflictReload": "Cancel",
+      "conflictOverwrite": "Overwrite",
+      "fileNotFound": "File not found",
+      "openFail": "Failed to open",
+      "saveFail": "Failed to save",
+      "format": "Format",
+      "validate": "Validate",
+      "formatFail": "Format failed (invalid content)",
+      "validateFail": "Validation failed: {{msg}}",
+      "validateFailLine": "Line {{line}}: {{msg}}",
+      "validateOk": "Validation passed",
+      "fileGone": "File no longer exists",
+      "searchPlaceholder": "Search files…",
+      "searchTooMany": "Over 100 results, narrow your search",
+      "searchNoResults": "No results",
+      "searchClear": "Clear",
+      "resize": {
+        "ariaLabel": "Drag to resize preview panel",
+        "title": "Drag to resize"
+      }
     }
   },
   "usage": {
@@ -211,10 +258,7 @@
       "output": "Output",
       "total": "Total"
     },
-    "toggle": {
-      "collapse": "Collapse usage",
-      "expand": "Expand usage"
-    },
+    "clickToExpand": "Click to view usage details",
     "compact": "Compact context",
     "clear": "Clear session"
   },

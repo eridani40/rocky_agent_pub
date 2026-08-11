@@ -107,6 +107,33 @@ export function PrimitiveMarkdownView({ source, className, baseDir, sessionId }:
     const line = lines[i];
     if (line === undefined) break;
 
+    // frontmatter 检测（仅 i===0 且首行 trim 后 === '---' 时触发）
+    if (i === 0 && line.trim() === '---') {
+      // 从第 2 行开始收集，直到下一个 trim 后 === '---' 的行（闭合）
+      let closeIdx = -1;
+      for (let j = 1; j < lines.length; j++) {
+        if (lines[j] !== undefined && lines[j]!.trim() === '---') {
+          closeIdx = j;
+          break;
+        }
+      }
+      if (closeIdx !== -1) {
+        // 闭合成功 → 提取 frontmatter 内容（纯文本，不做 YAML 解析）
+        const fmContent = lines.slice(1, closeIdx).join('\n');
+        blocks.push(
+          <div
+            key={`md-fm-${keyIdx++}`}
+            className="font-mono text-[12px] text-fg-2 bg-bg-warm rounded-md px-3 py-2 my-2 border border-border whitespace-pre-wrap"
+          >
+            {fmContent}
+          </div>,
+        );
+        i = closeIdx + 1; // 跳过闭合 ---
+        continue;
+      }
+      // 未闭合 → 不识别为 frontmatter，i 不跳过，继续走正常流程
+    }
+
     // 代码块 ```
     if (line.trim().startsWith('```')) {
       const lang = line.trim().slice(3).trim();
@@ -172,10 +199,30 @@ export function PrimitiveMarkdownView({ source, className, baseDir, sessionId }:
     // 有序列表项 1. 2. 3.
     if (/^\s*\d+\.\s+/.test(line)) {
       const items: string[] = [];
+      let prevNum: number | null = null; // [v0.0.306] 前一项编号，用于连续检测
       while (i < lines.length) {
         const ln = lines[i];
-        if (!ln || !/^\s*\d+\.\s+/.test(ln)) break;
+        if (!ln || !/^\s*\d+\.\s+/.test(ln)) {
+          // [v0.0.319] 松散列表（loose list）：空行分隔的列表项仍属同一 <ol>
+          // 遇空行时 peek 跳过连续空行，下一非空行是列表项 → 消费空行继续收集；否则断开
+          if (ln !== undefined && ln.trim() === '') {
+            let j = i;
+            while (j < lines.length && lines[j] !== undefined && lines[j]!.trim() === '') j++;
+            const next = lines[j];
+            if (next !== undefined && /^\s*\d+\.\s+/.test(next)) {
+              i = j;
+              continue;
+            }
+          }
+          break;
+        }
+        // [v0.0.306] 编号重置检测：再次出现 `1.`（非首项）→ 断开当前 <ol>，外层循环开新 <ol>
+        const n = parseInt(ln.match(/^\s*(\d+)\.\s+/)![1]!, 10);
+        if (items.length > 0 && n === 1) break;
+        // [v0.0.306] 编号跳变检测：非连续编号（非 1）→ 断开当前 <ol>，该行交外层循环处理
+        if (prevNum !== null && n !== prevNum + 1) break;
         items.push(ln.replace(/^\s*\d+\.\s+/, ''));
+        prevNum = n;
         i++;
       }
       blocks.push(
@@ -287,9 +334,16 @@ export function PrimitiveMarkdownView({ source, className, baseDir, sessionId }:
       para.push(ln);
       i++;
     }
+    // v0.0.314: 段落内多行换行保留——逐行 renderInline（保留行内格式），
+    // whitespace-pre-wrap + 行间 '\n' 渲染换行
     blocks.push(
-      <p key={`md-${keyIdx++}`} className="my-0.5 break-words">
-        {renderInline(para.join(' '), `p${keyIdx}`, linkOpts)}
+      <p key={`md-${keyIdx++}`} className="my-0.5 break-words whitespace-pre-wrap">
+        {para.map((line, j) => (
+          <span key={`md-pl-${keyIdx}-${j}`}>
+            {renderInline(line, `p${keyIdx}-${j}`, linkOpts)}
+            {j < para.length - 1 && '\n'}
+          </span>
+        ))}
       </p>,
     );
   }

@@ -40,3 +40,7 @@ interface Props {
 - 字体：stu-name 13.5px/600；stu-v 11px muted；stat b 15px/600；stat span 10.5px muted。
 - 边框：卡 `rounded-xl` + 1px border + hover border-strong + shadow-md（过渡 .15s）。
 - 配色：avatar gradient；tag 三色按 status（gold/sage/muted）；recentGain sage 色（`--color-sage`）。
+
+## 消费方
+
+- `app/web/src/components/academy-page/component-classroom-tab-panels.tsx`

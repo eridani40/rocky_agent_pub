@@ -64,6 +64,8 @@ function makeTemplate(
   for (const m of members) {
     fs.writeFileSync(path.join(agentsDir, `${m.name}.md`), `# ${m.name} agent`);
   }
+  // leader 独立文件（manifest.leaderName 顶层字段，不在 members；role='leader'）
+  fs.writeFileSync(path.join(agentsDir, 'leader.md'), '# Leader agent');
   // .rocky/skills/dummy-skill/SKILL.md
   const skillDir = path.join(dir, '.rocky', 'skills', 'dummy-skill');
   fs.mkdirSync(skillDir, { recursive: true });
@@ -183,7 +185,8 @@ describe('applyTemplate', () => {
       modelDefault: 'claude-sonnet-4',
       leader: { name: 'Boss' },
     });
-    const result = await applyTemplate(tmpRoot, created.squad.id, 'team-a', deps);
+    // [v0.0.321] 传 leaderMemberId + leaderName → leader.md 改名 {leaderName}-{memberId}.md 实名格式
+    const result = await applyTemplate(tmpRoot, created.squad.id, 'team-a', deps, created.leaderMember.id, 'Boss');
 
     expect(result.created).toEqual(['coder', 'tester']);
     expect(result.failed).toEqual([]);
@@ -205,6 +208,13 @@ describe('applyTemplate', () => {
       '.rocky', 'agents', `coder-${coderMember!.id}.md`,
     );
     expect(fs.existsSync(coderAgentFile)).toBe(true);
+
+    // leader agent 文件改名（[v0.0.321] 实名 Boss-{leaderMemberId}.md，与其他成员 name 前缀一致）
+    const agentsDir = path.join(squadRootDir(tmpRoot, created.squad.id), '.rocky', 'agents');
+    const leaderAgentFile = path.join(agentsDir, `Boss-${created.leaderMember.id}.md`);
+    expect(fs.existsSync(leaderAgentFile)).toBe(true);
+    // 不再残留未改名的 leader.md（旧 bug：nameToId 无 leader → 保留原名）
+    expect(fs.existsSync(path.join(agentsDir, 'leader.md'))).toBe(false);
 
     // skills 已 merge 复制
     const skillMd = path.join(

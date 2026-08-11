@@ -38,6 +38,7 @@ import {
 import { handleWorkspaceWatch, handleWorkspaceWatchSet, handleWorkspaceUnwatch } from '../handlers/session-workspace-watch';
 import { handleWorkspaceSaveImage } from '../handlers/session-workspace-save-image';
 import { handleWorkspaceFileRead, handleWorkspaceFileSave } from '../handlers/session-workspace-file';
+import { handleWorkspaceSearch } from '../handlers/session-workspace-search';
 import { handleSessionDebugSystemPrompt } from '../handlers/session-debug';
 import { handleCronRoute } from '../handlers/cron-handler';
 import { handleTodoRoute } from '../handlers/todo-handler';
@@ -163,6 +164,10 @@ export async function dispatchSessionRoutes(
     if (sessionMatch.sub === 'workspace_file-save') {
       // [v0.0.227] POST /session/:id/workspace/file/save（覆盖写文本文件，last-write-wins，api §2.6.7）
       return handleWorkspaceFileSave(req, method, sessionMatch.id, deps);
+    }
+    if (sessionMatch.sub === 'workspace_search') {
+      // [v0.0.320] GET /session/:id/workspace/search?q=（递归全量搜索文件名/文件夹名，api v0.0.320 §1.3）
+      return handleWorkspaceSearch(req, method, sessionMatch.id, deps);
     }
     if (sessionMatch.sub === 'debug_system-prompt') {
       // [v0.0.21] GET /session/:id/debug/system-prompt（test gate，handler 内 404）

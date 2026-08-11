@@ -12,7 +12,7 @@
  * 从 squad-status-modal.tsx 迁出 PanelRowView（isIdle 二元 → variant 三元 'running'|'idle'|'benched'）。
  */
 import { useTranslation } from 'react-i18next';
-import { MemberAvatar, type MemberAvatarRole } from '../common/member-avatar';
+import { hashHueName } from '../../lib/hue-hash';
 import { SpinnerRing } from '../common/spinner-ring';
 import type { PanelRow, PanelRows } from './squad-status-utils';
 import { Icon } from './studio-icons';
@@ -60,13 +60,12 @@ export function PanelRowView({
       >
         {/* avatar 保持原色不反色（角色色在黑底上辨识度更好） */}
         <span>
-          <MemberAvatar
-            name={row.member.name}
-            role={row.member.role as MemberAvatarRole}
-            id={row.member.id}
-            size="sm"
-            showName={false}
-          />
+          <span
+            className="flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded font-bold font-sans text-[10px] text-white"
+            style={{ background: `var(--hue-${hashHueName(row.member.id ?? row.member.name)})` }}
+          >
+            {row.member.name.trim().charAt(0).toUpperCase() || 'A'}
+          </span>
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1">
@@ -110,13 +109,12 @@ export function PanelRowView({
     >
       {/* 色卡（avatar）：idle 降透明度 / benched 灰度滤镜+额外降透明度（色块变灰，叠乘于行根 opacity） */}
       <span className={isBenched ? 'opacity-50 grayscale' : isIdle ? 'opacity-70' : ''}>
-        <MemberAvatar
-          name={row.member.name}
-          role={row.member.role as MemberAvatarRole}
-          id={row.member.id}
-          size="sm"
-          showName={false}
-        />
+        <span
+          className="flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded font-bold font-sans text-[10px] text-white"
+          style={{ background: `var(--hue-${hashHueName(row.member.id ?? row.member.name)})` }}
+        >
+          {row.member.name.trim().charAt(0).toUpperCase() || 'A'}
+        </span>
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1">

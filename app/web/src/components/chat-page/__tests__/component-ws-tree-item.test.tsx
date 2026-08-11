@@ -40,7 +40,8 @@ describe('ComponentWsTreeItem - 文件夹分支', () => {
     expect(container.querySelector('.ws-item')).toBeTruthy();
     // twisty（i18n 未初始化 → raw key）
     expect(screen.getByRole('button', { name: 'common:action.expand' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'chat:workspace.tree.openFolder' })).toBeTruthy();
+    // [v0.0.320 D7] item 本体也是 role=button（aria-label 与 hover 按钮相同）→ 用 .ws-act 定位 hover 打开按钮
+    expect(container.querySelector('.ws-act')).toBeTruthy();
   });
 
   it('点 twisty 触发 onToggleExpand(path)', () => {
@@ -70,9 +71,9 @@ describe('ComponentWsTreeItem - 文件夹分支', () => {
     );
     // 无 twisty
     expect(screen.queryByRole('button', { name: 'common:action.expand' })).toBeNull();
-    // 但 item 本身存在 + open 按钮在
+    // 但 item 本身存在 + open 按钮在（[v0.0.320 D7] .ws-act 定位）
     expect(container.querySelector('.ws-item')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'chat:workspace.tree.openFolder' })).toBeTruthy();
+    expect(container.querySelector('.ws-act')).toBeTruthy();
   });
 });
 
@@ -89,13 +90,14 @@ describe('ComponentWsTreeItem - 文件分支', () => {
     );
     expect(container.querySelector('.ws-item')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'common:action.expand' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'chat:workspace.tree.openFile' })).toBeTruthy();
+    // [v0.0.320 D7] .ws-act 定位（item 本体 role=button 同名 aria-label 避免多匹配）
+    expect(container.querySelector('.ws-act')).toBeTruthy();
   });
 
   it('点 hover 打开按钮触发 onOpen(node)', () => {
     const onOpen = vi.fn();
     const node = file('a.ts');
-    render(
+    const { container } = render(
       <ComponentWsTreeItem
         node={node}
         depth={0}
@@ -104,7 +106,9 @@ describe('ComponentWsTreeItem - 文件分支', () => {
         onOpen={onOpen}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'chat:workspace.tree.openFile' }));
+    const openAct = container.querySelector('.ws-act') as HTMLElement;
+    expect(openAct).toBeTruthy();
+    fireEvent.click(openAct);
     expect(onOpen).toHaveBeenCalledWith(node);
   });
 });
@@ -120,7 +124,8 @@ describe('ComponentWsTreeItem - 布局稳定性（§4.4）', () => {
         onOpen={() => {}}
       />,
     );
-    const act = screen.getByRole('button', { name: 'chat:workspace.tree.openFile' });
+    const act = container.querySelector('.ws-act') as HTMLElement;
+    expect(act).toBeTruthy();
     // opacity-0 class 在（默认隐藏），无 hidden/display:none
     expect(act.className).toContain('opacity-0');
     expect(act.className).toContain('group-hover:opacity-100');

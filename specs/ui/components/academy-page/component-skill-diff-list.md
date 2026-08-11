@@ -64,3 +64,7 @@ interface Props {
 - 字体：目录 head 12px；文件 path mono 11.5px；badge 10.5px/600；字节变化 mono 10.5px muted-2；行级 diff mono 12px/1.7。
 - 边框：目录卡 1px border + 展开时 head bottom border；文件行 1px border；`CmpCols` 两列之间 1px border。
 - 配色：整体新增 sage-bg/sage；已移除 danger-light/danger；文件修改 + 修改 + 二进制变更 gold-bg/`#b45309`；新增文件 sage；删除文件 danger；不变 muted；目录 head 底 `bg-warm`，展开体底 `bg`，hover `accent-light`。
+
+## 消费方
+
+- `app/web/src/components/academy-page/component-diff-viewer.tsx`

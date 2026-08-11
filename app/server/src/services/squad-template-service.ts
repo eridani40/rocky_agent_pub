@@ -135,6 +135,13 @@ export function getTemplate(dataDir: string, slug: string): ManifestSchema | und
  *   2. 遍历 members 批量 createMemberService（mode=fresh）；失败不中断 best-effort
  *   3. 复制模板配置文件到 squad 目录
  *
+ * [v0.0.319-fix] leaderMemberId：leader 由 createSquadService 先于 applyTemplate 创建，
+ *   不在 manifest.members 内。传入其 memberId 后，nameToId 补 `leader` 映射，
+ *   copyTemplateFiles 可将模板 `.rocky/agents/leader.md` 改名为 `leader-{memberId}.md`
+ *   （对齐 `*-{memberId}.md` 注入扫描约定，修复 leader 个人 AGENTS 注入失效）。
+ *
+ * @param leaderMemberId leader 的 memberId（由调用方从 createSquadService 返回值传入；可选）
+ * @param leaderName leader 的名字（可选；提供时 leader 文件产出 {leaderName}-{memberId}.md 实名格式）
  * @returns { created: string[], failed: string[] }
  */
 export async function applyTemplate(
@@ -142,6 +149,8 @@ export async function applyTemplate(
   squadId: string,
   slug: string,
   deps: CreateMemberDeps,
+  leaderMemberId?: string,
+  leaderName?: string,
 ): Promise<ApplyTemplateResult> {
   const manifest = getTemplate(dataDir, slug);
   if (!manifest) throw new TemplateNotFoundError(`template "${slug}" not found`);
@@ -150,6 +159,9 @@ export async function applyTemplate(
   const failed: string[] = [];
   /** member name → memberId 映射（用于 agent 文件改名） */
   const nameToId = new Map<string, string>();
+  // leader 不在 manifest.members 里，但模板 agents 目录有 leader.md（role='leader'）
+  // → 补 `leader` → leaderMemberId 映射，copyTemplateFiles 才能命中改名
+  if (leaderMemberId) nameToId.set('leader', leaderMemberId);
 
   // ── 批量 hire（best-effort，失败记 failed 不中断）──
   for (const spec of manifest.members) {
@@ -172,7 +184,7 @@ export async function applyTemplate(
   // ── 复制配置文件 ──
   const srcDir = templateDir(dataDir, slug);
   const destDir = squadRootDir(dataDir, squadId);
-  copyTemplateFiles(srcDir, destDir, nameToId);
+  copyTemplateFiles(srcDir, destDir, nameToId, leaderName);
 
   return { created, failed };
 }
@@ -191,11 +203,13 @@ export class TemplateNotFoundError extends Error {
  * 复制模板配置文件到 squad 目录（§⑤ 复制策略）。
  * AGENTS.md → 覆盖；agents → 改名；skills/memory/templates/commands → merge；settings.json → 仅不存在才复制。
  * 全部 best-effort（console.warn 不阻断）。
+ * [v0.0.319] 加 export：团队同步导入（team-sync-import-service）复用本复制策略（零逻辑变化）。
  */
-function copyTemplateFiles(
+export function copyTemplateFiles(
   srcDir: string,
   destDir: string,
   nameToId: Map<string, string>,
+  leaderName?: string,
 ): void {
   // 1. AGENTS.md → 覆盖
   copyIfExists(
@@ -213,7 +227,10 @@ function copyTemplateFiles(
       if (!file.endsWith('.md')) continue;
       const role = file.replace(/\.md$/, '');
       const memberId = nameToId.get(role);
-      const destName = memberId ? `${role}-${memberId}.md` : file;
+      // [v0.0.321] leader 且提供 leaderName → 实名 {leaderName}-{memberId}.md（与其他成员 name 前缀一致）
+      const destName = memberId
+        ? (role === 'leader' && leaderName ? `${leaderName}-${memberId}.md` : `${role}-${memberId}.md`)
+        : file;
       copyIfExists(
         path.join(srcAgentsDir, file),
         path.join(destAgentsDir, destName),

@@ -5,6 +5,11 @@
 > 本文是 usage-panel 的概念权威源：定义子组件构成、数据契约、三态交互、视觉基线、按钮状态绑定。PRD/编码对齐本文。
 > 数据源: `usage` prop（纯展示）。父级 `useUsage` area-hook 提供：`onInit GET /session/:id/usage` 拉基线 + `subscribe(session_panel)` 收 `session_usage_update` 全量 replace。
 
+## 消费方
+
+- `components/chat-page/component-chat-topbar-right.tsx`
+- `components/chat-page/section-chat-session.tsx`
+
 ## 0. 设计意图（一句话）
 topbar 右侧一个紧凑的 token 用量圆环 + 「已用/总」（如 23k/200k）+ 一个展开按钮 + compact 按钮 + clear 按钮；点展开弹出完整面板（context window 进度条 3 分段 + 累积消耗表格三分区行）；compact 按钮状态绑定 summaryTask，clear 按钮 hover danger 色 + 确认 modal。
 

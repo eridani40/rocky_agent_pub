@@ -197,8 +197,8 @@ describe('MarkdownImage 渲染', () => {
     expect(img).toBeTruthy();
     // 验证 readBinary 用正确的 sessionId + resolvedPath 调用
     expect(mockReadBinary).toHaveBeenCalledWith('sess-1', 'images/test.png');
-    // 验证 img src 是 data URL（base64 → data:image/unknown;base64,...）
-    expect(img.getAttribute('src')).toContain('data:image/unknown;base64,');
+    // 验证 img src 是 data URL（base64 → data:image/png;base64,...，MIME 由扩展名推断）
+    expect(img.getAttribute('src')).toContain('data:image/png;base64,');
   });
 
   it('relative + baseDir + sessionId + DI readBinary 失败 → error', async () => {

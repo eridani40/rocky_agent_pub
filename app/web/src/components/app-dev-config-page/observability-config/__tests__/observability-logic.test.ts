@@ -5,7 +5,7 @@
  *       specs/ui/components/app-dev-config-page/observability-config/section-observability-detail.md（dirty/必填）
  *
  * 覆盖点：
- *   - isObservabilityDirty：enabled 不计 dirty；其他字段变 → dirty
+ *   - isObservabilityDirty：[v0.0.317 D9] enabled 计 dirty（detail toggle 攒 draft）；其他字段变 → dirty
  *   - isObservabilityValid：4 必填字段；secretKey 非空即合法（明文 GET，SecretInput mask）
  *   - generateObsId：obs_ 前缀 + 时间戳
  *   - emptyObservabilityDraft：空壳形态
@@ -41,10 +41,10 @@ describe('isObservabilityDirty', () => {
     expect(isObservabilityDirty(c, { ...c })).toBe(false);
   });
 
-  it('enabled 变化不计 dirty（toggle 即时生效，spec 决策）', () => {
+  it('enabled 变化 → dirty（[v0.0.317 D9] detail toggle 攒 draft，不再即时生效）', () => {
     const saved = base();
     const draft = { ...saved, enabled: !saved.enabled };
-    expect(isObservabilityDirty(draft, saved)).toBe(false);
+    expect(isObservabilityDirty(draft, saved)).toBe(true);
   });
 
   it('name 变化 → dirty', () => {

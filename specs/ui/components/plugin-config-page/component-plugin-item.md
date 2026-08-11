@@ -20,3 +20,6 @@
 ## 复用关系
 - 被组合：`section-plugin-list`
 - 组合：（生产用其替代内联开关）
+
+## 消费方
+- `app/web/src/components/plugin-config-page/section-plugin-list.tsx`

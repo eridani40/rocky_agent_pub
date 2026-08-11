@@ -1,17 +1,20 @@
 /**
  * @vitest-environment jsdom
- * section-bash-config 单测（v0.0.296 新增）
+ * section-bash-config 单测（v0.0.296 新增；v0.0.316-fix 适配 forwardRef + onDirtyChange）
  * 参考: specs/tech/version_logs/v0.0.296/change_plan.md
  *
  * 校验点：
  *   - 挂载 GET `/config/app?group=runtime&key=bash_seatbelt` 读 baseline（null → true）
- *   - toggle 翻转 → dirty → save/reset 启用
- *   - save → PUT body 形状正确（group=runtime, items=[{key:'bash_seatbelt', data:false}]）
- *   - reset → draft 回 baseline → dirty 清除
+ *   - toggle 翻转 → onDirtyChange(true)
+ *   - ref.save() → PUT body 形状正确（group=runtime, items=[{key:'bash_seatbelt', data:false}]）
+ *   - ref.reset() → draft 回 baseline → onDirtyChange(false)
  */
 import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { initI18n } from '../../../i18n';
+import { createRef, act } from 'react';
+import { SectionBashConfig } from '../section-bash-config';
+import type { SectionSaveHandle } from '../use-tab-dirty-aggregator';
 
 beforeAll(async () => {
   await initI18n('zh-CN');
@@ -49,19 +52,13 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
       },
     ]) as unknown as typeof fetch;
 
-    render(<SectionBashConfigLazy />);
+    render(<SectionBashConfig />);
 
     // 等待加载完成，toggle 显示开启态
     await waitFor(() => {
       const toggle = screen.getByRole('switch');
       expect(toggle.getAttribute('aria-checked')).toBe('true');
     });
-
-    // 初始 clean → save/reset 禁用
-    const save = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
-    const reset = screen.getByRole('button', { name: '重置' }) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
-    expect(reset.disabled).toBe(true);
   });
 
   it('挂载 GET baseline=false → toggle 默认关', async () => {
@@ -72,7 +69,7 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
       },
     ]) as unknown as typeof fetch;
 
-    render(<SectionBashConfigLazy />);
+    render(<SectionBashConfig />);
 
     await waitFor(() => {
       const toggle = screen.getByRole('switch');
@@ -80,7 +77,7 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
     });
   });
 
-  it('toggle 翻转 → dirty → save/reset 启用', async () => {
+  it('toggle 翻转 → onDirtyChange(true)', async () => {
     global.fetch = mockFetch([
       {
         match: '/config/app?group=runtime&key=bash_seatbelt',
@@ -88,7 +85,8 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
       },
     ]) as unknown as typeof fetch;
 
-    render(<SectionBashConfigLazy />);
+    const dirtySpy = vi.fn();
+    render(<SectionBashConfig onDirtyChange={dirtySpy} />);
 
     // 等待加载完成
     await waitFor(() => {
@@ -100,14 +98,14 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-checked')).toBe('false');
 
-    // dirty → save/reset 启用
-    const save = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
-    const reset = screen.getByRole('button', { name: '重置' }) as HTMLButtonElement;
-    expect(save.disabled).toBe(false);
-    expect(reset.disabled).toBe(false);
+    // dirty 上报（onDirtyChange 被调，最后一次参数为 true）
+    await waitFor(() => {
+      const lastCall = dirtySpy.mock.calls[dirtySpy.mock.calls.length - 1];
+      expect(lastCall?.[0]).toBe(true);
+    });
   });
 
-  it('save → PUT body 形状正确（group=runtime, items bash_seatbelt）', async () => {
+  it('ref.save() → PUT body 形状正确（group=runtime, items bash_seatbelt）', async () => {
     const fetchSpy = mockFetch([
       {
         match: '/config/app?group=runtime&key=bash_seatbelt',
@@ -120,7 +118,8 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
     ]);
     global.fetch = fetchSpy as unknown as typeof fetch;
 
-    render(<SectionBashConfigLazy />);
+    const ref = createRef<SectionSaveHandle>();
+    render(<SectionBashConfig ref={ref} />);
 
     await waitFor(() => {
       expect(screen.getByRole('switch')).toBeTruthy();
@@ -128,8 +127,8 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
 
     // toggle 翻转 true → false
     fireEvent.click(screen.getByRole('switch'));
-    // save
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    // ref.save()
+    await ref.current!.save();
 
     await waitFor(() => {
       const putCalls = fetchSpy.mock.calls.filter(
@@ -142,7 +141,7 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
     });
   });
 
-  it('reset → draft 回 baseline → dirty 清除', async () => {
+  it('ref.reset() → draft 回 baseline → onDirtyChange(false)', async () => {
     global.fetch = mockFetch([
       {
         match: '/config/app?group=runtime&key=bash_seatbelt',
@@ -150,7 +149,9 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
       },
     ]) as unknown as typeof fetch;
 
-    render(<SectionBashConfigLazy />);
+    const dirtySpy = vi.fn();
+    const ref = createRef<SectionSaveHandle>();
+    render(<SectionBashConfig ref={ref} onDirtyChange={dirtySpy} />);
 
     await waitFor(() => {
       expect(screen.getByRole('switch')).toBeTruthy();
@@ -161,17 +162,16 @@ describe('SectionBashConfig（v0.0.296 Bash 工具沙箱开关）', () => {
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-checked')).toBe('false');
 
-    // reset → 回 baseline
-    fireEvent.click(screen.getByRole('button', { name: '重置' }));
+    // reset → 回 baseline（act 包裹让 React flush re-render）
+    await act(async () => {
+      ref.current!.reset();
+    });
     expect(toggle.getAttribute('aria-checked')).toBe('true');
 
-    // dirty 清除 → save/reset 禁用
-    const save = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
+    // dirty 清除 → onDirtyChange(false)
+    await waitFor(() => {
+      const lastCall = dirtySpy.mock.calls[dirtySpy.mock.calls.length - 1];
+      expect(lastCall?.[0]).toBe(false);
+    });
   });
 });
-
-import { SectionBashConfig } from '../section-bash-config';
-function SectionBashConfigLazy() {
-  return <SectionBashConfig />;
-}

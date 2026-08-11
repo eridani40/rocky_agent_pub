@@ -12,6 +12,10 @@
  *     clamped = max(min, min(max, raw)) → onResize(clamped)
  *   - mouseup：恢复 body cursor/userSelect + onResizeEnd
  *
+ * [v0.0.320] posSide prop：side 决定 delta 方向，posSide 决定手柄贴 panel 哪侧缘（拆分语义）。
+ *   预览区左分隔条 = side='left'（拖右变宽）+ posSide='left'（贴预览左缘）——旧调用方不传 posSide
+ *   时行为不变（side='right' 贴左缘 / side='left' 贴右缘）。
+ *
  * 视觉复用 .ws-resize 模式（§6.2）：6px 手柄贴栏缘 + hover accent 1px 竖线 + body cursor/userSelect 锁定。
  *
  * i18n 文案由调用方注入（本组件不 useTranslation——ws 手柄传 workspace.resize.* / conv 手柄传 convPanel.resize.*）。
@@ -19,8 +23,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 
 export interface ColResizeHandleProps {
-  /** 拖哪一栏（决定 delta 方向 + 手柄贴 panel 哪侧缘） */
+  /** 拖哪一栏（决定 delta 方向 + 缺省 posSide：right 贴左缘 / left 贴右缘） */
   side: 'left' | 'right';
+  /** [v0.0.320] 手柄贴 panel 哪侧缘（缺省 = 旧行为 side 决定） */
+  posSide?: 'left' | 'right';
   /** 当前宽度（mousedown 时捕获为 startWidth；mid-drag 不重捕获） */
   currentWidth: number;
   /** 静态/动态下限（调用方决定，如 180 / 232） */
@@ -37,6 +43,8 @@ export interface ColResizeHandleProps {
   ariaLabel?: string;
   /** title（调用方注入 i18n 文案） */
   title?: string;
+  /** [v0.0.320] data-testid（ET/UT 锚点；预览区双分隔条 pv-resize-left/right 用） */
+  testid?: string;
 }
 
 /**
@@ -44,6 +52,7 @@ export interface ColResizeHandleProps {
  */
 export function ComponentColResizeHandle({
   side,
+  posSide,
   currentWidth,
   minWidth,
   maxWidth,
@@ -52,6 +61,7 @@ export function ComponentColResizeHandle({
   onResizeEnd,
   ariaLabel,
   title,
+  testid,
 }: ColResizeHandleProps) {
   // startRef 仅 mousedown 捕获一次：mid-drag 不重捕获，到边界后反向拖动立即响应（无死区）
   const startRef = useRef({ startX: 0, startWidth: currentWidth });
@@ -99,13 +109,15 @@ export function ComponentColResizeHandle({
     [currentWidth, onDragStart],
   );
 
-  // side=right（右栏）→ 手柄贴 panel 左缘；side=left（左栏）→ 手柄贴 panel 右缘
-  const posClass = side === 'right' ? '-left-0.5' : '-right-0.5';
-  const accentPosClass = side === 'right' ? 'left-[2px]' : 'right-[2px]';
+  // 手柄贴 panel 哪侧缘：[v0.0.320] posSide 显式指定（预览区左条 posSide='left'）；
+  // 缺省 = 旧行为（side='right' 贴左缘 / side='left' 贴右缘）
+  const effPos = posSide ?? (side === 'right' ? 'left' : 'right');
+  const posClass = effPos === 'right' ? '-right-0.5' : '-left-0.5';
+  const accentPosClass = effPos === 'right' ? 'right-[2px]' : 'left-[2px]';
 
   return (
     <div
-
+      data-testid={testid}
       role="separator"
       aria-orientation="vertical"
       aria-label={ariaLabel}

@@ -16,6 +16,7 @@ import type { ModelInstance, ProtocolMeta, ProviderInstance } from '../../lib/ap
 import { ComponentProviderFields, type ProviderDraftFields } from './component-provider-fields';
 import { ComponentModelListCard } from './component-model-list-card';
 import { ComponentModelEditModal } from './component-model-edit-modal';
+import { SaveBar } from '../common/component-save-bar';
 
 /** 二级页 draft 形状（连接配置 + models） */
 export interface ProviderDraft extends ProviderDraftFields {
@@ -62,6 +63,8 @@ export function ComponentProviderDetail({ provider, protocolOptions, onBack, onS
   // model 弹层：null=新增 / ModelInstance=编辑 / 关闭用闭包标志
   const [editingModel, setEditingModel] = useState<ModelInstance | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  /** [v0.0.317] 保存中状态（SaveBar saving prop） */
+  const [saving, setSaving] = useState(false);
 
   // snapshot 用于 dirty 判定（props 变化时重算）
   const snapshot = useMemo(() => toDraft(provider, protocolOptions), [provider, protocolOptions]);
@@ -75,6 +78,16 @@ export function ComponentProviderDetail({ provider, protocolOptions, onBack, onS
 
   /** 重置 → 回 snapshot（含 models） */
   const handleReset = () => setDraft(snapshot);
+
+  /** [v0.0.317] 保存：async 包装 + saving 状态管理（SaveBar saving prop） */
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSaved(draft);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   /** 开 modal：editing=null 新增；否则编辑该 model */
   const openModal = (editing: ModelInstance | null) => {
@@ -143,29 +156,14 @@ export function ComponentProviderDetail({ provider, protocolOptions, onBack, onS
         protocolOptions={protocolOptions}
       />
 
-      {/* save-bar：dirty 指示 + 重置 + 保存 */}
-      <div className="flex items-center gap-3 border-t border-border pt-4 mt-4">
-        <span className={'flex-1 text-[11px] font-mono ' + (dirty ? 'text-accent' : 'text-muted')}>
-          {dirty ? t('detail.dirty') : t('detail.saved')}
-        </span>
-        <button
-          type="button"
-          data-action-key="providers.provider.reset"
-          onClick={handleReset}
-          disabled={!dirty}
-          className="px-3 py-1.5 text-sm text-fg-2 border border-border-2 rounded-md hover:border-accent hover:text-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {t('common:action.reset')}
-        </button>
-        <button
-          type="button"
-          data-action-key="providers.provider.save"
-          onClick={() => onSaved(draft)}
-          className="px-4 py-1.5 text-sm text-white bg-accent rounded-md hover:bg-accent-hover transition-colors"
-        >
-          {t('common:action.save')}
-        </button>
-      </div>
+      {/* [v0.0.317] SaveBar 替换原自定义 inline save-bar */}
+      <SaveBar
+        variant="detail"
+        dirty={dirty}
+        saving={saving}
+        onSave={handleSave}
+        onCancel={handleReset}
+      />
 
       <hr className="border-border my-6" />
 

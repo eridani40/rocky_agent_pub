@@ -5,6 +5,10 @@
 > 视觉基线: **待设计师 demo**（req.md「需要看 demo」；本版按现有 token + cron modal 风格做交互逻辑，字号/色号/几何精修留 demo 到位）
 > 需求权威: specs/prd/version_logs/v0.0.223.md §2.6；数据契约: specs/api/overall/20-todo.md
 
+## 消费方
+
+- `components/chat-page/component-chat-float-menu.tsx`
+
 ## 职责
 session 级 todo 的只读弹层：主 item + 步骤的**双层树视图**，悬停主 item 弹结构化详情（source/output/memo）。
 边界：本版**只读**（todo 是 agent 自主维护的工具数据，用户编辑归 follow-up）；不直调 API（crud 由父 component-chat-float-menu 恒挂载后 prop 下传，badge 与弹层同源）。

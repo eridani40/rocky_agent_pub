@@ -1,3 +1,14 @@
+---
+type: spec
+title: component-seat-row — mate 坐席行
+priority: P1
+status: deprecated
+updated: 2026-08-09
+since: v0.0.170
+---
+
+> **DEPRECATED（v0.0.288 重构后零引用，代码待清理）**：首页成员列表/坐席卡已由 `component-member-roster-list.tsx`（MemberRosterList 三分区）取代；`component-seat-row.tsx` 生产代码无任何 import。本文保留作历史契约。
+
 # component-seat-row
 
 > 层级: component
@@ -31,3 +42,7 @@
 - who 列：；名行 =  容器内 = 名 Inter 13.5px/600 fg 单行 truncate + 可选 running spinner；meta `role · state` Inter 11.5px muted-2
 - status 列：；脉冲点  + 文案 Inter 12.5px 单行 truncate（currentWork=fg-3 / fallback=muted-2）
 - 无 hex 硬编码；无 keyframes/无动画类
+
+## 消费方
+
+无（零引用，疑似死代码）。

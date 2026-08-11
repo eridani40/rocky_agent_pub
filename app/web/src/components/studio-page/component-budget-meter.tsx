@@ -7,9 +7,13 @@
  *
  * 职责：实时显示 squad 当前 daily 窗口 token 消耗。
  * [v0.0.116] 新增配置交互：budget-switch（off=不限量/on=限量）+ on 展开 budget-limit-input + budget-save。
- * 写走 onSaveBudget（PATCH /squad { budget }）；off→null/on→{limit,window:'daily',scope:'team'}。
+ *
+ * [v0.0.316 P1] 受控化：从「自管 budgetOn/limitInput/savePending + onSaveBudget PATCH」改为「受控 + onChange 上报」。
+ *   budgetOn 从 useState 改为派生 budget != null；toggle off → onChange(null)；
+ *   toggle on → onChange(默认值)；limit 变 → onChange(更新 limit)；去掉 save 按钮 + savePending。
+ *   usage 展示（useLifecycle 轮询）不变（只读展示，与 save 无关）。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getBudgetUsage } from '../../lib/squad-api';
 import { useLifecycle } from '../../lib/use-lifecycle';
@@ -18,12 +22,15 @@ import type { BudgetUsage } from './squad-types';
 import { FIELD_LABEL } from './studio-styles';
 import { Icon } from './studio-icons';
 
+/** budget 配置形（受控 prop + onChange 值形） */
+type BudgetConfig = { limit: number; window: 'daily'; scope: 'team' } | null;
+
 interface BudgetMeterProps {
   squadId: string;
-  /** 当前 budget 配置（来自 squad detail；null=不限量） */
-  budget?: { limit: number; window: 'daily'; scope: 'team' } | null;
-  /** 保存 budget 配置（PATCH /squad { budget }；null=不限量） */
-  onSaveBudget?: (budget: { limit: number; window: 'daily'; scope: 'team' } | null) => Promise<void>;
+  /** 当前 budget 配置（受控：来自父级 draft；null=不限量） */
+  budget?: BudgetConfig;
+  /** 上报变更（toggle/limit 改动）→ 父级 dirty（不再自管 PATCH） */
+  onChange?: (budget: BudgetConfig) => void;
   /** 父级触发即时刷新；变化即 refetch */
   refreshKey?: string;
 }
@@ -34,11 +41,11 @@ const POLL_INTERVAL_MS = 30_000;
 /** 默认预算上限（budget switch on 时预填） */
 const DEFAULT_LIMIT = 1_000_000;
 
-/** token 预算仪表 + 配置 */
-export function BudgetMeter({ squadId, budget, onSaveBudget, refreshKey }: BudgetMeterProps) {
+/** token 预算仪表 + 配置。[v0.0.316] 受控模式：配置区纯上报，无自管 PATCH/savePending。 */
+export function BudgetMeter({ squadId, budget, onChange, refreshKey }: BudgetMeterProps) {
   const { t } = useTranslation(['studio', 'common']);
 
-  // 使用量数据（useLifecycle Snapshot 形）
+  // 使用量数据（useLifecycle Snapshot 形）—— 只读展示，与配置 save 无关
   const { ctx: usage, loading, error, reload } = useLifecycle<Snapshot<BudgetUsage>>({
     onInit: async ({ signal, startTimer }) => {
       startTimer({
@@ -64,31 +71,10 @@ export function BudgetMeter({ squadId, budget, onSaveBudget, refreshKey }: Budge
     }
   }, [refreshKey, reload]);
 
-  // 配置交互本地态
-  const [budgetOn, setBudgetOn] = useState(budget != null);
-  const [limitInput, setLimitInput] = useState<string>(budget?.limit != null ? String(budget.limit) : String(DEFAULT_LIMIT));
-  const [savePending, setSavePending] = useState(false);
-
-  // 外部 budget prop 变化时同步本地态（父级 refresh 后）
-  useEffect(() => {
-    setBudgetOn(budget != null);
-    setLimitInput(budget?.limit != null ? String(budget.limit) : String(DEFAULT_LIMIT));
-  }, [budget]);
-
-  const handleSaveBudget = async () => {
-    if (!onSaveBudget || savePending) return;
-    setSavePending(true);
-    try {
-      if (budgetOn) {
-        const limit = parseInt(limitInput, 10);
-        await onSaveBudget({ limit: isNaN(limit) ? DEFAULT_LIMIT : limit, window: 'daily', scope: 'team' });
-      } else {
-        await onSaveBudget(null);
-      }
-    } finally {
-      setSavePending(false);
-    }
-  };
+  // [v0.0.316] 受控派生：budgetOn 从 useState 改为派生 budget != null（D2 设计）
+  const budgetOn = budget != null;
+  // limitInput 派生自 budget draft（非独立 useState）：budget.limit ?? DEFAULT_LIMIT
+  const limitValue = budget?.limit ?? DEFAULT_LIMIT;
 
   const unlimited = usage != null && usage.limit === -1;
   const pct = usage && usage.limit > 0 ? Math.min(100, (usage.consumed / usage.limit) * 100) : 0;
@@ -98,20 +84,21 @@ export function BudgetMeter({ squadId, budget, onSaveBudget, refreshKey }: Budge
     <div data-squad-id={squadId} className="flex flex-col gap-2">
       <label className={FIELD_LABEL}>{t('studio:budget.label')}</label>
 
-      {/* 配置区（仅当 onSaveBudget 提供时显示） */}
-      {onSaveBudget && (
+      {/* 配置区（仅当 onChange 提供时显示）—— [v0.0.316] 受控：纯上报，无 save 按钮 */}
+      {onChange && (
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-2 p-3">
           <div className="flex items-center gap-2.5">
-            {/* budget switch：off=不限量/on=限量 */}
+            {/* budget switch：off=不限量/on=限量；toggle off → onChange(null)，on → onChange(默认值) */}
             <button
               type="button"
 
               role="switch"
               aria-checked={budgetOn}
-              disabled={savePending}
-              onClick={() => setBudgetOn(!budgetOn)}
+              onClick={() =>
+                onChange(budgetOn ? null : { limit: limitValue, window: 'daily', scope: 'team' })
+              }
               className={
-                'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ' +
+                'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ' +
                 (budgetOn ? 'bg-accent' : 'bg-border-strong')
               }
             >
@@ -129,7 +116,7 @@ export function BudgetMeter({ squadId, budget, onSaveBudget, refreshKey }: Budge
             </span>
           </div>
 
-          {/* 展开：budget-limit-input */}
+          {/* 展开：budget-limit-input；limit 变 → onChange(更新 limit) */}
           {budgetOn && (
             <div className="flex items-center gap-2 pl-2">
               <span className="text-[11px] text-muted-2">
@@ -139,23 +126,15 @@ export function BudgetMeter({ squadId, budget, onSaveBudget, refreshKey }: Budge
                 type="number"
 
                 min={1}
-                value={limitInput}
-                disabled={savePending}
-                onChange={(e) => setLimitInput(e.target.value)}
-                className="w-28 rounded-md border border-border-2 bg-surface px-2 py-1 font-mono text-[12px] text-fg disabled:opacity-50"
+                value={limitValue}
+                onChange={(e) => {
+                  const limit = parseInt(e.target.value, 10);
+                  onChange({ limit: isNaN(limit) ? DEFAULT_LIMIT : limit, window: 'daily', scope: 'team' });
+                }}
+                className="w-28 rounded-md border border-border-2 bg-surface px-2 py-1 font-mono text-[12px] text-fg"
               />
             </div>
           )}
-
-          <button
-            type="button"
-
-            disabled={savePending}
-            onClick={() => void handleSaveBudget()}
-            className="self-start rounded-md bg-accent px-3 py-1 text-[12px] font-semibold text-white hover:bg-accent-hover disabled:opacity-40"
-          >
-            {savePending ? t('common:status.saving') : t('studio:budget.save', { defaultValue: '保存预算' })}
-          </button>
         </div>
       )}
 

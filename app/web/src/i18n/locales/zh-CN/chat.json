@@ -186,6 +186,53 @@
       "loading": "读取中…",
       "loadFail": "图片加载失败",
       "close": "关闭"
+    },
+    "preview": {
+      "empty": "打开文件以预览",
+      "loading": "读取中…",
+      "edit": "编辑",
+      "openInBrowser": "浏览器打开",
+      "save": "保存",
+      "saving": "保存中…",
+      "cancel": "取消",
+      "undo": "撤销",
+      "saved": "已保存",
+      "retry": "重试",
+      "expand": "展开预览区",
+      "collapse": "收起预览区",
+      "doorLeft": "文档区占满（门滑至左）",
+      "doorRight": "对话区占满（门滑至右）",
+      "doorCenter": "恢复分栏（门回居中）",
+      "closeTab": "关闭 {{name}}",
+      "tabLeft": "向左滚动",
+      "tabRight": "向右滚动",
+      "dirtyTitle": "文件「{{name}}」有未保存的修改",
+      "dirtyBody": "切换前请选择：保存并切换 / 放弃修改 / 取消",
+      "dirtySaveSwitch": "保存并切换",
+      "dirtyDiscard": "放弃修改",
+      "dirtyCancel": "取消",
+      "conflictTitle": "文件已被外部修改",
+      "conflictBody": "「{{name}}」已被其他进程修改。取消=重新加载，覆盖=强制写入",
+      "conflictReload": "取消",
+      "conflictOverwrite": "覆盖",
+      "fileNotFound": "文件未找到",
+      "openFail": "打开失败",
+      "saveFail": "保存失败",
+      "format": "格式化",
+      "validate": "校验",
+      "formatFail": "格式化失败（内容格式不正确）",
+      "validateFail": "校验失败：{{msg}}",
+      "validateFailLine": "第 {{line}} 行：{{msg}}",
+      "validateOk": "校验通过",
+      "fileGone": "文件已不存在",
+      "searchPlaceholder": "搜索文件…",
+      "searchTooMany": "结果超过 100 条，请进一步输入以缩小范围",
+      "searchNoResults": "无结果",
+      "searchClear": "清空",
+      "resize": {
+        "ariaLabel": "拖动调节预览区宽度",
+        "title": "拖动调节宽度"
+      }
     }
   },
   "usage": {
@@ -211,10 +258,7 @@
       "output": "输出",
       "total": "合计"
     },
-    "toggle": {
-      "collapse": "收起用量",
-      "expand": "展开用量"
-    },
+    "clickToExpand": "点击查看用量详情",
     "compact": "压缩上下文 (Compact)",
     "clear": "清空会话 (Clear)"
   },

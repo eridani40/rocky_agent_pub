@@ -5,6 +5,10 @@
 > 后端契约：`specs/api/overall/04-agent-session.md §3.2`（POST /messages toolReply, handleType='approval'）+ `§3.6`（GET /pending-tool-call recover）+ agent_event（require_human_input payload=pending）
 > 同构参照：`component-pending-question-card.md`（提问卡，位置/驱动/可见性模式一致）
 
+## 消费方
+
+- `components/chat-page/base-chat-input-bar.tsx`
+
 ## 3. 职责
 - 渲染队首 `subState==='need_approval'` 的 PendingToolCall（data=ApprovalData）：工具名 + 参数（bash 即 `command`）+ 拦截原因（reason）。
 - 三按钮触发回填：同意（allow）/ 拒绝（deny）/ 永远同意（allow_always）→ `submitReply(toolCallId, 'approval', {decision})`。

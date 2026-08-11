@@ -1,10 +1,18 @@
 ---
 type: log
 title: Frontend KB 变更记录
-updated: 2026-08-08
+updated: 2026-08-11
 ---
 
 # Frontend KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-11 · v0.0.329（门模型 — 2+3 三态 center/left/right，可横向滑动的门）
+
+- **`index.md` ① 概念表 L49**：v0.0.329 门模型概念行——`use-preview-collapsed.ts` 三态 hook 重写（`DoorState='center'|'left'|'right'` + `pv-door-<sid>` 持久化 + 旧 `pv-collapsed-<sid>` 迁移/桥接 + **sessionId 变化重读门态 blocking 修复**）+ `layout-width-engine.ts` 可选 `chatCollapsed?` 分支（缺省旧路径逐字段相等回归保护；door=left 先 4 槽完整换算再门态重分配）+ `use-three-col-layout.ts` chatCollapsed 透传 + chatRenderWidth + `section-preview-area.tsx` 三态渲染（right=现状收起路径原样 / left=门框左缘粗线 rail+▶贴右+aside 占满无 resizer / center=细线左◀+右▶双把手）+ `component-preview-collapse-toggle.tsx` 可选 `direction/tooltipKey/testid` prop + page-chat/studio-chat-router Row 读 door + chatCollapsed 条件不渲染。**视觉 3 轮老板验收**（rail bg-bg-warm+双 border / rail 6→7px+handle 7→8px / stickCls 偏移 7→8px 同步）。详见 `specs/tech/version_logs/v0.0.329/change_log.md` + `specs/prd/version_logs/v0.0.329-region23-door.md`。
+
+## 2026-08-10 · v0.0.320（文件预览区 — 三栏 chat|预览|工作区 + 多 tab + 编辑 + 冲突检测 + 弹层退役）
+
+- **`index.md` ① 概念表 L48**：v0.0.320 文件预览区概念行——`layout-width-engine.ts` preview? 可选槽（preview=null 旧 3 槽路径零改动）+ `use-three-col-layout.ts` dragDynMax4 + `section-preview-area.tsx` / `preview-area-context.ts` / **`preview-area-provider.tsx`（Task 3 偏离：Provider 上移 page-chat/studio-chat-router 顶层包整行——workspace-panel/message-stream 是容器兄弟节点，Context 只能向下传；M-1 修复：sessionId 用 activeSessionId 与渲染面板对齐）** / `use-preview-tabs.ts`（tab 状态机：dirty 守卫三选 modal + 409 冲突 modal 取消=reload/覆盖=force；absolute 源 version='' 跳过冲突）+ `component-preview-tab-bar.tsx`（横滑 + chevron + × 关闭 + dirty ● + **展开态收起按钮 → rail 36px + localStorage**，ET-fix）+ `component-preview-viewer.tsx`（md→PrimitiveMarkdownView / 其余→pre）+ `component-preview-editor.tsx`（textarea + 保存/取消 + 错误保留重试）+ `component-preview-dirty-modal.tsx`/`component-preview-conflict-modal.tsx`（L3 modal，dirty 标题 {{name}} 插值 ET-fix）。**弹层退役（D13）**：删 `component-ws-file-editor.tsx` + `component-chat-link-viewer.tsx`（component-modal-md-editor 保留 academy）；无 Provider 降级 `component-ws-file-editor-fallback.tsx`。chat 链接 Provider 迁 `chat-link-handler-context.ts`（纯 TS createElement 断循环依赖）；message-stream onLocalViewer → openLocalPath 共享分流。workspace 文件树：文件夹 item 点击 toggle、`component-ws-search-box.tsx`（防抖 300ms 前端过滤 + 后端 searchWorkspaceFiles 补全）。file-format 'code' 分类（37 编程语言后缀 → 'code'，getCategory('code')='plain'）。范式归属：预览区全部控件即时操作 / L3 确认 modal / 拖拽手柄，不引入 SaveBar。
 
 ## 2026-08-08 · v0.0.286（Markdown Viewer 图片渲染）
 

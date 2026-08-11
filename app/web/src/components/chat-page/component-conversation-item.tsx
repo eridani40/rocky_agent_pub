@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { ChildrenView, Session } from './types';
 import { ComponentSubagentTree } from './component-subagent-tree';
 import { SpinnerRing } from '../common/spinner-ring';
-import { PinIcon } from './icons';
+import { Icon } from '../studio-page/studio-icons';
 
 /**
  * 格式化时间（简短展示：相对/日期）。
@@ -70,6 +70,11 @@ interface Props {
    * → session_meta reducer 自动刷新 title。
    */
   onRenameTitle?: (id: string, newTitle: string) => void;
+  /**
+   * [v0.0.306] 置顶/取消置顶回调（可选，向后兼容）。父组件 fire-and-forget PUT {pinned}，
+   * 归位靠 session_meta 广播重排（无乐观更新）。未注入时 hover pin 按钮不渲染（旧消费方零破坏）。
+   */
+  onTogglePin?: (id: string, pinned: boolean) => void;
 }
 
 /**
@@ -87,6 +92,7 @@ export function ComponentConversationItem({
   onContextMenu,
   onRefreshChildren,
   onRenameTitle,
+  onTogglePin,
 }: Props) {
   const s = session;
   // common.timeAgo.* 相对时间文案
@@ -170,9 +176,30 @@ export function ComponentConversationItem({
         (active ? 'bg-[var(--surface-3)]' : isPinned ? 'bg-bg-warm' : 'hover:bg-bg-warm')
       }
     >
-      {/* [v0.0.231] 置顶 pin 图标：absolute top-2 right-2 常驻（脱离布局流，出现/消失零 reflow） */}
-      {isPinned && (
-        <PinIcon size={12} className="absolute top-2 right-2 text-muted pointer-events-none" aria-hidden="true" />
+      {/*
+       * [v0.0.306] 可交互 pin 按钮（替换 v0.0.231 只读 PinIcon）：absolute top-2 right-2
+       * 恒占位（visibility:visible，脱离布局流零 reflow）。hover 显隐（group-hover）+
+       * pinned 常驻（opacity-100 + text-accent）；未 pin text-muted hover:text-fg。
+       * 点击 stopPropagation 防行 onSelect/expandOnce；fire-and-forget 无乐观更新。
+       * 仅注入 onTogglePin 时渲染（向后兼容）；未注入保持零按钮。unread 红点 right-[18px] 错位共存。
+       */}
+      {onTogglePin && (
+        <button
+          type="button"
+          aria-label={isPinned ? t('chat:convPanel.unpin') : t('chat:convPanel.pin')}
+          title={isPinned ? t('chat:convPanel.unpin') : t('chat:convPanel.pin')}
+          onClick={(e) => {
+            e.stopPropagation(); // 不触发行 onSelect/expandOnce
+            onTogglePin(s.id, !isPinned);
+          }}
+          className={
+            'absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded transition-opacity ' +
+            (isPinned ? 'text-accent opacity-100' : 'text-muted hover:text-fg opacity-0 group-hover:opacity-100')
+          }
+          style={{ visibility: 'visible' }} // 恒占位（visibility 不控 display，零 reflow）
+        >
+          <Icon name={isPinned ? 'pin-filled' : 'pin'} size={12} />
+        </button>
       )}
       {/* 未读红点：absolute top-2 7px 圆 var(--danger)（§4.2 / §8 视觉基线）；
           [v0.0.231] right-2 → right-[18px] 统一位移，与 pin 图标错位共存 */}

@@ -21,6 +21,8 @@ import { SseChannel } from './sse/sse-channel';
 import { wrapBusWithLog } from './dev-logs/wrap-bus-with-log';
 import type { LogWriter } from './dev-logs/log-writer';
 import { SESSION_META_TOPIC, APP_TASK_TOPIC } from './agent/session-event-types';
+// [v0.0.305] squad_meta topic 名（squad 层事件类型文件导出；白名单测试 import 真值）
+import { SQUAD_META_TOPIC } from './squad/squad-event-types';
 // [v0.0.189] panorama topic 名（hub.registerTopic 用；SSE 前端订阅白名单项）
 const PANORAMA_TOPIC = 'panorama';
 export { PANORAMA_TOPIC };
@@ -46,6 +48,7 @@ export async function bootstrapBusPhase(logWriter: LogWriter): Promise<{
   sessionMetaBus: ReplayableEventBusType;
   appTaskBus: ReplayableEventBusType;
   panoramaBus: ReplayableEventBusType;
+  squadMetaBus: ReplayableEventBusType;
   sseChannel: SseChannel;
 }> {
   // EventHub 全局单例 + agent_loop topic 的 replayable bus + session_panel topic 的 bus
@@ -118,9 +121,19 @@ export async function bootstrapBusPhase(logWriter: LogWriter): Promise<{
   );
   hub.registerTopic(PANORAMA_TOPIC, panoramaBus);
 
+  // [v0.0.305] squad_meta topic —— squad 聚合状态广播（在线/工作中/最后活跃）。
+  //   non-replayable（快照态：初始态走 GET /squad 拉全量，订阅后只收增量——对齐 session_meta §10.3）。
+  //   共享广播 group `_all`。SseChannel 构造前注册（bus 就绪保证）。
+  const squadMetaBus = wrapBusWithLog(
+    new ReplayableEventBus({ replayable: false }),
+    logWriter,
+    SQUAD_META_TOPIC,
+  );
+  hub.registerTopic(SQUAD_META_TOPIC, squadMetaBus);
+
   // SseChannel 创建前置（仅依赖 hub）——供 SessionUnreadRuntime 注入前台判定探针。
   // [REPLAY-DEBUG] 传 logWriter：SseChannel 在 SSE 实际发送点（enqueue）记录每条帧全文到 event.log。
   const sseChannel = new SseChannel(hub, logWriter);
 
-  return { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, sseChannel };
+  return { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, squadMetaBus, sseChannel };
 }

@@ -20,12 +20,13 @@
  *   - 不进 app-settings-config-defs.ts 的 KV_GROUPS
  *   - type 未配置 / 无候选 impl → save 禁用
  */
-import { useCallback, useEffect, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState, type ForwardedRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { req, getPluginInventory, type PluginExtImpl } from '../../lib/api-client';
 import { resolveI18nField } from '../../i18n/resolve-i18n-field';
 import { SecretInput } from '../framework/primitives/secret-input';
 import { ComponentChannelTypeDropdown } from '../channel-page/component-channel-type-dropdown';
+import type { SectionSaveHandle } from './use-tab-dirty-aggregator';
 
 /** web_search 配置 record（GET/PUT body 形状，对齐后端 app_config.web_search.default） */
 interface WebSearchConfig {
@@ -36,8 +37,13 @@ interface WebSearchConfig {
 /** 空 draft：record 缺失 / type 缺失时占位 */
 const EMPTY_DRAFT: WebSearchConfig = { type: '', credentials: {} };
 
-/** 网络搜索自渲染 section */
-export function SectionWebSearchConfig() {
+/** [v0.0.316-fix] section props：onDirtyChange 上报 dirty 变化给 tab aggregator */
+interface SectionWebSearchConfigProps {
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+/** 网络搜索自渲染 section（forwardRef 暴露 save/reset 给 tab 级 aggregator） */
+export const SectionWebSearchConfig = forwardRef<SectionSaveHandle, SectionWebSearchConfigProps>(function SectionWebSearchConfig({ onDirtyChange }, ref: ForwardedRef<SectionSaveHandle>) {
   // app-dev-config ns：本 section 主文案（标题/描述/按钮/label）
   // plugin-config ns：解析 manifest `__MSG_plugin.builtin.*__` 占位符（impl.description）
   const { t } = useTranslation('app-dev-config');
@@ -135,6 +141,17 @@ export function SectionWebSearchConfig() {
     setDraft(baseline);
   };
 
+  /** [v0.0.316-fix] dirty 变化上报 page（声明式通知，驱动 save bar 亮） */
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  /** [v0.0.316-fix] 暴露 save/reset 给 tab 级 aggregator（dirty 走 onDirtyChange 上报） */
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    reset: handleReset,
+  }), [handleSave, handleReset]);
+
   if (loading) {
     return (
       <div className="p-8 text-muted text-sm">
@@ -208,30 +225,8 @@ export function SectionWebSearchConfig() {
           />
         </div>
       )}
-
-      {/* save/reset toolbar（saveMode='item' 自管，无 component-group-save-bar） */}
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-
-          onClick={handleReset}
-          disabled={!dirty || saving}
-          className="text-xs text-muted hover:text-fg-2 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {t('webSearch.reset')}
-        </button>
-        <button
-          type="button"
-
-          onClick={() => void handleSave()}
-          disabled={!canSave || saving}
-          className="text-xs px-3 py-1 rounded-md bg-accent text-surface disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving ? t('webSearch.saving') : t('webSearch.save')}
-        </button>
-      </div>
     </div>
   );
-}
+});
 
 export default SectionWebSearchConfig;

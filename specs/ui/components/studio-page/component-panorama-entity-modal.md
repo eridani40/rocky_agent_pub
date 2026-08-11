@@ -49,3 +49,7 @@ edit 模式下 `id_field` 与 `states.field` 字段强制 readOnly。**why**：�
 - 字段布局：title 在上 → 各字段 → footer（取消/提交）。
 - selector 控件复用 `component-board-selector`（禁原生 select）。
 - 必填字段 label 后 `*`；状态字段 label 后括注「(状态字段)」。
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-panorama-view.tsx`

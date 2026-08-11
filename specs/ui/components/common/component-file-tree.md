@@ -3,6 +3,11 @@
 > 层级: component
 > 文件: app/web/src/components/common/component-file-tree.tsx（纯函数 `common/file-tree.ts`）
 
+## 消费方
+
+- `components/academy-page/component-skill-browser-modal.tsx`
+- `components/skill-page/component-skill-preview-modal.tsx`
+
 ## 职责
 递归渲染文件树：dir 可折叠（twisty + folder/folderOpen 图标），file 可选中（file 图标 + active 高亮）。纯结构组件——不含任何 i18n 文案、不持状态、不发请求。
 

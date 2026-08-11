@@ -38,3 +38,6 @@
 - **layout**：卡  横排  `gap 14px`，`padding 14px 16px`，。logo 38×38（`flex-shrink 0`）→ info（`flex 1` `min-width 0`，name 行 + desc 行）→ controls。
 - **font**：name `.skill-name` 13.5px/600 `var(--fg)`，name 行 flex `gap 8px`（name + badge 同行）；desc `.skill-desc` 12px `var(--muted-2)` `line-height 1.5`，2 行省略（`-webkit-line-clamp:2`）。badge `.badge` 10px/600 `JetBrains Mono` `letter-spacing 0.03em`。按钮 `.btn` 12px/600。
 - **双主题**：全 token；logo 渐变两色在 light/dark 一致。badge sage/bg-warm token 双主题都有定义。
+
+## 消费方
+- `app/web/src/components/skill-page/section-skill-list.tsx`

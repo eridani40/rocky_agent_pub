@@ -7,14 +7,13 @@
  *   + 底部危险操作区 team 硬删除入口（SquadDeleteSection）。自主性 infra（toggle + budget）在 autowork-tab。
  * 边界：meta 改动 → squad-admin-save（PATCH /squad 合并字段）；删除 → onDelete 上抛父级。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PatchSquadBody, SquadDetail } from './squad-types';
+import type { PatchSquadBody, SquadDetail, SaveBarController } from './squad-types';
 import { SquadDeleteSection } from './component-squad-delete';
 import { GroupChatToggle } from './component-group-chat-toggle';
 import { Dropdown } from './component-shared-selector';
-import { Icon } from './studio-icons';
-import { INPUT, TEXTAREA, FIELD_LABEL, BTN_PRIMARY } from './studio-styles';
+import { INPUT, TEXTAREA, FIELD_LABEL } from './studio-styles';
 import { ModelPicker } from '../chat/ModelPicker';
 import type { ModelSelection } from '../../lib/providers';
 import type { EffortLevel } from '../chat-page/component-input-effort-picker';
@@ -27,10 +26,12 @@ interface ManageTabProps {
   onSaveMeta: (patch: PatchSquadBody) => Promise<void>;
   /** team 硬删除（解散）→ 父级发 DELETE /squad/:id；返回 true=成功 / false=失败（弹层据此决定是否关） */
   onDelete: () => Promise<boolean>;
+  /** [v0.0.317] 上推 SaveBarController 给 SeatsPanel（面板级统一 SaveBar） */
+  onSaveBarChange?: (ctrl: SaveBarController | null) => void;
 }
 
 /** 管理 tab 内容 */
-export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
+export function ManageTab({ detail, onSaveMeta, onDelete, onSaveBarChange }: ManageTabProps) {
   const { t } = useTranslation(['studio', 'common']);
   const [name, setName] = useState(detail.name);
   const [description, setDescription] = useState(detail.description);
@@ -42,7 +43,22 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
   );
   // [v0.0.279] 团队默认推理强度（detail 恒有值——后端回显 ?? 'default'）
   const [effortDefault, setEffortDefault] = useState<EffortLevel>(detail.effortDefault);
+  // [v0.0.316] 群聊开关 draft state（攒入 dirty，与元信息一起统一 save）
+  const [enableGroupChat, setEnableGroupChat] = useState(detail.enableGroupChat);
   const [saving, setSaving] = useState(false);
+
+  // [v0.0.317] detail 变化时同步 draft（save 成功后 detail prop 更新 → draft 跟上 → dirty 清零）
+  useEffect(() => {
+    setName(detail.name);
+    setDescription(detail.description);
+    setModelDefaultSel(
+      detail.modelDefault
+        ? { providerId: detail.modelDefaultProviderId ?? '', modelId: detail.modelDefault }
+        : null,
+    );
+    setEffortDefault(detail.effortDefault);
+    setEnableGroupChat(detail.enableGroupChat);
+  }, [detail]);
 
   const dirty =
     name !== detail.name ||
@@ -51,7 +67,9 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
     (modelDefaultSel?.modelId ?? '') !== detail.modelDefault ||
     (modelDefaultSel?.providerId ?? '') !== (detail.modelDefaultProviderId ?? '') ||
     // [v0.0.279] 推理强度变更 → dirty
-    effortDefault !== detail.effortDefault;
+    effortDefault !== detail.effortDefault ||
+    // [v0.0.316] 群聊开关变更 → dirty
+    enableGroupChat !== detail.enableGroupChat;
 
   const save = async () => {
     if (!dirty || !name.trim()) return;
@@ -66,11 +84,34 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
           : { modelDefault: '' }),
         // [v0.0.279] 团队默认推理强度（显式 'default' 也落盘）
         effortDefault,
+        // [v0.0.316] 群聊开关（与元信息一起落盘）
+        enableGroupChat,
       });
     } finally {
       setSaving(false);
     }
   };
+
+  /** [v0.0.317] cancel：draft 回 detail 原值（SaveBar cancel 语义） */
+  const cancel = () => {
+    setName(detail.name);
+    setDescription(detail.description);
+    setModelDefaultSel(
+      detail.modelDefault
+        ? { providerId: detail.modelDefaultProviderId ?? '', modelId: detail.modelDefault }
+        : null,
+    );
+    setEffortDefault(detail.effortDefault);
+    setEnableGroupChat(detail.enableGroupChat);
+  };
+
+  /** [v0.0.317] 上推 SaveBarController 给 SeatsPanel（dirty/saving 变化时重新上报） */
+  const ctrl: SaveBarController = { dirty, saving, save, cancel };
+  useEffect(() => {
+    onSaveBarChange?.(ctrl);
+    return () => onSaveBarChange?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, saving]);
 
   return (
     <div>
@@ -111,18 +152,13 @@ export function ManageTab({ detail, onSaveMeta, onDelete }: ManageTabProps) {
           actionKey="studio.squad.select-default-effort"
         />
       </div>
-      <div className="mb-5 flex justify-end">
-        <button type="button" data-action-key="studio.squad.save" onClick={() => void save()} disabled={!dirty || saving} className={BTN_PRIMARY}>
-          <Icon name="check" size={12} /> {saving ? t('common:status.saving') : t('studio:manageTab.save')}
-        </button>
-      </div>
+      {/* [v0.0.317] 底部保存按钮去掉——改由 SeatsPanel 面板级 SaveBar 统一驱动 */}
 
-      {/* [v0.0.292] 群聊可见性开关（从 autowork-tab 迁入；元信息编辑区后、危险操作区前） */}
+      {/* [v0.0.316] 群聊可见性开关（受控化——攒入 dirty，与元信息一起统一 save） */}
       <div className="mb-5">
         <GroupChatToggle
-          squadId={detail.id}
-          enableGroupChat={detail.enableGroupChat}
-          onPatch={(patch) => onSaveMeta(patch)}
+          enableGroupChat={enableGroupChat}
+          onChange={setEnableGroupChat}
         />
       </div>
 

@@ -17,7 +17,6 @@
  */
 import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ComponentKeyCard } from './component-key-card';
 import { ComponentLocaleCard } from './component-locale-card';
 import { SectionDefaultModelsAndRequest } from './section-default-models-and-request';
 import { SectionSessionConfig } from './section-session-config';
@@ -28,8 +27,13 @@ import { SectionWebSearchConfig } from './section-web-search-config';
 import { SectionWebFetchConfig } from './section-web-fetch-config';
 import { SectionSeeImageConfig } from './section-see-image-config';
 import { SectionBashConfig } from './section-bash-config';
+import { SectionLogsConfig } from './section-logs-config';
 import { SectionUserMemory } from './section-user-memory';
+// [v0.0.318] 配置同步（导入导出）：自渲染即时操作，不走 SaveBar
+import { SectionConfigSync } from './section-config-sync';
+import { SectionTeamSync } from './section-team-sync';
 import { PagePluginConfig } from '../plugin-config-page/page-plugin-config';
+import type { LocaleId } from '../../i18n';
 import type { GroupInfo } from './section-config-layout';
 import type { DefaultModelsData } from './use-app-settings-config';
 import type { TabId, ConsolidationData } from './app-settings-config-defs';
@@ -43,6 +47,21 @@ export interface SectionTabPanelProps {
   onKeyChange: (groupId: string, key: string, next: unknown) => void;
   /** consolidation record draft */
   consolidationDraft: ConsolidationData;
+  /**
+   * [v0.0.316] tab 级 section ref 注册器（tools/observability tab 用）。
+   * 传入时，tools tab 的 4 个 section + observability section 挂 ref 到 aggregator。
+   * 不传（undefined）= 旧模式（section 自管 save bar，向后兼容）。
+   */
+  registerSection?: (key: string) => (handle: import('./use-tab-dirty-aggregator').SectionSaveHandle | null) => void;
+  /**
+   * [v0.0.316-fix] section dirty 变化上报（page 注入 aggregator.reportDirty）。
+   * section 通过 onDirtyChange callback 上报 → page setDirtyMap → re-render → save bar 亮。
+   */
+  onSectionDirtyChange?: (key: string, dirty: boolean) => void;
+  /** [v0.0.317 D8] 语言 draft 值（null = 未改动，显示当前 i18n 语言） */
+  languageDraft?: LocaleId | null;
+  /** [v0.0.317 D8] 语言选择回调（仅上报父级，不调 changeLanguage） */
+  onLanguageChange?: (lng: LocaleId) => void;
 }
 
 /** 渲染当前 tab 的 group 集合 */
@@ -53,8 +72,12 @@ export function SectionTabPanel({
   onDefaultModelsChange,
   onKeyChange,
   consolidationDraft,
+  registerSection,
+  onSectionDirtyChange,
+  languageDraft,
+  onLanguageChange,
 }: SectionTabPanelProps): ReactNode {
-  const { t } = useTranslation('app-dev-config');
+  const { t, i18n } = useTranslation('app-dev-config');
   // 可观测性 detail 视图（新增/编辑配置）独占 tab 内容区时，隐藏 tab 内其他 group（logs）。
   // 由 SectionObservability 通过 onDetailViewChange 同步上报（UI 展示态，与 providerViewLevel 同性质）。
   const [obsInDetail, setObsInDetail] = useState(false);
@@ -67,11 +90,15 @@ export function SectionTabPanel({
   switch (selectedTab) {
     case 'general':
       // general tab 只留语言 card；theme 不再前端配置（light-only）
+      // [v0.0.317 D8] 语言走 SaveBar：受控 value/onChange（不调 changeLanguage，点保存才切）
       return (
         <div>
           <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.locale.label')}</h3>
           <div className="flex flex-col">
-            <ComponentLocaleCard />
+            <ComponentLocaleCard
+              value={languageDraft ?? (i18n.language ?? 'zh-CN') as LocaleId}
+              onChange={(lng) => onLanguageChange?.(lng)}
+            />
           </div>
         </div>
       );
@@ -111,25 +138,37 @@ export function SectionTabPanel({
     case 'tools':
       return (
         <>
-          {/* 网络搜索 section */}
+          {/* 网络搜索 section（[v0.0.316] 挂 ref 到 tab 级 aggregator，自管 save/reset toolbar 已移除） */}
           <div>
             <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.web_search.label')}</h3>
-            <SectionWebSearchConfig />
+            <SectionWebSearchConfig
+              ref={registerSection?.('web_search')}
+              onDirtyChange={(d) => onSectionDirtyChange?.('web_search', d)}
+            />
           </div>
           {/* 网络抓取 section（v0.0.121 新增，紧邻网络搜索下方） */}
           <div className="mt-8">
             <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.web_fetch.label')}</h3>
-            <SectionWebFetchConfig />
+            <SectionWebFetchConfig
+              ref={registerSection?.('web_fetch')}
+              onDirtyChange={(d) => onSectionDirtyChange?.('web_fetch', d)}
+            />
           </div>
           {/* 看图理解 section（v0.0.141 新增，紧邻网络抓取下方） */}
           <div className="mt-8">
             <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.see_image.label')}</h3>
-            <SectionSeeImageConfig />
+            <SectionSeeImageConfig
+              ref={registerSection?.('see_image')}
+              onDirtyChange={(d) => onSectionDirtyChange?.('see_image', d)}
+            />
           </div>
           {/* Bash 工具 section（v0.0.296 新增，沙箱开关） */}
           <div className="mt-8">
             <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.bash.label')}</h3>
-            <SectionBashConfig />
+            <SectionBashConfig
+              ref={registerSection?.('bash')}
+              onDirtyChange={(d) => onSectionDirtyChange?.('bash', d)}
+            />
           </div>
         </>
       );
@@ -140,6 +179,12 @@ export function SectionTabPanel({
           <SectionUserMemory />
         </div>
       );
+    case 'config_sync':
+      // [v0.0.318] 配置同步：自渲染即时操作（导入导出），不走 SaveBar / page-tab dirty
+      return <SectionConfigSync />;
+    case 'team_sync':
+      // [v0.0.319] 团队同步：独立操作页（即时操作，不进 page-tab dirty / SaveBar）
+      return <SectionTeamSync />;
     case 'observability': {
       // detail 视图（新增/编辑可观测性配置）独占 tab 内容区，
       // 隐藏「可观测性」group 标题与「日志」group，避免 detail 下滚看到 tab 内其他内容。
@@ -150,20 +195,19 @@ export function SectionTabPanel({
             {obsInDetail ? null : (
               <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.observability.label')}</h3>
             )}
-            <SectionObservability onDetailViewChange={setObsInDetail} />
+            <SectionObservability
+              ref={registerSection?.('observability')}
+              onDirtyChange={(d) => onSectionDirtyChange?.('observability', d)}
+              onDetailViewChange={setObsInDetail}
+            />
           </div>
           {obsInDetail ? null : (
             <div>
               <h3 className="text-[15px] font-semibold text-fg mb-3 mt-8">{t('group.logs.label')}</h3>
-              <div className="flex flex-col">
-                {kvGroups.logs!.keys.map((k) => (
-                  <ComponentKeyCard
-                    key={k.key}
-                    keyInfo={k}
-                    onChange={(next) => onKeyChange('logs', k.key, next)}
-                  />
-                ))}
-              </div>
+              <SectionLogsConfig
+                ref={registerSection?.('logs')}
+                onDirtyChange={(d) => onSectionDirtyChange?.('logs', d)}
+              />
             </div>
           )}
         </>

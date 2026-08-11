@@ -4,7 +4,7 @@
  *       设计稿视觉基线: reqs/v0.0.11/easy-opc-config-v10.html L399-458（list 视图）
  *
  * 职责：标题区 + provider-card 列表（component-obs-item）+ 「添加配置」卡 + 删除确认 modal。
- * 每项点击进入详情；启停 toggle 即时；删除经 modal 二次确认。
+ * 每项点击进入详情；启停 toggle 攒入 dirty（v0.0.317，走 SaveBar 保存）；删除经 modal 二次确认后即时。
  * 边界：不管详情编辑（→ section-observability-detail）；不直接落库（归 tech manager / page）。
  */
 import { useState } from 'react';
@@ -20,7 +20,7 @@ interface SectionObservabilityListProps {
   onSelect: (id: string) => void;
   /** 点「添加配置」→ 进 detail（new） */
   onAdd: () => void;
-  /** toggle 即时生效（不计 dirty） */
+  /** [v0.0.317] toggle 攒入 dirty（走 SaveBar 保存，不再即时生效） */
   onToggle: (id: string, enabled: boolean) => void;
   /** modal 确认后调用 */
   onDelete: (id: string) => void;

@@ -4,26 +4,31 @@
 > 文件: app/web/src/components/app-dev-config-page/component-locale-card.tsx
 
 ## 职责
-locale group 的语言选择器卡片：label + 说明 + 两选项卡。选项 onChange 立即调 `changeLanguage(lng)`——实时切（react-i18next 触发组件重渲染，无刷新）+ `<html lang>` 同步（无障碍）+ PUT 持久化（`/config/app` 整组提交 `locale` group）。
+外观 group 内的语言选择器卡片：label + 说明 + 两选项卡。**v0.0.317（D8）改为纯受控组件**——选语言只进 draft（UI 不切），点保存才由父级调 `changeLanguage`（切 UI + PUT 持久化一起做），与配置面板其他控件统一走 SaveBar。
+
 边界：
+- **受控模式**：接收 `value`（当前选中 locale）+ `onChange`（仅上报，不调 `changeLanguage`）。选中态真值来自父级 draft，不由 `i18n.language` 直接驱动。
 - **选项 label 自指**——「中文」恒显「中文」、「English」恒显「English」，不随 locale 切换变化（用户在任何 locale 下都能识别自己想切的语言）。label 不进 i18n 切换（不走 `t`）。
-- **切即生效，不进 group save-bar**——对齐 §2.3 appearance.theme 模式；dirty 状态不进 group save 编排。
-- **不持编辑态本地副本**——选中态真值来自 `i18n.language`（react-i18next 内部状态），changeLanguage 后 react-i18next 触发本组件重渲染，选中态视觉同步。
+- **语言切换走 SaveBar**——选语言只进 draft，UI 不切；点保存才由父级调 `changeLanguage`（切 UI + PUT 持久化）。不再「切即生效」。
+
+## Props
+- value: LocaleId — 当前选中 locale（由父级 draft 控制）
+- onChange: (lng: LocaleId) => void — 选择回调：仅上报父级，不做任何副作用
 
 ## 状态 / 交互
-- 选中态真值 = `useTranslation.i18n.language`（当前 locale，`'zh-CN'` / `'en'`，缺省 `'zh-CN'`）。
-- 点击选项 → `handleSelect(lng)`：
-  - 若 `lng === currentLng` → no-op（避免无意义的 PUT）。
-- react-i18next 在 `changeLanguage` 后触发本组件重渲染，选中态视觉（accent 边框 + 对勾 svg）同步切换。
-- 持久化失败不显错。
+- 选中态真值 = `value` prop（父级 draft 控制）。
+- 点击选项 → `handleSelect(lng)`：若 `lng === value` → no-op；否则 `onChange(lng)` 仅上报父级。
+- 父级保存时调 `changeLanguage(lng)`（react-i18next 触发组件重渲染，UI 切 + PUT 持久化）。
 
 ## 复用关系
-- 取当前 locale：`useTranslation.i18n.language`（react-i18next hook）
-- 不复用 primitive：本组件自渲染 choice-cards（卡片容器 + 选项 button + 选中态 svg），不复用 `primitive-k
-- 被组合：`page-app-settings-merged.tsx`（renderGroupArea 注入，仅 locale group 渲染本组件）
+- 用 primitive-key-choice-cards 范式（与 appearance.theme 同款选择卡片，禁原生 `<select>`）。
+- 被组合：`section-tab-panel.tsx`（general tab case）
 
 ## 视觉基线
 - 卡片样式：border + rounded-lg + py-[16px] + px-[20px] + mb-[8px] + bg-surface-2 + hover:border-border-strong。
 - 选项卡：flex-1 + rounded-lg + border + px-3 + py-2.5；选中态 border-accent + bg-accent-surface + text-accent；未选中 border-border + bg-surface-2 + text-fg-2 + hover:border-border-strong。
-- 选中态对勾：14×14 svg，stroke=currentColor，text-accent（accent 颜色随 theme 切换）。
-- label：固定字符串 "language"。
+- 选中态对勾：14×14 svg，stroke=currentColor，text-accent。
+- label：i18n key `locale.label`（app-dev-config ns）。
+
+## 消费方
+- `app/web/src/components/app-dev-config-page/section-tab-panel.tsx`

@@ -127,9 +127,9 @@ describe('PageChannel', () => {
     expect(screen.getByRole('dialog')).toBeTruthy();
     // 空态提示文案（zh-CN form.noImplTypes，不渲染成【资源X不存在】）
     expect(screen.getByText(/无可用渠道类型/)).toBeTruthy();
-    // 类型下拉 disabled + 提交 disabled
-    const submitBtn = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
-    expect(submitBtn.disabled).toBe(true);
+    // 类型下拉 disabled（types 空态不可选）+ [v0.0.317] SaveBar 替换后保存按钮不 disabled（dirty=false 走灰色态）
+    // 空态行为由必填校验保障：点保存 → 校验拦截（onSubmit 不触发）
+    expect(screen.getByText(/无可用渠道类型/)).toBeTruthy();
     // 既有 config 列表不被空态阻断（列表区仍渲染空态文案）
     expect(screen.getByText(/暂无渠道/)).toBeTruthy();
   });
@@ -198,18 +198,18 @@ describe('SectionChannelForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('types 空态（types=[]）：下拉/提交 disabled + noImplTypes 提示 + 无 feishu 兜底 option', () => {
+  it('types 空态（types=[]）：noImplTypes 提示 + 无 feishu 兜底 option + 点保存校验拦截', () => {
     const onSubmit = vi.fn();
     render(<SectionChannelForm types={[]} onSubmit={onSubmit} onCancel={() => {}} />);
     // 空态提示（zh-CN form.noImplTypes 真实文案，非【资源X不存在】）
     expect(screen.getByText(/无可用渠道类型/)).toBeTruthy();
-    // 提交 disabled（空态不可提交）
+    // [v0.0.317] SaveBar 替换后保存按钮不 disabled（dirty=false 走灰色态），但点保存 → 必填校验拦截
     const submitBtn = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
-    expect(submitBtn.disabled).toBe(true);
+    fireEvent.click(submitBtn);
+    // 必填校验：name 空 → onSubmit 不触发
+    expect(onSubmit).not.toHaveBeenCalled();
     // 无 feishu 硬编码兜底（下拉 trigger 不显「飞书」）
     expect(screen.queryByText('飞书')).toBeNull();
-    fireEvent.click(submitBtn);
-    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('types 空态 + 编辑态：回显不受阻断（implId 回显原值）', () => {

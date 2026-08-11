@@ -358,6 +358,81 @@ describe('PrimitiveMarkdownView — 有序列表 1.（v0.0.145）', () => {
     expect(container.querySelectorAll('ul li').length).toBe(1);
     expect(container.querySelectorAll('ol li').length).toBe(1);
   });
+
+  // ===== v0.0.306：编号重置 / 编号跳变边界识别（PRD §3.2 判定示例表）=====
+  it('编号重置：`1. a\\n2. b\\n1. c\\n2. d`（无空行）→ 2 个 <ol> 各 2 个 <li>', () => {
+    const md = '1. a\n2. b\n1. c\n2. d';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const ols = container.querySelectorAll('ol');
+    expect(ols.length).toBe(2);
+    expect(Array.from(ols[0]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a', 'b']);
+    expect(Array.from(ols[1]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['c', 'd']);
+  });
+
+  it('段落后 `1.` 不再续接：`1. a\\n2. b\\n\\n段落\\n\\n1. c\\n2. d` → 2 个 <ol>', () => {
+    const md = '1. a\n2. b\n\n段落\n\n1. c\n2. d';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const ols = container.querySelectorAll('ol');
+    expect(ols.length).toBe(2);
+    expect(Array.from(ols[0]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a', 'b']);
+    expect(Array.from(ols[1]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['c', 'd']);
+    // 中间段落保留
+    const ps = Array.from(container.querySelectorAll('p'));
+    expect(ps.some((p) => p.textContent === '段落')).toBe(true);
+  });
+
+  it('编号跳变：`1. a\\n3. b\\n4. c` → 断开（`3.` 起独立 <ol>）', () => {
+    const md = '1. a\n3. b\n4. c';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    // 1. a 单独一个 ol；3. b / 4. c 连续 → 第二个 ol
+    const ols = container.querySelectorAll('ol');
+    expect(ols.length).toBe(2);
+    expect(Array.from(ols[0]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a']);
+    expect(Array.from(ols[1]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['b', 'c']);
+  });
+
+  it('从非 1 编号开始：`2. a\\n3. b` → 保持 1 个 ol（不强制断开）', () => {
+    const md = '2. a\n3. b';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const ols = container.querySelectorAll('ol');
+    expect(ols.length).toBe(1);
+    expect(Array.from(ols[0]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a', 'b']);
+  });
+
+  // ===== v0.0.319：松散列表（loose list）空行分隔的列表项合并到同一 <ol> =====
+  it('空行分隔：`1. a\\n\\n2. b\\n\\n3. c` → 1 个 <ol> 3 个 <li>（空行分隔合并）', () => {
+    const md = '1. a\n\n2. b\n\n3. c';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const ols = container.querySelectorAll('ol');
+    expect(ols.length).toBe(1);
+    expect(Array.from(ols[0]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('空行后非列表项断开：`1. a\\n\\n2. b\\n\\n段落` → 1 个 <ol> 2 个 <li> + 段落', () => {
+    const md = '1. a\n\n2. b\n\n段落';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const ols = container.querySelectorAll('ol');
+    expect(ols.length).toBe(1);
+    expect(Array.from(ols[0]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a', 'b']);
+    const ps = Array.from(container.querySelectorAll('p'));
+    expect(ps.some((p) => p.textContent === '段落')).toBe(true);
+  });
+
+  it('回归：编号重置不受空行合并影响 `1. a\\n2. b\\n1. c` 仍 2 个 <ol>', () => {
+    const md = '1. a\n2. b\n1. c';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const ols = container.querySelectorAll('ol');
+    expect(ols.length).toBe(2);
+    expect(Array.from(ols[0]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a', 'b']);
+    expect(Array.from(ols[1]!.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['c']);
+  });
 });
 
 describe('PrimitiveMarkdownView — 引用块 >（v0.0.145）', () => {
@@ -553,5 +628,141 @@ describe('PrimitiveMarkdownView — block 级图片渲染（v0.0.286）', () => 
     // 段落正常渲染
     const p = container.querySelector('p');
     expect(p).toBeTruthy();
+  });
+});
+
+// ===== v0.0.313: frontmatter 渲染（首行 --- ... --- → 灰色 metadata 块）=====
+describe('PrimitiveMarkdownView — frontmatter 渲染（v0.0.313）', () => {
+  it('合法 frontmatter → 渲染为灰色 metadata <div> + 正文标题正常', () => {
+    const md = '---\nname: test-doc\ntitle: 测试文档\n---\n# Title';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    // frontmatter 内容块（font-mono + whitespace-pre-wrap）
+    const fmDiv = container.querySelector('.font-mono.whitespace-pre-wrap');
+    expect(fmDiv).not.toBeNull();
+    expect(fmDiv?.textContent).toContain('name: test-doc');
+    expect(fmDiv?.textContent).toContain('title: 测试文档');
+    // --- 分隔符不出现在渲染输出中
+    expect(fmDiv?.textContent).not.toMatch(/^---$/);
+
+    // 正文标题正常渲染
+    const h1 = container.querySelector('h1');
+    expect(h1?.textContent).toBe('Title');
+  });
+
+  it('无 frontmatter（首行不是 ---）→ 不触发，纯正文正常渲染', () => {
+    const md = '# Title\n\n正文段落。';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    // 无 frontmatter metadata div（font-mono + whitespace-pre-wrap 组合仅 frontmatter 用）
+    // 验证标题正常
+    expect(container.querySelector('h1')?.textContent).toBe('Title');
+    // 段落正常
+    const p = container.querySelector('p');
+    expect(p?.textContent).toContain('正文段落');
+    // 不应出现 frontmatter 样式的纯文本块（非 pre/code 场景）
+    const fmDivs = Array.from(container.querySelectorAll('div')).filter(
+      (d) => d.classList.contains('whitespace-pre-wrap') && !d.querySelector('pre') && d.textContent?.includes(':'),
+    );
+    // 没有 frontmatter 特征块
+    expect(fmDivs.length).toBe(0);
+  });
+
+  it('未闭合 frontmatter（只有开头 --- 无结尾 ---）→ 不识别为 frontmatter，回退原逻辑', () => {
+    const md = '---\nname: x';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    // 没有闭合 --- → 不识别为 frontmatter → 走段落渲染
+    // --- 会被当作普通段落文本
+    const text = container.textContent ?? '';
+    expect(text).toContain('---');
+    expect(text).toContain('name: x');
+    // 没有独立的 frontmatter metadata div（不含 pre）
+    const fmDivs = Array.from(container.querySelectorAll('div')).filter(
+      (d) => d.classList.contains('whitespace-pre-wrap') && !d.querySelector('pre'),
+    );
+    expect(fmDivs.length).toBe(0);
+  });
+
+  it('正文中有 --- 分隔线不误判（非首行 --- 正常渲染为段落/文本）', () => {
+    const md = '# Title\n\n---\n\ntext after divider';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    // 标题正常
+    expect(container.querySelector('h1')?.textContent).toBe('Title');
+    // --- 分隔线后的文本正常渲染
+    const text = container.textContent ?? '';
+    expect(text).toContain('text after divider');
+    // 没有独立的 frontmatter metadata div（不含 pre）
+    const fmDivs = Array.from(container.querySelectorAll('div')).filter(
+      (d) => d.classList.contains('whitespace-pre-wrap') && !d.querySelector('pre'),
+    );
+    expect(fmDivs.length).toBe(0);
+  });
+});
+
+// ===== v0.0.314: 段落多行换行保留（para.join(' ') → 逐行 renderInline + \n）=====
+describe('PrimitiveMarkdownView — 段落多行换行保留（v0.0.314）', () => {
+  it('多行纯文本段落：渲染为单个 <p>，每行作为独立 <span>，行间有换行文本节点', () => {
+    const md = '第一行\n第二行\n第三行';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const p = container.querySelector('p');
+    expect(p).toBeTruthy();
+    // whitespace-pre-wrap 让换行符在 HTML 中渲染
+    expect(p?.className).toContain('whitespace-pre-wrap');
+
+    // 每行内容保留（不挤成一行空格连接）
+    const text = p?.textContent ?? '';
+    expect(text).toContain('第一行');
+    expect(text).toContain('第二行');
+    expect(text).toContain('第三行');
+    // 不应出现 "第一行 第二行"（空格连接的旧行为）
+    expect(text).not.toContain('第一行 第二行');
+    // 换行符保留在 DOM 中（whitespace-pre-wrap 下渲染为换行）
+    expect(text).toContain('\n');
+  });
+
+  it('多行段落 + 行内格式：每行单独 renderInline，加粗/代码/链接不丢失', () => {
+    const md = '**加粗**行\n`代码`行\n[链接](https://x.com)行';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const p = container.querySelector('p');
+    expect(p).toBeTruthy();
+    // 三行各自的行内格式都保留
+    expect(p?.querySelector('strong')?.textContent).toBe('加粗');
+    expect(p?.querySelector('code')?.textContent).toBe('代码');
+    expect(p?.querySelector('a')?.getAttribute('href')).toBe('https://x.com');
+    // 换行符保留
+    expect(p?.textContent).toContain('\n');
+  });
+
+  it('单行段落仍正常渲染（不回归）', () => {
+    const md = '这是单行段落。';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const p = container.querySelector('p');
+    expect(p).toBeTruthy();
+    expect(p?.textContent).toBe('这是单行段落。');
+    // 单行段落不应有多余换行符
+    expect(p?.textContent).not.toContain('\n');
+  });
+
+  it('两段落间用空行分隔：各段落内多行换行各自保留', () => {
+    const md = '段落一行 A\n段落一行 B\n\n段落二行 C\n段落二行 D';
+    const { container } = render(<PrimitiveMarkdownView source={md} />);
+
+    const paragraphs = container.querySelectorAll('p');
+    expect(paragraphs.length).toBe(2);
+    // 段落一内两行各自保留
+    const t1 = paragraphs[0]!.textContent ?? '';
+    expect(t1).toContain('段落一行 A');
+    expect(t1).toContain('段落一行 B');
+    expect(t1).toContain('\n');
+    // 段落二内两行各自保留
+    const t2 = paragraphs[1]!.textContent ?? '';
+    expect(t2).toContain('段落二行 C');
+    expect(t2).toContain('段落二行 D');
+    expect(t2).toContain('\n');
   });
 });

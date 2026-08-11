@@ -18,10 +18,11 @@
  *   - 不做 jinaEnabled/jinaTimeoutMs UI（范围纪律，req 只要 key 字段）
  *   - 不消费 useAppSettingsConfig（自渲染，与 providers/observability 同范式）
  */
-import { useCallback, useEffect, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState, type ForwardedRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { req } from '../../lib/api-client';
 import { SecretInput } from '../framework/primitives/secret-input';
+import type { SectionSaveHandle } from './use-tab-dirty-aggregator';
 
 /** GET /config/app?group=web → items[] 单条形状 */
 interface WebGroupItem {
@@ -34,8 +35,13 @@ function extractJinaApiKey(items: WebGroupItem[]): string {
   return items.find((item) => item.key === 'jinaApiKey')?.data ?? '';
 }
 
-/** 网络抓取自渲染 section（tools tab 下方，紧邻网络搜索） */
-export function SectionWebFetchConfig() {
+/** [v0.0.316-fix] section props：onDirtyChange 上报 dirty 变化给 tab aggregator */
+interface SectionWebFetchConfigProps {
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+/** 网络抓取自渲染 section（forwardRef 暴露 save/reset 给 tab 级 aggregator） */
+export const SectionWebFetchConfig = forwardRef<SectionSaveHandle, SectionWebFetchConfigProps>(function SectionWebFetchConfig({ onDirtyChange }, ref: ForwardedRef<SectionSaveHandle>) {
   const { t } = useTranslation('app-dev-config');
 
   /** 服务端基线值（GET 明文真值或 ''，从未配置时为 ''） */
@@ -101,6 +107,17 @@ export function SectionWebFetchConfig() {
     setDraft(baseline);
   };
 
+  /** [v0.0.316-fix] dirty 变化上报 page（声明式通知，驱动 save bar 亮） */
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  /** [v0.0.316-fix] 暴露 save/reset 给 tab 级 aggregator（dirty 走 onDirtyChange 上报） */
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    reset: handleReset,
+  }), [handleSave, handleReset]);
+
   if (loading) {
     return (
       <div className="p-8 text-muted text-sm">
@@ -144,30 +161,8 @@ export function SectionWebFetchConfig() {
           {t('webFetch.jinaApiKeyDesc')}
         </span>
       </div>
-
-      {/* save/reset toolbar（saveMode='item' 自管，与 section-web-search-config 同范式） */}
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-
-          onClick={handleReset}
-          disabled={!dirty || saving}
-          className="text-xs text-muted hover:text-fg-2 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {t('webFetch.reset')}
-        </button>
-        <button
-          type="button"
-
-          onClick={() => void handleSave()}
-          disabled={!dirty || saving}
-          className="text-xs px-3 py-1 rounded-md bg-accent text-surface disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving ? t('webFetch.saving') : t('webFetch.save')}
-        </button>
-      </div>
     </div>
   );
-}
+});
 
 export default SectionWebFetchConfig;

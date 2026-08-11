@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  * section-observability-detail 单测（v0.0.90.ui 新增 — 覆盖 SecretInput 接入）
+ * [v0.0.316] 适配 draft 攒入模式：onSave → onDraftChange，去 save 按钮断言
  * 参考: specs/ui/components/app-dev-config-page/observability-config/section-observability-detail.md
  *       specs/ui/components/framework/primitive-secret-input.md（SecretInput 四态机）
  *
@@ -8,7 +9,7 @@
  *   - secretKey 已保存（明文，len>8）→ mask 展示（首4+*+末4）
  *   - secretKey='***'（旧哨兵/短值）→ mask 后视觉等同 '***'（len=3 全 *）
  *   - click display → 编辑态：field 出现，draft 起始空（编辑 secret = 重输）
- *   - 填新值 + click 提交 → updateField('secretKey', next) → dirty=true → save 启用
+ *   - 填新值 + click 提交 → onDraftChange 调用，secretKey 为新值
  *   - Esc cancel → draft 不变（仍为原值 mask）
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
@@ -42,8 +43,7 @@ describe('SectionObservabilityDetail — secretKey SecretInput 接入（v0.0.90.
         initialData={baseCfg}
         isNew={false}
         onBack={() => {}}
-        onSave={() => {}}
-        onToggle={() => {}}
+        onDraftChange={() => {}}
       />,
     );
     const root = container.querySelector('[data-mode]')!;
@@ -59,27 +59,23 @@ describe('SectionObservabilityDetail — secretKey SecretInput 接入（v0.0.90.
         initialData={{ ...baseCfg, secretKey: '***' }}
         isNew={false}
         onBack={() => {}}
-        onSave={() => {}}
-        onToggle={() => {}}
+        onDraftChange={() => {}}
       />,
     );
     expect(screen.getByText('***').textContent).toBe('***');
     expect(container.querySelector('[data-mode]')!.getAttribute('data-empty')).toBe('false');
   });
 
-  it('click display → 编辑态：field 出现 draft 起始空；填值 + 提交 → save 启用', () => {
-    const onSave = vi.fn();
+  it('click display → 编辑态：field 出现 draft 起始空；填值 + 提交 → onDraftChange 调用', () => {
+    const onDraftChange = vi.fn();
     render(
       <SectionObservabilityDetail
         initialData={baseCfg}
         isNew={false}
         onBack={() => {}}
-        onSave={onSave}
-        onToggle={() => {}}
+        onDraftChange={onDraftChange}
       />,
     );
-    // 初始 save 禁用（无 dirty）
-    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true);
     // click display 进编辑态
     fireEvent.click(screen.getByText('sk-l****cret'));
     const field = screen.getByPlaceholderText('sk-lf-...') as HTMLInputElement;
@@ -89,13 +85,10 @@ describe('SectionObservabilityDetail — secretKey SecretInput 接入（v0.0.90.
     fireEvent.change(field, { target: { value: 'sk-new-secret-key' } });
     // commit
     fireEvent.click(screen.getByRole('button', { name: '提交' }));
-    // dirty → save 启用
-    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false);
-    // 点 save → onSave 调用，secretKey 为新值
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-    expect(onSave).toHaveBeenCalledTimes(1);
-    const saved = onSave.mock.calls[0]![0] as ObservabilityConfig;
-    expect(saved.secretKey).toBe('sk-new-secret-key');
+    // [v0.0.316] onDraftChange 被调用，secretKey 为新值（draft 攒入模式）
+    expect(onDraftChange).toHaveBeenCalled();
+    const lastCall = onDraftChange.mock.calls[onDraftChange.mock.calls.length - 1]![0] as ObservabilityConfig;
+    expect(lastCall.secretKey).toBe('sk-new-secret-key');
   });
 
   it('Esc cancel → secretKey 不变（display 仍展示原 mask）', () => {
@@ -104,8 +97,7 @@ describe('SectionObservabilityDetail — secretKey SecretInput 接入（v0.0.90.
         initialData={baseCfg}
         isNew={false}
         onBack={() => {}}
-        onSave={() => {}}
-        onToggle={() => {}}
+        onDraftChange={() => {}}
       />,
     );
     // 进编辑态
@@ -117,7 +109,5 @@ describe('SectionObservabilityDetail — secretKey SecretInput 接入（v0.0.90.
     // 回到 display 态，mask 仍是原 secretKey 的 mask
     expect(container.querySelector('[data-mode]')!.getAttribute('data-mode')).toBe('display');
     expect(screen.getByText('sk-l****cret').textContent).toBe('sk-l****cret');
-    // save 仍禁用（无 dirty）
-    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

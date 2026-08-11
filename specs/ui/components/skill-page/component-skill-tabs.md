@@ -31,3 +31,6 @@ Skill 页的 tab 栏容器。预埋多 tab 支持；实际启用两 tab「我的
 - **border**：每 tab 底 2px 下划线，默认 `transparent`；激活 `border-bottom 2px solid var(--accent)`。栏底线 1px。
 - **双主题**：全 token，无特殊处理。
 - **决策**：组件按多 tab props 实现，调用方 v0.0.21 仅传 1 项；视觉与设计稿单 tab 一致（栏底线 + 1 个激活项）。
+
+## 消费方
+- `app/web/src/components/skill-page/page-skill.tsx`

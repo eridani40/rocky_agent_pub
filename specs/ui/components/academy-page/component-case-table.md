@@ -39,3 +39,8 @@ interface Props {
 - 字体：row 12px；分数 tag mono 11px/500；题 12px ellipsis。
 - 边框：table 1px border；行 bottom border（last-child none）。
 - 配色：分数 sage-bg/sage（>=8）/ gold-bg/#b45309（6-7）/ danger-light/danger（<=5）；level 标签同 sage/danger/gold 配色。
+
+## 消费方
+
+- `app/web/src/components/academy-page/component-iteration-timeline.tsx`
+- `app/web/src/components/academy-page/section-training-observe.tsx`

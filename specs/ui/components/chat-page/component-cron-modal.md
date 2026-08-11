@@ -5,6 +5,10 @@
 > （被 `component-chat-float-menu` 承载，取代 ws-panel「定时任务」tab）
 > `crud` prop 下传，与 badge 同一实例 —— **不在本组件内重新调用 `useCronCrud`**）
 
+## 消费方
+
+- `components/chat-page/component-chat-float-menu.tsx`
+
 ## Props
 - sessionId: string
 - crud: CronCrud

@@ -43,7 +43,7 @@ prod   ── 打包 exe / dmg        ── 运行时 API 3720 · 签名凭证 
 
 | 键 | 类型 | 含义 |
 |---|---|---|
-| `APP_NAME` | string | 应用标识 |
+| `APP_NAME` | string | 应用标识；dev 模式下还用于 Electron 进程隔离（见 §4.8） |
 | `APP_ENV` | `"test"` \| `"dev"` \| `"prod"` | 当前环境标记，代码据此分支 |
 | `API_PORT` | number | 后端 HTTP API（server `node:http`）监听端口，**三环境必须互不相同**（AT curl 此端口） |
 | `WEB_PORT` | number | 渲染层 Vite dev server 端口（ET 驱动此端口）；prod 打包产物从文件加载、运行时不监听 |
@@ -186,6 +186,12 @@ CSC_KEY_PASSWORD=
 **结论**：`.env` / `runtime-config.json` 里的 `DATA_DIR` 存**字面 `~/`**（如 `~/.rocky_agent_prod`）；`~` 展开是**运行时职责**，唯一权威 = `app/server/src/config.ts` 的 `resolveDataDir(env)`（内部 `expandTilde` 按**运行用户** home 展开 `~` + 未设时回退派生 `~/.{APP_NAME}_{env}` 并展开）。所有取 `DATA_DIR` 的入口都必须经它，不得各自拼接字面 `~`。
 **理由（BUG-004 真机实证）**：存字面 `~` 而非绝对路径才能跨用户/机器可移植——packaged dmg 分发到别人机器，`~` 按运行者 home 展开、不是打包者的 `/Users/<builder>`（故 `build-dmg.sh` 生成 `runtime-config.json` 时特意把 build 机 `$HOME` 前缀还原成字面 `~`，见 `../package/[P0]packaging_toolchain.md §3.6`）。既然存字面 `~`，就必须有**唯一**展开点：dev/CLI 入口走 `index.ts getConfig().dataDir`（= `resolveDataDir`）；**packaged 启动桥** `backend-bootstrap.resolveServerOpts` 也必须复用 `resolveDataDir`，**禁止重复拼接字面 `~`**——否则字面 `~` 漏到下游 `mkdirSync`，packaged cwd=`/` 下 `mkdirSync('/~/...')` EACCES → 全部 HTTP 500。
 **反例**：若某入口自行 `env.DATA_DIR ?? '~/.x'` 不展开，`StartServerOptions.dataDir`「绝对路径」契约被破，下游建目录用字面 `~` → dev cwd 可写侥幸不崩、packaged cwd=`/` 直接 EACCES —— 只在打包产物暴露，最难查（启动桥展开责任见 `../package/[P0]package_structure.md §4.3`）。
+
+### 4.8 dev 模式 Electron `APP_NAME` 进程隔离
+
+**结论**：dev 模式（`shouldStartBackend=false`）在 `app.whenReady()` 之前显式调 `app.setName(process.env.APP_NAME)`，让 macOS 认为是不同 app（如 `rocky_agent_dev` vs packaged 的 `rocky_agent`），实现 dev 与 prod 进程/窗口隔离。
+**理由**：dev 和 prod 用同一 Electron app bundle（同一 `package.json`），macOS 通过 `app.name` 做进程/窗口管理。不隔离会导致 dev 启动影响 prod 窗口（白屏）。`APP_NAME` 已是共通键（三环境都有），dev.env 填 `rocky_agent_dev` 即可复用此机制，无需新增 env 键。
+**反例**：若不调 `setName`，dev 和 prod 共用 `app.name`（= `package.json` 的 name），macOS 视为同一 app 实例 → dev 窗口与 prod 窗口互相干扰。
 
 ## 5. 边界
 

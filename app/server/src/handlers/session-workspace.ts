@@ -36,8 +36,8 @@ interface WsTreeNode {
   linkTarget?: string;
 }
 
-/** 与 chokidar WATCH_OPTIONS 一致的 ignore 名单（spec §2.6.1 + manager §4） */
-const IGNORED_NAMES = new Set(['node_modules', '.git']);
+/** 与 chokidar WATCH_OPTIONS 一致的 ignore 名单（spec §2.6.1 + manager §4）。export 供 session-workspace-search.ts 复用。 */
+export const IGNORED_NAMES = new Set(['node_modules', '.git']);
 
 /** 构造 JSON Response（可选 Allow 头）。export 供 session-workspace-watch.ts 复用。 */
 export function json(status: number, body: unknown, allow?: string): Response {

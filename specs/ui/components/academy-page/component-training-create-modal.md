@@ -55,3 +55,7 @@ interface Props {
 - 字体：modal-title 15px/600；mode-name 13.5px/600；mode-desc 11.5px/1.5 muted；sec-label 12px/600；field-label 12px/500；hint-bar 12px/1.55。
 - 边框：modal `rounded-xl` + shadow-lg；head/foot border；mode-card border-2（sel border-accent + bg）；picker border；stepper border + overflow-hidden；checkbox 16×16 border-1.5。
 - 配色：req-ok sage-bg/sage；req-miss gold-bg/#b45309；hint-bar indigo-bg；checkbox on `--color-accent` 黑底；btn-primary 黑底白字。
+
+## 消费方
+
+- `app/web/src/components/academy-page/page-academy.tsx`

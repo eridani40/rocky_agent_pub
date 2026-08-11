@@ -168,13 +168,16 @@ describe('isBuiltinEditable（link-target 复用 file-format 权威）', () => {
     expect(isBuiltinEditable('X.JSON')).toBe(true);
     expect(isBuiltinEditable('Y.MD')).toBe(true);
   });
-  it('编程语言 / 图片 / pdf / 未知 → 不命中', () => {
-    expect(isBuiltinEditable('a.py')).toBe(false);
-    expect(isBuiltinEditable('b.js')).toBe(false);
-    expect(isBuiltinEditable('c.png')).toBe(false);
-    expect(isBuiltinEditable('d.pdf')).toBe(false);
-    expect(isBuiltinEditable('e.xlsx')).toBe(false);
-    expect(isBuiltinEditable('Makefile')).toBe(false);
+  it('[v0.0.320 D11] 编程语言 → 命中（code 分类并入白名单）；图片 / pdf / 未知 → 不命中', () => {
+    expect(isBuiltinEditable('a.py')).toBe(true);
+    expect(isBuiltinEditable('b.js')).toBe(true);
+    expect(isBuiltinEditable('c.tsx')).toBe(true);
+    expect(isBuiltinEditable('d.sh')).toBe(true);
+    expect(isBuiltinEditable('e.png')).toBe(false);
+    expect(isBuiltinEditable('f.pdf')).toBe(false);
+    expect(isBuiltinEditable('g.xlsx')).toBe(false);
+    // [v0.0.328] Makefile ∈ KNOWN_TEXT_BASENAMES → 可内置编辑（txt），不再 false
+    expect(isBuiltinEditable('Makefile')).toBe(true);
   });
 });
 

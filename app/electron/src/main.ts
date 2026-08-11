@@ -110,6 +110,15 @@ function createMainWindow(): BrowserWindow {
 // 单实例锁定 + ready 后起窗口；macOS dock 激活时若无窗口重建。
 // packaged 模式在起窗口前先 startServer（node:http），让渲染层 loadFile 后即可 fetch 后端。
 void (async () => {
+  // [v0.0.317] dev APP_NAME 隔离：dev 和 prod 用同一 Electron app bundle（同一 package.json），
+  //   macOS 通过 app.name 做进程/窗口管理，不隔离会导致 dev 启动影响 prod 窗口（白屏）。
+  //   dev 模式（shouldStartBackend=false）时显式 setName(APP_NAME)，
+  //   让 macOS 认为是不同 app（如 rocky_agent_dev vs packaged 的 rocky_agent）。
+  //   必须在 app.whenReady() 之前调用才生效。
+  if (!shouldStartBackend(process.env) && process.env.APP_NAME) {
+    app.setName(process.env.APP_NAME);
+  }
+
   // 单实例锁（packaged only）：后端跑在主进程内 node:http 监听 API_PORT，第二个实例会
   // 撞 EADDRINUSE → 后端起不来 → 白屏。拿不到锁说明已有实例在跑，直接退出并把已有窗口聚焦。
   // dev 模式（shouldStartBackend=false，不起后端）无端口冲突，允许多实例、跳过锁。

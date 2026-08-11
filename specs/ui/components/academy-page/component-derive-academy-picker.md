@@ -70,3 +70,7 @@ interface Props {
 - 字体：derive-head 13px/600；sel-label 11px/600/uppercase；pick-item 名 13px/500；副 11px muted/sage；copy-note 12px/1.55；src-node 12.5px/500。**继承预览面板**：preview-summary 11px/600（同 sel-label 字号但不大写，fg-2 色）；group label 11px/600/uppercase muted-2（与 sel-label 一致）；项名 13px/500 fg；status-badge 11px/500（复用 primitive-status-badge 字号口径）。
 - 边框：derive-panel border + `rounded-xl`；head bottom border；sel-col 之间 border；pick-item sel 态 border-1.5 accent；foot top border；src-node border + `rounded-md`。**继承预览面板**：preview-summary 顶部 bottom border 分隔 select-cols；group 之间无额外 divider（靠 group label + padding 自然分隔）；项行 hover bg-bg-warm（同 pick-item hover）。
 - 配色：pick-item sel bg-accent-light + border-accent；indigo-bg copy-note；ver-badge-sm 黑底白字（old muted-2）；btn-primary 黑底白字。**继承预览面板**：status-badge sage（bg-sage-bg text-sage）=「新增」/「将带入」；amber（bg-gold-bg text-[#b45309]）=「同名 · 保留原 squad」；toggle off 灰（bg-border-strong）/ on accent（沿用 `primitive-toggle-switch` 配色，不重造）；preview-summary error 态用 text-danger 兜底文案。
+
+## 消费方
+
+- `app/web/src/components/academy-page/use-derive-options.ts`

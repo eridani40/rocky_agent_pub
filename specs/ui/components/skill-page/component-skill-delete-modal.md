@@ -24,3 +24,6 @@ Skill 删除确认 modal。展示「删除 Skill」标题 + 确认文案（含 s
 - **font**：title 16px/700 `var(--fg)`。body 13px `var(--muted-2)`，其中 skill name 用 `<strong>` `color var(--fg)` 强调。按钮 12px/600（`.btn` 通用）。
 - **双主题**：全 token；danger/danger-light token 双主题都有（:17,:25）。overlay 半透明 + blur 双主题一致。
 - **文案**：title「删除 Skill」；body「确定要删除 **{name}** 吗？该 Skill 将不再可用，此操作无法撤销。」；按钮「取消」/「确认删除」。
+
+## 消费方
+- `app/web/src/components/skill-page/page-skill.tsx`

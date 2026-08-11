@@ -24,6 +24,9 @@ import { handleTokenStatsRoute } from '../handlers/squad-token-stats-handler';
 import { handleSchedulerHistoryRoute } from '../handlers/squad-scheduler-handler';
 // [v0.0.189] panorama 子路由分发（/squad/:id/panorama/*）
 import { handlePanoramaRoute } from '../squad/panorama/http/routes';
+// [v0.0.319] 团队同步（导出 zip / 导入建队）
+import { handleTeamSyncExport, handleTeamSyncImport } from '../handlers/team-sync-handler';
+import { SquadStore, MemberStore } from '../stores/squad-store';
 
 /**
  * /squad* 路由组分发。命中返 Response；未命中返 null（主分发继续下个 group）。
@@ -51,6 +54,26 @@ export async function dispatchSquadRoutes(
     return null;
   }
 
+  // [v0.0.319] 团队同步分发——MUST 在 /squad/:id CRUD 之前匹配
+  //（`/squad/import` 会被下方 CRUD 当 squadId='import' 吞掉；`/squad/:id/export` 同理）
+  {
+    const url = new URL(req.url);
+    const teamSyncDeps = {
+      sessionStore: bs.store,
+      // bs.squadStore/bs.memberStore 为顶层共享句柄（bootstrap 装配）；缺省时自包含 new（UT/旧装配不回归）
+      squadStore: bs.squadStore ?? new SquadStore({ root: dataDir }),
+      memberStore: bs.memberStore ?? new MemberStore({ root: dataDir }),
+      dataDir,
+      ...(bs.appConfig ? { appConfig: bs.appConfig } : {}),
+    };
+    if (path === '/squad/import') {
+      return handleTeamSyncImport(req, method, path, url.searchParams, teamSyncDeps);
+    }
+    if (/^\/squad\/[^/]+\/export$/.test(path)) {
+      return handleTeamSyncExport(method, path, teamSyncDeps);
+    }
+  }
+
   const sd: SquadHandlerDeps = {
     sessionStore: bs.store,
     dataDir,
@@ -61,6 +84,9 @@ export async function dispatchSquadRoutes(
     ...(bs.tokenUsageAggregator ? { tokenUsageAggregator: bs.tokenUsageAggregator } : {}),
     // [v0.0.36] 注入 appConfig（modelDefault/model 写入校验 fail-fast）
     appConfig: bs.appConfig,
+    // [v0.0.305] 注入 squad 聚合 meta 广播器 + MemberStore（写路径 broadcast + GET /squad 聚合计算）
+    ...(bs.squadMetaBroadcaster ? { squadMetaBroadcaster: bs.squadMetaBroadcaster } : {}),
+    ...(bs.memberStore ? { memberStore: bs.memberStore } : {}),
   };
 
   // member 子路径：/squad/:id/member / :mid / :mid/{deploy,bench}（squadId 由 sub-handler 从 path 解析）

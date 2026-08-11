@@ -106,6 +106,12 @@ export interface SquadSummary {
   enableGroupChat: boolean;
   createdAt: string;
   updatedAt: string;
+  /** [v0.0.305] 在线成员数 = member.state==='deployed' 数（与 seats 同口径；optional 旧后端无字段） */
+  onlineCount?: number;
+  /** [v0.0.305] 工作中数 = busy session 数（running/interrupting/suspended；optional 旧后端无字段） */
+  inProgressCount?: number;
+  /** [v0.0.305] 成员最后会话时间 = max(session.updatedAt) ?? squad.updatedAt（optional 旧后端无字段） */
+  lastActiveAt?: string;
 }
 
 /** squad 详情（11a §1.3 GET /squad/:id → SquadDetail，含 members） */
@@ -230,4 +236,16 @@ export interface PatchMemberBody {
   /** 工作方式（可空，空串=清空回写，无 400——区别于 intro） */
   workStyle?: string;
   skillConfig?: MemberSkillConfig;
+}
+
+/**
+ * [v0.0.317] SaveBarController —— tab 级 dirty/saving/save/cancel 上推接口
+ * ManageTab/AutoworkTab 通过 onSaveBarChange 回调上推给 SeatsPanel，
+ * SeatsPanel 据此驱动面板级统一 SaveBar。
+ */
+export interface SaveBarController {
+  dirty: boolean;
+  saving: boolean;
+  save: () => Promise<void>;
+  cancel: () => void;
 }

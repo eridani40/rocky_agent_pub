@@ -6,6 +6,11 @@
 > 数据源: `GET /session/:id/children`（REST，父级 `refreshChildren` 触发拉取写 store；`fetchedRef` 防重复 GET）。**无 SSE 订阅**——`useLifecycle` 仅借来做 unmount 时 abort in-flight，无实时增量；running/terminated 由父 conv-item 注入。
 > 本文是 subagent 展开树的概念权威源：定义三段展开结构、identity 视觉、交互、视觉基线。PRD/编码对齐本文。
 
+## 消费方
+
+- `components/academy-page/component-train-view-col.tsx`
+- `components/chat-page/component-conversation-item.tsx`
+
 ## 职责
 会话列表项（parent session）有 subagent 时，展开显示其派生的 children（swarm）——三段结构：① running subagent 列表 → ② 分割线「非运行中 (N)」+ 展开按钮 → ③ terminated subagent 列表灰显。点击子项切换到该 subagent 只读页面。
 本组件同时是 academy 训练观察页 subagent 树的共享实现（academy 平行版已删）：flat 形态 + onOpenNode 观察入口以 props 表达差异，无 kind 分支。

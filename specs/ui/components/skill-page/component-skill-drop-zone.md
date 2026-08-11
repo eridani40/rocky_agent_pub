@@ -24,3 +24,6 @@ Skill 安装区。支持两种输入：(1) 拖拽（dragover/drop，含文件夹
 - **font**：标题 `.drop-title` 14px/600 `var(--fg)`；sub `.drop-sub` 11px `JetBrains Mono` `var(--muted)`；按钮 12px/600（`.btn` 通用）。
 - **color**：默认底 `var(--surface-2)`；hover/dragOver 底 `var(--accent-surface)`；图标默认 `var(--bg-warm)` 底 + `var(--muted-2)` 字，hover/dragOver → `var(--accent-light)` 底 + `var(--accent)` 字。按钮文字 `var(--fg-3)` → hover `var(--accent)`。
 - **双主题**：全 token，dash/border-strong/阴影圈 token 在 light/dark 都有定义（:16,:24），无需特判。
+
+## 消费方
+- `app/web/src/components/skill-page/page-skill.tsx`

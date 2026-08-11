@@ -33,3 +33,7 @@ interface Props {
 - 字体：名 13px/500；副 11px muted。
 - 边框：仅 hover/active 底色变化，无边框。
 - 配色：logo bg 由 `logoBg` prop 派生（典型 violet-bg / indigo-bg）；active 底色 `--color-accent-light`（=#f4f4f5）。
+
+## 消费方
+
+- `app/web/src/components/academy-page/section-classroom-list.tsx`

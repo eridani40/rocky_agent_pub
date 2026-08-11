@@ -17,6 +17,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Portal } from '../../lib/portal';
 import { isDangerousImageScheme } from '../../lib/link-target';
 import { readWorkspaceFileBinary } from '../../lib/chat-api/workspace-api';
+import { mediaTypeFromPath } from '../../lib/media-type';
 
 // ===== 纯函数（可独立 UT）=====
 
@@ -150,7 +151,7 @@ export function MarkdownImage({ src, alt, baseDir, sessionId, readBinary }: Mark
       const path = info.resolvedPath ?? info.url;
       window.rockyShell?.readFileBinary(path).then((res) => {
         if (res.ok && res.content) {
-          setImgSrc(`data:image/unknown;base64,${res.content}`);
+          setImgSrc(`data:${mediaTypeFromPath(path)};base64,${res.content}`);
           setState('loaded');
         } else if (res.reason === 'too-large') {
           setState('too-large');
@@ -162,21 +163,22 @@ export function MarkdownImage({ src, alt, baseDir, sessionId, readBinary }: Mark
     }
     // relative + baseDir → workspace 或 absolute resolve
     if (info.type === 'relative' && info.resolvedPath) {
+      const resolvedPath = info.resolvedPath; // 提取局部变量（闭包内类型收窄保持）
       setState('loading');
       if (sessionId) {
         // workspace 相对 → readWorkspaceFileBinary（HTTP）或 DI readBinary（UT）
         const readFn = readBinary ?? ((sid, path) => readWorkspaceFileBinary(sid, { path }).then((r) => r.content));
-        readFn(sessionId, info.resolvedPath)
+        readFn(sessionId, resolvedPath)
           .then((content: string) => {
-            setImgSrc(`data:image/unknown;base64,${content}`);
+            setImgSrc(`data:${mediaTypeFromPath(resolvedPath)};base64,${content}`);
             setState('loaded');
           })
           .catch(() => setState('error'));
       } else {
         // joinPath 后是 absolute → readFileBinary IPC
-        window.rockyShell?.readFileBinary(info.resolvedPath).then((res) => {
+        window.rockyShell?.readFileBinary(resolvedPath).then((res) => {
           if (res.ok && res.content) {
-            setImgSrc(`data:image/unknown;base64,${res.content}`);
+            setImgSrc(`data:${mediaTypeFromPath(resolvedPath)};base64,${res.content}`);
             setState('loaded');
           } else if (res.reason === 'too-large') {
             setState('too-large');

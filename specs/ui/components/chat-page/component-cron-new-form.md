@@ -4,6 +4,10 @@
 > 文件: app/web/src/components/chat-page/component-cron-new-form.tsx
 > 数据契约: `specs/api/overall/16-cron.md` §2（POST /session/:sid/cron）
 
+## 消费方
+
+- `components/chat-page/component-cron-modal.tsx`
+
 ## 1. 定位
 
 ## Props

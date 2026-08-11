@@ -14,13 +14,19 @@
  *   - 不进 app-settings-config-defs.ts 的 KV_GROUPS
  *   - baseline null/缺失 → 显示 true（安全默认）
  */
-import { useCallback, useEffect, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState, type ForwardedRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { req } from '../../lib/api-client';
 import { ToggleSwitch } from '../framework/primitives/toggle-switch';
+import type { SectionSaveHandle } from './use-tab-dirty-aggregator';
 
-/** bash 配置 section（bash_seatbelt boolean toggle） */
-export function SectionBashConfig() {
+/** [v0.0.316-fix] section props：onDirtyChange 上报 dirty 变化给 tab aggregator */
+interface SectionBashConfigProps {
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+/** bash 配置 section（bash_seatbelt boolean toggle；forwardRef 暴露 save/reset 给 tab 级 aggregator） */
+export const SectionBashConfig = forwardRef<SectionSaveHandle, SectionBashConfigProps>(function SectionBashConfig({ onDirtyChange }, ref: ForwardedRef<SectionSaveHandle>) {
   const { t } = useTranslation('app-dev-config');
   const [baseline, setBaseline] = useState<boolean>(true);
   const [draft, setDraft] = useState<boolean>(true);
@@ -80,6 +86,17 @@ export function SectionBashConfig() {
     setDraft(baseline);
   };
 
+  /** [v0.0.316-fix] dirty 变化上报 page（声明式通知，驱动 save bar 亮） */
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  /** [v0.0.316-fix] 暴露 save/reset 给 tab 级 aggregator（dirty 走 onDirtyChange 上报） */
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    reset: handleReset,
+  }), [handleSave, handleReset]);
+
   if (loading) {
     return (
       <div className="p-8 text-muted text-sm">
@@ -126,29 +143,8 @@ export function SectionBashConfig() {
           {t('bash.restartNotice')}
         </p>
       )}
-
-      {/* save/reset toolbar（saveMode='item' 自管，无 component-group-save-bar） */}
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={handleReset}
-          disabled={!dirty || saving}
-          className="text-xs text-muted hover:text-fg-2 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {t('bash.reset')}
-        </button>
-        <button
-          type="button"
-          data-testid="bash-config-save"
-          onClick={() => void handleSave()}
-          disabled={!dirty || saving}
-          className="text-xs px-3 py-1 rounded-md bg-accent text-surface disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving ? t('bash.saving') : t('bash.save')}
-        </button>
-      </div>
     </div>
   );
-}
+});
 
 export default SectionBashConfig;

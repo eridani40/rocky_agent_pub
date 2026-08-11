@@ -55,3 +55,8 @@ interface Props {
 - 字体：iter-ver mono 12.5px/600；iter-score mono 12px/600；step 12.5px；working-link 11px。
 - 边框：iter-item border；cur 加 border-accent + shadow-xs；iter-detail top border。
 - 配色：gate-tag sage/danger/gold；step-dot sage ✓ / gold 进行 / muted 数字 / indigo spin；working-link `--color-indigo`；reflect-box `--color-violet-bg` + fg-2。
+
+## 消费方
+
+- `app/web/src/components/academy-page/component-train-view-col.tsx`
+- `app/web/src/components/academy-page/section-training-observe.tsx`

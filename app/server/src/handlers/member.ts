@@ -175,6 +175,8 @@ async function handleDeploy(
   const { memberStore } = makeStores(deps);
   try {
     const member = await deployMemberService({ memberStore }, squadId, memberId);
+    // [v0.0.305] 落盘成功后 broadcast squad 聚合（在线数变化；PRD §4.4.2）
+    deps.squadMetaBroadcaster?.broadcast(squadId);
     return json(200, { member });
   } catch (e) {
     if (e instanceof MemberNotFoundError) return json(404, { error: 'member not found' });
@@ -204,6 +206,8 @@ async function handleBench(
   const { memberStore } = makeStores(deps);
   try {
     const member = await benchMemberService({ memberStore }, squadId, memberId, body.reason);
+    // [v0.0.305] 落盘成功后 broadcast squad 聚合（在线数变化；PRD §4.4.2）
+    deps.squadMetaBroadcaster?.broadcast(squadId);
     return json(200, { member });
   } catch (e) {
     if (e instanceof MemberNotFoundError) return json(404, { error: 'member not found' });

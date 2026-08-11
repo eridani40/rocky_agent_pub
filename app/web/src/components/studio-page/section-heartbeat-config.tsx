@@ -7,10 +7,13 @@
  * 职责：为整个 squad 配置心跳调度参数（间隔 + 多工作时间段 + 范围）。
  * 写走 PATCH /squad/:id { heartbeatConfig }，非旧 member 心跳端点。
  * 总开关关时显示 disabled 提示（heartbeat-disabled-by-killswitch），配置保存但不生效。
+ *
+ * [v0.0.316 P1] 受控化：从「自管 draft + save/reset 按钮 + onSave PATCH」改为「受控 + onChange 上报」。
+ *   三子控件（interval / activeWindows / scope）改 draft 后汇总为一个 heartbeatConfig 对象上报 onChange；
+ *   不再自管 PATCH（父级 AutoworkTab 统一 save）；去掉 save/reset 按钮 + pending/error 自管态。
  */
-import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Member, PatchSquadBody, SquadHeartbeatConfig } from './squad-types';
+import type { Member, SquadHeartbeatConfig } from './squad-types';
 import { FIELD_LABEL, FIELD_HINT } from './studio-styles';
 import { HeartbeatWindowList } from './heartbeat-window-list';
 import { HeartbeatScopePicker } from './heartbeat-scope-picker';
@@ -26,72 +29,31 @@ const DEFAULT_CONFIG: SquadHeartbeatConfig = {
 };
 
 interface HeartbeatConfigProps {
-  squadId: string;
   enableHeartBeat: boolean;
+  /** 当前配置（受控：来自父级 draft；null = 未配置，用 DEFAULT_CONFIG 基线展示） */
   heartbeatConfig: SquadHeartbeatConfig | null;
   members: Member[];
   timezone: string;
-  onSave: (patch: PatchSquadBody) => Promise<void>;
+  /** 上报变更（子控件改 draft 后汇总为完整 heartbeatConfig 对象）→ 父级 dirty */
+  onChange: (config: SquadHeartbeatConfig) => void;
 }
 
-/** squad 级心跳配置 section */
-export function HeartbeatConfigSection({ squadId, enableHeartBeat, heartbeatConfig, members, timezone, onSave }: HeartbeatConfigProps) {
+/**
+ * squad 级心跳配置 section。[v0.0.316] 受控模式：
+ * 值从 props.heartbeatConfig 派生（非自管 useState）；子控件改动汇总 onChange 上报；无自管 PATCH。
+ */
+export function HeartbeatConfigSection({ enableHeartBeat, heartbeatConfig, members, timezone, onChange }: HeartbeatConfigProps) {
   const { t } = useTranslation(['studio', 'common']);
 
-  // 编辑态（基线 = heartbeatConfig ?? 默认）
+  // 受控派生：基线 = props.heartbeatConfig ?? DEFAULT_CONFIG（父级 draft 直灌，无本地 useState）
   const base = heartbeatConfig ?? DEFAULT_CONFIG;
-  const [interval, setInterval] = useState<number>(base.interval);
-  const [activeWindows, setActiveWindows] = useState(base.activeWindows);
-  const [scope, setScope] = useState(base.scope);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // 外部 heartbeatConfig 变化时重置编辑态（保存成功后父级 refresh 回灌）
-  useEffect(() => {
-    const b = heartbeatConfig ?? DEFAULT_CONFIG;
-    setInterval(b.interval);
-    setActiveWindows(b.activeWindows);
-    setScope(b.scope);
-    setError(null);
-  }, [heartbeatConfig]);
-
-  // dirty 判定
-  const dirty =
-    interval !== base.interval ||
-    JSON.stringify(activeWindows) !== JSON.stringify(base.activeWindows) ||
-    JSON.stringify(scope) !== JSON.stringify(base.scope);
-
-  const handleSave = async () => {
-    if (pending) return;
-    setError(null);
-    setPending(true);
-    try {
-      await onSave({
-        heartbeatConfig: { interval, activeWindows, scope },
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('common:error.saveFail'));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handleReset = async () => {
-    if (pending) return;
-    setError(null);
-    setPending(true);
-    try {
-      await onSave({ heartbeatConfig: null });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('common:error.saveFail'));
-    } finally {
-      setPending(false);
-    }
-  };
+  const interval = base.interval;
+  const activeWindows = base.activeWindows;
+  const scope = base.scope;
 
   return (
-    <div data-squad-id={squadId} className="flex flex-col gap-3">
-      {/* 总开关关时提示（非阻断，保存仍可操作） */}
+    <div className="flex flex-col gap-3">
+      {/* 总开关关时提示（非阻断，配置仍可编辑攒入 draft） */}
       {!enableHeartBeat && (
         <div
 
@@ -112,10 +74,9 @@ export function HeartbeatConfigSection({ squadId, enableHeartBeat, heartbeatConf
               key={opt}
               type="button"
 
-              disabled={pending}
-              onClick={() => setInterval(opt)}
+              onClick={() => onChange({ interval: opt, activeWindows, scope })}
               className={
-                'rounded-md border px-3 py-1 font-mono text-[12px] transition-colors disabled:opacity-50 ' +
+                'rounded-md border px-3 py-1 font-mono text-[12px] transition-colors ' +
                 (interval === opt
                   ? 'border-accent bg-accent/10 text-accent'
                   : 'border-border-2 bg-surface text-muted-2 hover:border-accent hover:text-accent')
@@ -145,8 +106,7 @@ export function HeartbeatConfigSection({ squadId, enableHeartBeat, heartbeatConf
         <div className="mt-1.5">
           <HeartbeatWindowList
             windows={activeWindows}
-            disabled={pending}
-            onChange={setActiveWindows}
+            onChange={(windows) => onChange({ interval, activeWindows: windows, scope })}
           />
         </div>
       </div>
@@ -160,42 +120,9 @@ export function HeartbeatConfigSection({ squadId, enableHeartBeat, heartbeatConf
           <HeartbeatScopePicker
             scope={scope}
             members={members}
-            disabled={pending}
-            onChange={setScope}
+            onChange={(s) => onChange({ interval, activeWindows, scope: s })}
           />
         </div>
-      </div>
-
-      {/* 错误 banner */}
-      {error && (
-        <div
-
-          className="rounded-md border border-danger/40 bg-danger/5 px-2.5 py-1.5 text-[11.5px] text-danger"
-        >
-          {error}
-        </div>
-      )}
-
-      {/* 操作按钮 */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-
-          disabled={!dirty || pending}
-          onClick={() => void handleSave()}
-          className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-accent-hover disabled:opacity-40"
-        >
-          {pending ? t('common:status.saving') : t('studio:heartbeat.save', { defaultValue: '保存心跳配置' })}
-        </button>
-        <button
-          type="button"
-
-          disabled={pending}
-          onClick={() => void handleReset()}
-          className="rounded-md border border-border-2 bg-surface px-3 py-1.5 text-[12px] text-muted-2 hover:border-accent hover:text-accent disabled:opacity-40"
-        >
-          {t('studio:heartbeat.reset', { defaultValue: '重置默认' })}
-        </button>
       </div>
     </div>
   );

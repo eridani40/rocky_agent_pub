@@ -1,0 +1,90 @@
+# team_sync_import_dup_tc5 — 导入重名建队（后端允许重名 → 201，两个同名 squad 共存）
+#
+# 覆盖契约：
+#   - specs/tech/version_logs/v0.0.319/change_plan.md D2+D3：execute 建队调 createSquadService
+#     （squad 级 name 无唯一性校验，仅非空；成员名才是 squad 内唯一）→ 重名导入 201 成功
+#   - test-plan team_sync_import_dup_tc5：导入时 name 与已有 squad 同名 → execute
+#     201 成功（后端允许重名），本地两个同名 squad
+#   - PRD UC-4「导入重名团队名 → 提醒不拦」：重名检测在前端（listSquads 比对），
+#     后端不拒绝 → AT 断言建队成功 + 新旧两 squad 同名共存
+#
+# 设计说明：
+#   - setup 先建一个 name=ts-dup-name 的 squad（模拟「已有同名团队」）
+#   - preview 合法 zip（同 tc2 fixture）→ execute name=ts-dup-name（与已有同名）
+#   - 断言 execute 201 + squadId + created 非空；GET 新旧两个 squad 的 name 均为
+#     ts-dup-name（两 ULID 不同 → 两个同名 squad 同时存在）
+#   - check 右侧不插值 → 用 request path 插值（{dup_new_id}/{dup_existing_id}）分别 GET
+#
+# 不调 LLM：纯 HTTP（建队 + preview + execute + GET），全确定性。
+case: team_sync_import_dup_tc5
+module: squad
+timeout: 60
+
+setup:
+  - name: 建已有同名 squad（模拟本地已存在 ts-dup-name 团队）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "ts-dup-name"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "ts-dup-leader"
+    save:
+      dup_existing_id: .id
+    check:
+      - .id exists
+
+steps:
+  - name: preview 合法 zip → importKey
+    requests:
+      - method: POST
+        path: /squad/import?step=preview
+        multipart:
+          file:
+            filename: team.zip
+            content: "UEsDBBQAAAAIANyJCl08vMhc2AAAACUCAAANAAAAbWFuaWZlc3QuanNvbpWQPW7DMAyF95yC8BxfoGunLL1AURSSzTRE9ROQdDIEvnslKnXdBgnQRYLf9/j45MsGoJMwfXRP0Kn0FI+ZtRceelO3lScX8YY3NKIMTEelnJoDmgMqaJaAbkR++clowhruknK+zjcFyCTz+ImCUs3fuyBoWsTokaVor+UT4GLn767RKfbOMgzRaktl4FZbzCGfFMJzTnuq/+M7s67Lo6VSOiCTLhMF5RMyU3lunZivervn7eNu/kE3/+9uwySa491qi1zAGf27oOPhUIjyhAv884Byvm3mL1BLAwQUAAAACADciQpdiQDzQBUAAAATAAAACQAAAEFHRU5UUy5tZFNWKClWyMwtyC8qUXB0d/ULCeYCAFBLAwQUAAAACADciQpdwK/Y+BcAAAAVAAAAGgAAAC5yb2NreS9hZ2VudHMvdHMtbWF0ZS1hLm1kU1YoKVbITSxJVUhUKEgtKs7PS8zhAgBQSwMEFAAAAAgA3IkKXcHJOmEXAAAAFQAAABoAAAAucm9ja3kvYWdlbnRzL3RzLW1hdGUtYi5tZFNWKClWyE0sSVVIUihILSrOz0vM4QIAUEsDBBQAAAAIANyJCl2XGKM2DQAAAAsAAAAZAAAALnJvY2t5L3NraWxscy90cy1za2lsbC5tZFNWKClWKM7OzMnhAgBQSwECFAMUAAAACADciQpdPLzIXNgAAAAlAgAADQAAAAAAAAAAAAAAgAEAAAAAbWFuaWZlc3QuanNvblBLAQIUAxQAAAAIANyJCl2JAPNAFQAAABMAAAAJAAAAAAAAAAAAAACAAQMBAABBR0VOVFMubWRQSwECFAMUAAAACADciQpdwK/Y+BcAAAAVAAAAGgAAAAAAAAAAAAAAgAE/AQAALnJvY2t5L2FnZW50cy90cy1tYXRlLWEubWRQSwECFAMUAAAACADciQpdwck6YRcAAAAVAAAAGgAAAAAAAAAAAAAAgAGOAQAALnJvY2t5L2FnZW50cy90cy1tYXRlLWIubWRQSwECFAMUAAAACADciQpdlxijNg0AAAALAAAAGQAAAAAAAAAAAAAAgAHdAQAALnJvY2t5L3NraWxscy90cy1za2lsbC5tZFBLBQYAAAAABQAFAEkBAAAhAgAAAAA="
+            content_type: application/zip
+            encoding: base64
+    save:
+      import_key: .importKey
+    check:
+      - .importKey exists
+
+  - name: execute 用与已有 squad 同名建队 → 201 成功（后端不拒重名）
+    requests:
+      - method: POST
+        path: /squad/import?step=execute
+        multipart:
+          importKey: "{import_key}"
+          name: "ts-dup-name"
+    save:
+      dup_new_id: .squadId
+    check:
+      - .squadId exists
+      - .created[] any . == "ts-mate-a"
+      - .created[] any . == "ts-mate-b"
+
+  - name: 新 squad 存在且名为 ts-dup-name
+    requests:
+      - GET /squad/{dup_new_id}
+    check:
+      - .id exists
+      - .name == "ts-dup-name"
+
+  - name: 旧 squad 仍存在且同名（两个同名 squad 共存）
+    requests:
+      - GET /squad/{dup_existing_id}
+    check:
+      - .id exists
+      - .name == "ts-dup-name"
+
+teardown:
+  - name: 清理两个同名 squad（AT 独立 DATA_DIR，清残留）
+    requests:
+      - method: DELETE
+        path: /squad/{dup_new_id}
+        status: [200, 404]
+      - method: DELETE
+        path: /squad/{dup_existing_id}
+        status: [200, 404]

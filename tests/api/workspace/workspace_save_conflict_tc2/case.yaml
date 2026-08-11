@@ -1,0 +1,104 @@
+# workspace_save_conflict_tc2 — POST save 乐观锁冲突 + force 覆盖（v0.0.320）
+#
+# 覆盖契约：
+#   - specs/api/version_logs/v0.0.320/change_log.md §1.2：POST /session/:id/workspace/file/save
+#     body {path, content, expectedVersion?, force?}：
+#       - expectedVersion 缺失或 force=true → 跳过校验（last-write-wins）
+#       - expectedVersion 匹配当前磁盘 version → 200 {ok:true, version}
+#       - expectedVersion 不匹配 → 409 {error:'conflict', currentVersion}，不写盘
+#   - specs/api/overall/04-agent-session.md §2.6.7（save 端点既有语义：path 相对 workspaceDir）
+#
+# 设计说明：
+#   - setup 建 session + files 写 conflict.md（内容 A，size 较小）
+#   - step1 GET 拿 version V1（save v1）
+#   - step2 files 原语重写 conflict.md（内容 B，size 变大）→ 模拟外部修改（mtime+size 均变 → version 必变）
+#   - step3 save expectedVersion={v1} → 409 {error:'conflict', currentVersion exists}
+#   - step4 GET 读回 → content 仍是 B（409 不写盘，外部内容保留）
+#   - step5 save force:true → 200 {ok:true, version exists}
+#   - step6 GET 读回 → content == "force-overwrite-content"（force 覆盖成功）
+#
+# 注意：
+#   - check 右侧不插值：conflict 断言用 .error == "conflict"（字面量），currentVersion 只断 exists
+#   - 不调 LLM：纯 HTTP + files 原语，全确定性。
+case: workspace_save_conflict_tc2
+module: workspace
+timeout: 60
+
+setup:
+  - name: 建 session（workspaceDir 自动建 <DATA_DIR>/workspaces/{sid}）
+    requests:
+      - method: POST
+        path: /session
+        body:
+          title: "ws-conflict-tc2"
+    save:
+      sid: .id
+    check:
+      - .id exists
+
+  - name: 写初始文件 conflict.md（内容 A）
+    files:
+      - path: "workspaces/{sid}/conflict.md"
+        content: { marker: "initial-A" }
+
+steps:
+  - name: 读文件 → 拿 version V1
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/file?path=conflict.md
+    save:
+      v1: .version
+    check:
+      - .version exists
+      - .version ~= ":"
+
+  - name: 外部修改 conflict.md（内容 B，size 变化 → version 必变）
+    files:
+      - path: "workspaces/{sid}/conflict.md"
+        content: { marker: "external-B", extra: "make-size-different-1234567890" }
+
+  - name: save expectedVersion=V1 → 409 conflict + currentVersion，不写盘
+    requests:
+      - method: POST
+        path: /session/{sid}/workspace/file/save
+        status: [409]
+        body:
+          path: "conflict.md"
+          content: "overwrite-attempt"
+          expectedVersion: "{v1}"
+    check:
+      - .error == "conflict"
+      - .currentVersion exists
+
+  - name: 读回 → 内容仍是外部修改 B（409 未覆盖）
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/file?path=conflict.md
+    check:
+      - .content ~= "external-B"
+
+  - name: save force:true → 200 覆盖成功 + 新 version
+    requests:
+      - method: POST
+        path: /session/{sid}/workspace/file/save
+        body:
+          path: "conflict.md"
+          content: "force-overwrite-content"
+          force: true
+    check:
+      - .ok == true
+      - .version exists
+
+  - name: 读回 → 内容 == force 覆盖内容（force 生效）
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/file?path=conflict.md
+    check:
+      - .content == "force-overwrite-content"
+
+teardown:
+  - name: 清理 session
+    requests:
+      - method: DELETE
+        path: /session/{sid}
+        status: [204, 404]

@@ -27,3 +27,7 @@ Studio 复制 Session ID 的右键浮层菜单——`fixed` 定位（左上锚�
 - 被组合: `component-seats-panel.tsx`（seats-panel 持 contextMenu state + 渲染 primitiv
 - 组合: 无（纯 UI + i18n）
 - 触发上抛（自坐席卡 / 队长卡群聊按钮 → SeatsBody `onContextMenu` prop → SeatsPanel `openContext
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-seats-panel.tsx`

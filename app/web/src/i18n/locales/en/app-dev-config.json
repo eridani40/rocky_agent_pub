@@ -12,31 +12,87 @@
     "discardConfirmCancel": "Cancel"
   },
   "tab": {
-    "general": { "label": "General" },
-    "session": { "label": "Session" },
-    "models": { "label": "Models" },
-    "tools": { "label": "Tools" },
-    "memory": { "label": "Memory" },
-    "observability": { "label": "Observability" },
-    "consolidation": { "label": "Consolidation" },
-    "plugin": { "label": "Plugins" }
+    "general": {
+      "label": "General"
+    },
+    "session": {
+      "label": "Session"
+    },
+    "models": {
+      "label": "Models"
+    },
+    "tools": {
+      "label": "Tools",
+      "web_search": "Web Search",
+      "web_fetch": "Web Fetch",
+      "see_image": "See Image",
+      "bash": "Bash"
+    },
+    "memory": {
+      "label": "Memory"
+    },
+    "observability": {
+      "label": "Observability"
+    },
+    "consolidation": {
+      "label": "Consolidation"
+    },
+    "plugin": {
+      "label": "Plugins"
+    },
+    "config_sync": {
+      "label": "Config Sync"
+    },
+    "team_sync": {
+      "label": "Team Sync"
+    }
   },
   "group": {
-    "appearance": { "label": "Appearance" },
-    "providers": { "label": "Providers" },
-    "web_search": { "label": "Web Search" },
-    "web_fetch": { "label": "Web Fetch" },
-    "see_image": { "label": "See Image" },
-    "bash": { "label": "Bash Tool" },
-    "locale": { "label": "Language" },
-    "user_memory": { "label": "Long-term Memory" },
-    "llm_request": { "label": "LLM Request" },
-    "default_models": { "label": "Playground Default Models" },
-    "observability": { "label": "Observability" },
-    "logs": { "label": "Logs" },
-    "plugin": { "label": "Plugin" },
-    "session": { "label": "Session Injection Limits" },
-    "consolidation": { "label": "Consolidation" }
+    "appearance": {
+      "label": "Appearance"
+    },
+    "providers": {
+      "label": "Providers"
+    },
+    "web_search": {
+      "label": "Web Search"
+    },
+    "web_fetch": {
+      "label": "Web Fetch"
+    },
+    "see_image": {
+      "label": "See Image"
+    },
+    "bash": {
+      "label": "Bash Tool"
+    },
+    "locale": {
+      "label": "Language"
+    },
+    "user_memory": {
+      "label": "Long-term Memory"
+    },
+    "llm_request": {
+      "label": "LLM Request"
+    },
+    "default_models": {
+      "label": "Playground Default Models"
+    },
+    "observability": {
+      "label": "Observability"
+    },
+    "logs": {
+      "label": "Logs"
+    },
+    "plugin": {
+      "label": "Plugin"
+    },
+    "session": {
+      "label": "Session Injection Limits"
+    },
+    "consolidation": {
+      "label": "Consolidation"
+    }
   },
   "userMemory": {
     "title": "Global long-term memory",
@@ -240,6 +296,68 @@
         "label": "Log Performance",
         "desc": "Log slow queries (persistence queries over 200ms) to logs/performance.log (entity/duration/row count, for locating bottlenecks)"
       }
+    }
+  },
+  "team_sync": {
+    "desc": "Export the current squad config to a zip, or import a zip to create a new squad (AGENTS.md, member defs, skills, memory, templates, commands, settings).",
+    "export_btn": "Export Squad",
+    "import_btn": "Import Squad",
+    "cancel_btn": "Cancel",
+    "no_squad_hint": "The current session does not belong to any squad. You can still click \"Export Squad\" to pick a squad from the list.",
+    "export_success": "Export succeeded — browser is downloading the zip file",
+    "export_picker": {
+      "title": "Select a squad to export",
+      "loading": "Loading...",
+      "load_failed": "Failed to load squad list",
+      "retry": "Retry",
+      "empty": "No squads available to export",
+      "member_count": "{{count}} members",
+      "confirm": "Confirm"
+    },
+    "import_invalid": "Please select a valid squad export file (.zip)",
+    "import_failed": "Import failed",
+    "preview_team": "Squad name",
+    "preview_leader": "Leader",
+    "preview_members": "Members ({{count}})",
+    "name_label": "New squad name",
+    "dup_warning": "A squad with the same name already exists; importing will create two squads with the same name",
+    "confirm_title": "Confirm Import",
+    "confirm_body": "About to create squad \"{{name}}\" with {{count}} members. Continue?",
+    "confirm_ok": "Import",
+    "import_success": "Import succeeded: squad \"{{name}}\" created ({{count}} members)",
+    "imported_hint": "Import finished. Check the squad list for the new squad."
+  },
+  "config_sync": {
+    "loading": "Loading...",
+    "back": "Back",
+    "tree": {
+      "providers": "Model Config",
+      "tools": "Tool Config",
+      "empty_providers": "No model configs to export",
+      "duplicate_label": "Duplicate name"
+    },
+    "export": {
+      "title": "Export Config",
+      "desc": "Export model and tool configs as an encrypted file",
+      "do_export": "Export",
+      "exporting": "Exporting...",
+      "success": "Exported: {{providerCount}} model configs, {{toolCount}} tool configs",
+      "failed": "Export failed, please retry",
+      "load_failed": "Failed to load config"
+    },
+    "import": {
+      "title": "Import Config",
+      "desc": "Import model and tool configs from an encrypted file",
+      "do_import": "Import",
+      "importing": "Importing...",
+      "reselect": "Select another file",
+      "parse_failed": "Failed to parse file",
+      "success": "Imported: {{providerCount}} model configs, {{toolCount}} tool configs",
+      "failed": "Import failed, please retry",
+      "confirm_title": "Confirm Import",
+      "confirm_body": "About to import {{providerCount}} model configs and {{toolCount}} tool configs. Tool configs will overwrite existing settings. Continue?",
+      "confirm_ok": "Confirm Import",
+      "confirm_cancel": "Cancel"
     }
   }
 }

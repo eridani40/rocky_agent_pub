@@ -41,11 +41,15 @@ import type { ChannelManager } from './channel/channel-manager';
 import type { DriverRegistry } from './tools/browser/pick-driver';
 import type { ContextEngine } from './agent/context-engine';
 import type { AgentManagerImpl } from './agent/agent-manager';
+// [v0.0.307] ToolExecutionEngine 类型（BootstrapResult.toolEngine 字段声明用）
+import type { ToolExecutionEngine } from './tools/engine';
 import type { SessionTypePolicy } from './agent/session-type-policy';
 import type { InboxStore } from './agent/inbox';
 import type { SessionWorkspaceManager } from './agent/session-workspace-manager';
 import type { SessionUnreadRuntime } from './agent/session-unread-runtime';
 import type { SessionMetaBroadcaster } from './agent/session-meta-broadcaster';
+// [v0.0.305] squad 层聚合 meta 广播器（BootstrapResult 透传 → router → SquadHandlerDeps）
+import type { SquadMetaBroadcaster } from './squad/squad-meta-broadcaster';
 import type { AutoNamingService } from './agent/auto-naming-service';
 import type { ObservabilityManager } from './observability/index';
 import type { MentionProviderRegistry } from './mention';
@@ -107,6 +111,8 @@ export interface BootstrapResult {
   store: SessionStore;
   /** session 级 agent 管理器（enqueue/activate/subscribe） */
   agentManager: AgentManagerImpl;
+  /** [v0.0.307] ToolExecutionEngine（UT 验证 workerPool 注入用；router 不直接消费） */
+  toolEngine: ToolExecutionEngine;
   /** SessionTypePolicy — profile yaml 单源驱动工具解析（router.sessionDeps 透传给 debug 端点等） */
   sessionTypePolicy: SessionTypePolicy;
   /**
@@ -131,6 +137,13 @@ export interface BootstrapResult {
   appTaskLock: AppTaskLock;
   /** [v0.0.189] panorama topic bus（业务全景看板 SSE 广播；router 透传给 squad-routes + agent-phase rtc） */
   panoramaBus: ReplayableEventBus;
+  /** [v0.0.305] squad_meta topic bus（squad 聚合状态 SSE 广播；broadcaster emit 到 _all group） */
+  squadMetaBus: ReplayableEventBus;
+  /**
+   * [v0.0.305] SquadMetaBroadcaster —— squad 层聚合 meta 广播器（订阅 statusBus 自治 + handler
+   * 写路径显式 broadcast）。router 透传给 squad-routes → SquadHandlerDeps（写路径 broadcast）。
+   */
+  squadMetaBroadcaster: SquadMetaBroadcaster;
   /** SSE 桥后端对象（GET /sse / subscribe / unsubscribe） */
   sseChannel: SseChannel;
   /**
@@ -211,6 +224,12 @@ export interface BootstrapResult {
    * 与 setBuildAgentToolContext 内部 squadStoreForCtx 复用同一句柄。
    */
   squadStore: SquadStore;
+  /**
+   * [v0.0.305] MemberStore（顶层共享句柄，与 squadStore 同款无状态封装读 {root}/squads/*）。
+   * router buildCronRouteDeps / squad-routes 读此字段注入 handler（squad 聚合计算 listMembers 用）。
+   * 与 bootstrapMentionRegistry 内部 memberStoreForMention 复用同一句柄。
+   */
+  memberStore: MemberStore;
   /**
    * [v0.0.223] TodoStore — session 级双层 todo 持久化（独立 store，仿 cron）。
    * router buildTodoRouteDeps 读此字段注入 handleTodoRoute；todo 工具经 rtc.sessionDeps.todoStore 读；
@@ -365,7 +384,7 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
 
   // Phase 6 装配（EventHub + ReplayableEventBus + SseChannel + SSE test interceptor）。
   // 纯 move 到 bootstrap-bus-phase.ts（v0.0.156 结构性拆分）。
-  const { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, sseChannel } =
+  const { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, squadMetaBus, sseChannel } =
     await bootstrapBusPhase(logWriter);
 
   // workdir=<DATA_DIR>/workspace（启动期建；handler 也会幂等 mkdir 防外部删）
@@ -388,8 +407,8 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
   // 纯 move 到 bootstrap-store-phase.ts（v0.0.156 结构性拆分）。
   // 关键时序（INV-C-1）：reconcileOnStartup 必须在 unreadRuntime.start 前——reconcile 期间
   // enabled=false 挡住 emit 不产未读（spec 不变量 4）。
-  const { store, unreadRuntime, sessionMetaBroadcaster, taskLock, appTaskLock, tokenUsageAggregator, academyStore } =
-    await bootstrapStorePhase(dataDir, sessionStatusBus, sessionMetaBus, sseChannel, logWriter);
+  const { store, unreadRuntime, sessionMetaBroadcaster, taskLock, appTaskLock, tokenUsageAggregator, academyStore, squadMetaBroadcaster } =
+    await bootstrapStorePhase(dataDir, sessionStatusBus, sessionMetaBus, squadMetaBus, sseChannel, logWriter);
 
   // Phase 8 装配（ToolEngine + ContextEngine + AgentManager + 三个 runner 注入）。
   // 纯 move 到 bootstrap-agent-phase.ts（v0.0.156 结构性拆分）。
@@ -473,6 +492,8 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
     bus,
     store,
     agentManager,
+    // [v0.0.307] ToolExecutionEngine（UT 验证 workerPool 注入用）
+    toolEngine,
     sessionTypePolicy,
     contextEngine,
     // SessionTaskLock 单例（router 透传给 session handler）
@@ -480,6 +501,8 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
     // [v0.0.164] AppTaskLock 单例（router 透传给 consolidation-run handler + cron handler）
     appTaskLock,
     panoramaBus,
+    squadMetaBus,
+    squadMetaBroadcaster,
     sseChannel,
     workspaceManager: searchResult.workspaceManager,
     connectorManager: connectorsResult.connectorManager,
@@ -502,6 +525,8 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
     // squadStore 顶层共享（cron handler 取 squad.timezone fallback 用）；
     // 与 setBuildAgentToolContext 闭包外预建的 squadStoreForCtx 复用同一句柄。
     squadStore: squadStoreForCtx,
+    // [v0.0.305] MemberStore 顶层共享（squad 聚合计算 listMembers 用；router 透传 handler）
+    memberStore: memberStoreForMention,
     // [v0.0.223] TodoStore（router buildTodoRouteDeps 读注入 handleTodoRoute；
     // todo 工具经 rtc.sessionDeps.todoStore 读；reminder 经 ctx.todoStore 读）
     todoStore,

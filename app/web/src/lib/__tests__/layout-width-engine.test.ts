@@ -24,9 +24,14 @@ import {
   CONV_WIDTH_DEFAULT,
   MIDDLE_MIN,
   MIDDLE_COMFORT,
+  CHAT_WIDTH_MIN,
+  PV_WIDTH_MIN,
+  PV_WIDTH_MAX,
+  PV_WIDTH_DEFAULT,
   clampMiddleDefend,
   clampSidebar,
   dragDynMax,
+  dragDynMax4,
   computeThreeColLayout,
   type ThreeColLayoutInput,
 } from '../layout-width-engine';
@@ -47,9 +52,11 @@ function chatInput(available: number, over: Partial<ThreeColLayoutInput> = {}): 
 
 describe('宽度常量组（PRD §2.1 槽位表唯一权威源）', () => {
   it('9 常量数值与契约一致', () => {
-    expect([WS_WIDTH_MIN, WS_WIDTH_MAX, WS_WIDTH_DEFAULT, WS_RAIL_WIDTH]).toEqual([232, 560, 272, 36]);
+    // [v0.0.320] WS_WIDTH_MAX 560→1600（近全屏语义，PRD §2.1）+ PV_* 预览区常量
+    expect([WS_WIDTH_MIN, WS_WIDTH_MAX, WS_WIDTH_DEFAULT, WS_RAIL_WIDTH]).toEqual([232, 1600, 272, 36]);
     expect([CONV_WIDTH_MIN, CONV_WIDTH_MAX, CONV_WIDTH_DEFAULT]).toEqual([180, 400, 220]);
     expect([MIDDLE_MIN, MIDDLE_COMFORT]).toEqual([480, 932]);
+    expect([CHAT_WIDTH_MIN, PV_WIDTH_MIN, PV_WIDTH_MAX, PV_WIDTH_DEFAULT]).toEqual([320, 240, 1600, 360]);
   });
 });
 
@@ -161,9 +168,10 @@ describe('槽位组合（PRD §5 studio / chat 无右栏）', () => {
 });
 
 describe('clampSidebar 静态界（PRD §2.2 / UC-8）', () => {
-  it('#14 静态 max/min：setting=999→560(right)/400(left)；setting=100→232/180', () => {
-    expect(clampSidebar(999, Number.POSITIVE_INFINITY, 'right')).toBe(560);
+  it('#14 静态 max/min：setting=999→999(right，<1600 不截断)/400(left)；setting=2000→1600；100→232/180', () => {
+    expect(clampSidebar(999, Number.POSITIVE_INFINITY, 'right')).toBe(999);
     expect(clampSidebar(999, Number.POSITIVE_INFINITY, 'left')).toBe(400);
+    expect(clampSidebar(2000, Number.POSITIVE_INFINITY, 'right')).toBe(1600);
     expect(clampSidebar(100, Number.POSITIVE_INFINITY, 'right')).toBe(232);
     expect(clampSidebar(100, Number.POSITIVE_INFINITY, 'left')).toBe(180);
   });
@@ -171,5 +179,163 @@ describe('clampSidebar 静态界（PRD §2.2 / UC-8）', () => {
   it('#14b dynMax < 静态 min → min 永远赢（宁横滚不破侧栏下限）', () => {
     expect(clampSidebar(272, 100, 'right')).toBe(232);
     expect(clampSidebar(220, 50, 'left')).toBe(180);
+  });
+});
+
+// ═══════════════ [v0.0.320] 4 槽路径（preview 可选槽） ═══════════════
+
+/** 4 槽默认输入（left=220 / preview=360 / right=272，chat 无设定宽=剩余） */
+function fourInput(available: number, over: Partial<ThreeColLayoutInput> = {}): ThreeColLayoutInput {
+  return {
+    available,
+    left: { setting: CONV_WIDTH_DEFAULT },
+    preview: { setting: PV_WIDTH_DEFAULT, collapsed: false },
+    right: { setting: WS_WIDTH_DEFAULT, collapsed: false },
+    middleCurrent: 1500,
+    leftCurrent: CONV_WIDTH_DEFAULT,
+    previewCurrent: PV_WIDTH_DEFAULT,
+    rightCurrent: WS_WIDTH_DEFAULT,
+    dragging: null,
+    ...over,
+  };
+}
+
+describe('[v0.0.320] 4 槽路径（preview 可选槽）', () => {
+  it('preview=null/缺省 → 输出与旧版逐字段相等（回归保护）', () => {
+    const old1 = computeThreeColLayout(chatInput(1424));
+    const old2 = computeThreeColLayout(chatInput(1000));
+    // preview 缺省 = 旧路径（previewWidth=0，其余字段与旧断言逐字一致）
+    expect(old1).toMatchObject({ leftWidth: 220, rightWidth: 272, middleWidth: 932, previewWidth: 0, scrollX: false, cDefend: 932 });
+    expect(old2).toMatchObject({ leftWidth: 180, rightWidth: 232, middleWidth: 588, previewWidth: 0, scrollX: false });
+    // 显式 preview: null 等价缺省
+    const explicit = computeThreeColLayout({ ...chatInput(1424), preview: null });
+    expect(explicit).toEqual(old1);
+  });
+
+  it('4 槽宽裕：left|chat|preview|right 槽序，chat=剩余（无设定宽）', () => {
+    const r = computeThreeColLayout(fourInput(1600));
+    // 220 + chat + 360 + 272 = 1600 → chat = 748
+    expect(r).toMatchObject({
+      leftWidth: 220, previewWidth: 360, rightWidth: 272, middleWidth: 748,
+      scrollX: false, cDefend: 932, minRowWidth: 220 + CHAT_WIDTH_MIN + 360 + 272,
+    });
+  });
+
+  it('4 槽保底链：right→preview→left→chat；全触底 → chat 守 CHAT_WIDTH_MIN + scrollX', () => {
+    // 宽裕 → right 先降（保底链第一步）
+    const r1 = computeThreeColLayout(fourInput(1400));
+    // right dynMax = 1400 - 220 - 360 - 320 = 500 → right=500? 不对：dynMax=500 但 setting=272 已低于 → right=272
+    // 实际 right=272（setting 272 < dynMax 500）；preview=360；left=220；chat=548
+    expect(r1).toMatchObject({ rightWidth: 272, previewWidth: 360, leftWidth: 220, middleWidth: 548, scrollX: false });
+
+    // 缩窄：right 触底 232 → preview 降 → left 降 → chat 触底 320 横滚
+    const r2 = computeThreeColLayout(fourInput(900));
+    // 保底链：right=232（触底）、preview=240（PV_MIN）、left=180（CONV_MIN）
+    // 三者 232+240+180=652 → chat=900-652=248 < 320 → chat=320 + scrollX
+    expect(r2).toMatchObject({ leftWidth: 180, previewWidth: 240, rightWidth: 232, middleWidth: CHAT_WIDTH_MIN, scrollX: true });
+    expect(r2.minRowWidth).toBe(180 + CHAT_WIDTH_MIN + 240 + 232);
+  });
+
+  it('preview.collapsed=true → previewWidth=0（两侧自动扩展回收）', () => {
+    const r = computeThreeColLayout(fourInput(1600, { preview: { setting: PV_WIDTH_DEFAULT, collapsed: true } }));
+    // 220 + chat + 0 + 272 = 1600 → chat = 1108（preview 空间回收）
+    expect(r).toMatchObject({ leftWidth: 220, previewWidth: 0, rightWidth: 272, middleWidth: 1108, scrollX: false });
+  });
+
+  it('拖 preview：left/right hold 上一帧，preview 受 dragDynMax4 上限约束', () => {
+    const r = computeThreeColLayout(fourInput(1200, {
+      dragging: 'preview',
+      preview: { setting: 600, collapsed: false },
+      leftCurrent: 260, // hold 上一帧（≠setting 220）
+      rightCurrent: 300, // hold 上一帧
+    }));
+    // dynMax4 = 1200 - 260 - 300 - 320 = 320 → preview=320（被截断）
+    expect(dragDynMax4(1200, [260, 300])).toBe(320);
+    expect(r).toMatchObject({ leftWidth: 260, rightWidth: 300, previewWidth: 320, middleWidth: 1200 - 260 - 300 - 320, cDefend: 480 });
+  });
+
+  it('拖 right（4 槽）：left/preview hold 上一帧，right 受 dragDynMax4 上限约束', () => {
+    const r = computeThreeColLayout(fourInput(1200, {
+      dragging: 'right',
+      preview: { setting: 500, collapsed: false },
+      previewCurrent: 420, // hold 上一帧
+      right: { setting: 600, collapsed: false },
+    }));
+    // dynMax4 = 1200 - 220 - 420 - 320 = 240 → right=240（被截断，守 right 下限 232 之上）
+    expect(r).toMatchObject({ leftWidth: 220, previewWidth: 420, rightWidth: 240, middleWidth: 1200 - 220 - 420 - 240, cDefend: 480 });
+  });
+
+  it('拖 left（4 槽）：preview/right hold 上一帧，left 受 dragDynMax4 上限约束', () => {
+    const r = computeThreeColLayout(fourInput(1200, {
+      dragging: 'left',
+      previewCurrent: 360,
+      rightCurrent: 272,
+      left: { setting: 500 },
+    }));
+    // dynMax4 = 1200 - 360 - 272 - 320 = 248 → left=248
+    expect(r).toMatchObject({ leftWidth: 248, previewWidth: 360, rightWidth: 272, middleWidth: 1200 - 248 - 360 - 272, cDefend: 480 });
+  });
+
+  it('dragDynMax4 纯函数：available − others和 − minChat（唯一公式）', () => {
+    expect(dragDynMax4(1600, [220, 360, 272])).toBe(1600 - 220 - 360 - 272 - 320);
+    expect(dragDynMax4(1200, [260, 300])).toBe(1200 - 260 - 300 - 320);
+    expect(dragDynMax4(900, [180, 232], 240)).toBe(900 - 180 - 232 - 240);
+  });
+});
+
+// ═══════════════ [v0.0.329 门模型] chatCollapsed 分支（door=left） ═══════════════
+
+describe('[v0.0.329] chatCollapsed（门滑最左：chat 宽 0、preview 吞并门框）', () => {
+  it('chatCollapsed=true（4 槽场景 B）→ middleWidth=0、preview 吞并门框、无 scrollX', () => {
+    const r = computeThreeColLayout(fourInput(1600, { chatCollapsed: true }));
+    // left=220 / right=272 / preview=1600-220-272=1108 / chat=0
+    expect(r).toMatchObject({
+      leftWidth: 220,
+      rightWidth: 272,
+      previewWidth: 1600 - 220 - 272,
+      middleWidth: 0,
+      scrollX: false,
+    });
+    expect(r.minRowWidth).toBe(220 + 0 + (1600 - 220 - 272) + 272);
+  });
+
+  it('chatCollapsed=true 缩窄场景：preview 仍吞并门框（不被 CHAT_WIDTH_MIN 钳住）', () => {
+    // 窄窗 900：left=180（CONV_MIN）、right=232（WS_MIN）、preview=900-180-232=488、chat=0
+    const r = computeThreeColLayout(fourInput(900, { chatCollapsed: true }));
+    expect(r).toMatchObject({
+      leftWidth: 180,
+      rightWidth: 232,
+      previewWidth: 900 - 180 - 232,
+      middleWidth: 0,
+      scrollX: false,
+    });
+  });
+
+  it('chatCollapsed 缺省/undefined → 输出与现状逐字段相等（回归保护）', () => {
+    const base = fourInput(1424);
+    const withUndef = computeThreeColLayout({ ...base, chatCollapsed: undefined });
+    const without = computeThreeColLayout(base);
+    // 4 槽默认：left=220 / preview=360 / right=272 / chat=572
+    expect(without).toMatchObject({ leftWidth: 220, previewWidth: 360, rightWidth: 272, middleWidth: 572, scrollX: false });
+    expect(withUndef).toEqual(without);
+  });
+
+  it('chatCollapsed=true 时 preview.collapsed 同时为 true → 门态优先 preview 吞并（真实链路互斥：door=left 上报 preview.collapsed 必 false）', () => {
+    const r = computeThreeColLayout(fourInput(1600, { chatCollapsed: true, preview: { setting: PV_WIDTH_DEFAULT, collapsed: true } }));
+    // door 单值：preview.collapsed=true 只在 door=right 上报（previewHidden=door==='right'），与 door=left（chatCollapsed）互斥。
+    // 门态最高优先级：chatCollapsed=true → preview 必占满门框（吞并），preview.collapsed 字段不生效。
+    expect(r).toMatchObject({ leftWidth: 220, rightWidth: 272, previewWidth: 1600 - 220 - 272, middleWidth: 0, scrollX: false });
+  });
+
+  it('chatCollapsed=true 拖拽场景（场景 A）→ 走既有拖拽路径（chatCollapsed 仅场景 B 生效）', () => {
+    const r = computeThreeColLayout(fourInput(1200, {
+      chatCollapsed: true,
+      dragging: 'preview',
+      preview: { setting: 600, collapsed: false },
+      leftCurrent: 260,
+      rightCurrent: 300,
+    }));
+    // 拖拽路径不受 chatCollapsed 影响：preview 受 dragDynMax4 上限约束
+    expect(r).toMatchObject({ leftWidth: 260, rightWidth: 300, previewWidth: 320 });
   });
 });

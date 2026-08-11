@@ -146,6 +146,7 @@ export function SectionConvPanel({
             onContextMenu={(sessionId, x, y) => setContextMenu({ sessionId, x, y })}
             onRefreshChildren={onRefreshChildren}
             onRenameTitle={onRenameTitle}
+            onTogglePin={onTogglePin}
           />
         ))}
       </div>

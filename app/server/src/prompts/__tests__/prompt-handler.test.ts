@@ -242,13 +242,13 @@ describe('ContextFilesHandler', () => {
     expect(c).toBe('');
   });
 
-  it('超大文件 → 截断到 20000 char + truncation 标记', () => {
-    const big = 'x'.repeat(25000);
+  it('超大文件 → 截断到 100000 char + truncation 标记', () => {
+    const big = 'x'.repeat(120000);
     fs.writeFileSync(path.join(tmpProject, 'AGENTS.md'), big);
     const c = new ContextFilesHandler().build({ cwd: tmpProject }).content;
     expect(c).toContain('truncated');
-    // 20000 + 标记行，总长度远小于 25000
-    expect(c.length).toBeLessThan(21000);
+    // 100000 + 标记行，总长度远小于 120000
+    expect(c.length).toBeLessThan(101000);
   });
 
   it('空文件（仅空白）→ 跳过该候选', () => {

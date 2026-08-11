@@ -402,12 +402,12 @@ curl -X POST http://127.0.0.1:3710/session/01KV.../workspace/save-image \
 
 ### 2.6.7 `GET /session/:id/workspace/file` + `POST /session/:id/workspace/file/save` — workspace 文本文件读/存（v0.0.227 新增）
 
-> 服务内置 file viewer/editor 用：workspace panel 点文件在前端拦截改走内置 editor（复用 academy `component-modal-md-editor`），读/存经本组端点。**[v0.0.241] 前端拦截 11 种格式（xml/yaml/json/jsonl/txt/csv/tsv/toml/ini/.env/.log）+ md 均走此端点查看/编辑（含格式化 + 校验，前端 `isBuiltinEditable` 守门）**；**[v0.0.263] 起本地文件（任意扩展名，含普通 + symlink）一律进内置 editor——前端 handleOpen 不再用 `isBuiltinEditable` 白名单判定（该函数保留原 12 格式语义服务 link-target.ts markdown 链接分发），改为「本地文件一律 editor && !isRemoteLinkPath(.url)」新判定；`.url` 远程链接走浏览器**。后端不限扩展名。技术权威 `specs/tech/version_logs/v0.0.227/change_plan.md`（v0.0.227 引入）+ `specs/tech/version_logs/v0.0.241/change_plan.md`（v0.0.241 扩 11 格式）+ `specs/tech/version_logs/v0.0.263/change_plan.md`（v0.0.263 本地/远程二元 + 授权模型）；UI 契约 `specs/ui/components/chat-page/component-workspace-panel.md §4.4`（文件点击分流）+ `specs/ui/components/common/component-modal-md-editor.md`（通用 file editor，view 按 format 分流 + edit + 格式化/校验按钮）。
+> 服务内置 file viewer/editor 用：workspace panel 点文件在前端拦截改走内置 editor（复用 academy `component-modal-md-editor`），读/存经本组端点。**[v0.0.241] 前端拦截 11 种格式（xml/yaml/json/jsonl/txt/csv/tsv/toml/ini/.env/.log）+ md 均走此端点查看/编辑（含格式化 + 校验，前端 `isBuiltinEditable` 守门）**；**[v0.0.263] 起本地文件（任意扩展名，含普通 + symlink）一律进内置 editor——前端 handleOpen 不再用 `isBuiltinEditable` 白名单判定（该函数保留原 12 格式语义服务 link-target.ts markdown 链接分发），改为「本地文件一律 editor && !isRemoteLinkPath(.url)」新判定；`.url` 远程链接走浏览器**；**[v0.0.320] 12 格式 + code 进预览区 tab（弹层退役），读响应带 version、save 带 expectedVersion/force + 409 冲突检测**。后端不限扩展名。技术权威 `specs/tech/version_logs/v0.0.227/change_plan.md`（v0.0.227 引入）+ `specs/tech/version_logs/v0.0.241/change_plan.md`（v0.0.241 扩 11 格式）+ `specs/tech/version_logs/v0.0.263/change_plan.md`（v0.0.263 本地/远程二元 + 授权模型）+ `specs/tech/version_logs/v0.0.320/change_plan.md`（v0.0.320 version/409/search）；UI 契约 `specs/ui/components/chat-page/component-workspace-panel.md §4.4`（文件点击分流）+ `specs/ui/components/chat-page/section-preview-area.md`（预览区 tab）+ `specs/ui/components/common/component-modal-md-editor.md`（通用 file editor，academy + 降级场景）。
 
 | 方法 | 路径 | 语义 | 请求体 / query | 成功响应 |
 |------|------|------|--------|---------|
-| `GET` | `/session/:id/workspace/file` | 读 workspace 内文件内容（**[v0.0.263] 前端本地文件一律进 editor，后端不限扩展名**；.url 也走本端点读内容后嗅探 URL；**[v0.0.269] `?binary=1` → 读 Buffer 返 base64**，供图片 viewer 二进制通道） | query `path`（相对 workspaceDir）+ `binary?`（`'1'` 时二进制，缺省/非 `'1'` = UTF-8 文本） | `200` + `{ content: string }`（binary=1 时 content 为 base64 字符串） |
-| `POST` | `/session/:id/workspace/file/save` | 覆盖写 workspace 内文本文件（**last-write-wins**，无 mtime 校验、无冲突提示） | `SaveFileBody` | `200` + `{ ok: true }` |
+| `GET` | `/session/:id/workspace/file` | 读 workspace 内文件内容（**[v0.0.263] 前端本地文件一律进 editor，后端不限扩展名**；.url 也走本端点读内容后嗅探 URL；**[v0.0.269] `?binary=1` → 读 Buffer 返 base64**，供图片 viewer 二进制通道；**[v0.0.320] 文本分支响应加 `version`**） | query `path`（相对 workspaceDir）+ `binary?`（`'1'` 时二进制，缺省/非 `'1'` = UTF-8 文本） | `200` + `{ content: string, version: string }`（binary=1 时 content 为 base64 字符串，**不加 version**） |
+| `POST` | `/session/:id/workspace/file/save` | 覆盖写 workspace 内文本文件（**[v0.0.320] 带可选 expectedVersion 校验 + force 强制覆盖；不匹配且非 force → 409 不写盘**） | `SaveFileBody`（含 expectedVersion? / force?） | `200` + `{ ok: true, version: string }`；`409` + `{ error:'conflict', currentVersion }` |
 
 ```typescript
 // GET query param
@@ -417,8 +417,24 @@ binary?: string; // [v0.0.269] '1' = 二进制通道（读 Buffer 返 base64）�
 interface SaveFileBody {
   path: string;     // 相对 workspaceDir 的路径
   content: string;  // 新全文内容（覆盖写）
+  expectedVersion?: string; // [v0.0.320] 前端读时拿到的 version；匹配当前文件 → 保存成功；不匹配 → 409
+  force?: boolean;          // [v0.0.320] true = 跳过校验强制覆盖（last-write-wins）
+}
+
+// 成功响应（v0.0.320 返回 version）
+interface SaveFileResponse {
+  ok: true;
+  version: string;  // 写后重新 stat 的新版本标记
+}
+
+// 409 冲突响应（v0.0.320）
+interface ConflictResponse {
+  error: 'conflict';
+  currentVersion: string;  // 当前磁盘文件最新 version（前端可展示/重载用）
 }
 ```
+
+**version 语义（v0.0.320）**：`version = statSync(absPath).mtimeMs + ':' + statSync(absPath).size`（mtime 变化或 size 变化均导致 version 变化）；`binary=1` 分支不加 version（image viewer 无冲突语义）；**向后兼容**：version 为新增字段，旧消费方忽略即可；旧后端缺 version 字段 → 前端跳过冲突检测降级 last-write-wins。
 
 **行为**（handler `handleWorkspaceFileRead` / `handleWorkspaceFileSave`，落 `app/server/src/handlers/session-workspace-file.ts`，复用 `session-workspace.ts` export 的 `json()` + `whitelistResolve()`）：
 
@@ -434,11 +450,14 @@ interface SaveFileBody {
 **POST save** 流程：
 1. method 非 POST → `405`（带 `Allow: POST`）。
 2. `deps.store.getSession(id)` 未命中 → `404`。
-3. body 解析 `{ path, content }`：JSON 非法 / `path` 非 string / `content` 非 string → `400`。
+3. body 解析 `{ path, content, expectedVersion?, force? }`：JSON 非法 / `path` 非 string / `content` 非 string → `400`（`expectedVersion` / `force` 非 string/boolean → 忽略，宽松解析不 400）。
 4. 取 `session.workspaceDir`：缺失 → `500`。
 5. `realpathSync(workspaceDir)` → `realRoot`（异常 → `500`）。
 6. **路径白名单（MANDATORY）**：`whitelistResolve(realRoot, path)` → `traversal` → `400`；`not_found`（文件不存在，realpath 失败）→ `404`（**last-write-wins 不新建文件**，仅覆盖既有文件；新文件创建不在本端点语义内）。
-7. `writeFileSync(absPath, content, 'utf8')` 覆盖 → 返 `200` + `{ ok: true }`。写失败（权限/磁盘满）→ `500`。
+7. **版本校验（v0.0.320，MANDATORY 顺序）**：`expectedVersion` 缺失 **或** `force === true` → 跳过校验直接覆盖（last-write-wins，向后兼容旧调用方）；`expectedVersion` 存在且非 force → `statSync(absPath)` 当前 version（`${mtimeMs}:${size}`）比对：
+   - 匹配 → 继续覆盖写。
+   - **不匹配 → `409` + `{ error:'conflict', currentVersion }`，不写盘**（文件内容保持外部改动后的最新状态）。
+8. `writeFileSync(absPath, content, 'utf8')` 覆盖 → 返 `200` + `{ ok: true, version: 写后新version }`。写失败（权限/磁盘满）→ `500`。
 
 **安全（路径白名单 MANDATORY，与 §2.6.1/§2.6.2 同款双层校验，v0.0.263 链式授权）**：
 - **step 1 字符串前缀**：`resolve(realRoot, path)` 必须在 `realRoot` 内（挡 `../` 和绝对路径注入）。
@@ -447,9 +466,10 @@ interface SaveFileBody {
 - 复用 `app/server/src/handlers/session-workspace-path.ts whitelistResolve(realRoot, rel)` export（返 `WhitelistResult`），**不新写校验逻辑**。
 - **持续可打包护栏（BUG-004）**：路径展开经 `session.workspaceDir`（server 启动时 `resolveDataDir` 已展开为绝对路径落库）+ `realpathSync`，**禁字面 `~` / 禁相对路径拼接**（packaged cwd=`/` 不崩）。
 
-**冲突处理（last-write-wins，PRD §6.3 裁决）**：
-- 编辑过程中文件被外部（其他会话 / 外部编辑器 / watch 事件）修改，保存时**无 mtime 校验、无冲突提示**，`writeFileSync` 直接覆盖。
-- 对齐「保存即落盘」语义 + academy editor 最小改动原则；`.md` 外部并发编辑概率低，last-write-wins 简单直接可接受。
+**冲突处理（v0.0.320 起：可选版本校验；无 expectedVersion / force = last-write-wins 兜底）**：
+- 编辑过程中文件被外部（其他会话 / 外部编辑器 / watch 事件）修改：保存带 `expectedVersion`（前端读时拿到）→ 不匹配 → `409 { error:'conflict', currentVersion }`，**不写盘**（文件内容保持外部改动后的最新状态）；前端弹冲突 modal（取消=重载 / 覆盖=force 重发）。
+- 旧调用方不带 `expectedVersion` / 传 `force: true` → **跳过校验直接覆盖**（last-write-wins，PRD §5.3 兜底语义不变）。
+- **absolute IPC 源 v1 不做冲突检测**（`shell:writeFileText` 零改，last-write-wins）。
 
 **[v0.0.269] 文件打开判定（前端 handleOpen，v0.0.263 本地/远程二元 → 五路分流）**：
 - 拦截在 `section-workspace-panel.tsx handleOpen`，顺序（MUST）：
@@ -465,25 +485,71 @@ interface SaveFileBody {
 - `400` body 非法 JSON / 缺 `path` / `content` 非 string（save）/ `path` 非法（read query）/ 路径白名单 traversal 拒绝。
 - `404` session 不存在 / 文件不存在（realpath 失败，read + save 均不新建文件）。
 - `405` 非 GET（read）/ 非 POST（save），响应头带 `Allow`。
+- **`409`（v0.0.320）** `expectedVersion` 存在且非 force、与当前文件 version 不匹配 → `{ error:'conflict', currentVersion }`，不写盘。
 - `500` session 无 `workspaceDir` / `workspaceDir` realpath 失败 / readFileSync / writeFileSync 失败（权限/磁盘）。
 
 **请求示例**：
 
 ```bash
-# 读文本
+# 读文本（v0.0.320 起带 version）
 curl http://127.0.0.1:3710/session/01KV.../workspace/file?path=docs/notes.md
-# → 200 {"content":"# Notes\n\n..."}
-# [v0.0.269] 读二进制（图片 viewer 通道）
+# → 200 {"content":"# Notes\n\n...","version":"1750000000000:1234"}
+# [v0.0.269] 读二进制（图片 viewer 通道，不加 version）
 curl "http://127.0.0.1:3710/session/01KV.../workspace/file?path=img/logo.png&binary=1"
 # → 200 {"content":"iVBORw0KGgoAAAANSUhEUg..."}  （base64）
-# 存（last-write-wins 覆盖）
+# 存（v0.0.320 带 expectedVersion）
 curl -X POST http://127.0.0.1:3710/session/01KV.../workspace/file/save \
   -H "Content-Type: application/json" \
-  -d '{"path":"docs/notes.md","content":"# Notes\n\n新增内容\n"}'
-# → 200 {"ok":true}
+  -d '{"path":"docs/notes.md","content":"# Notes\n\n新增内容\n","expectedVersion":"1750000000000:1234"}'
+# → 200 {"ok":true,"version":"1750000000123:456"}
+# 冲突（expectedVersion 不匹配 → 409，不写盘）
+curl -X POST ... -d '{"path":"docs/notes.md","content":"# New","expectedVersion":"1750000000000:9999"}'
+# → 409 {"error":"conflict","currentVersion":"1750000000123:456"}
+# force 强制覆盖（last-write-wins）
+curl -X POST ... -d '{"path":"docs/notes.md","content":"# New","force":true}'
+# → 200 {"ok":true,"version":"1750000000123:456"}
 ```
 
 > **不进 AT（用户裁决，CLAUDE.md 持久化测试用例库铁律）**：本组端点是**确定性 HTTP 契约 / CRUD**，LLM 不参与、行为确定，一律 UT 覆盖（`app/server/src/handlers/__tests__/session-workspace-file.test.ts`：路径穿越 + 读/存 round-trip + 错误码），不新增持久 AT case。
+
+### 2.6.8 `GET /session/:id/workspace/search?q=` — workspace 递归搜索（v0.0.320 新增）
+
+> 工作区搜索框后端补全量用：文件树只懒加载已展开层，前端无法全量匹配；后端递归全量搜索文件名/文件夹名（substring，大小写不敏感）。技术权威 `specs/tech/version_logs/v0.0.320/change_plan.md` D10。
+
+| 方法 | 路径 | 语义 | 请求体 / query | 成功响应 |
+|------|------|------|--------|---------|
+| `GET` | `/session/:id/workspace/search` | 递归全量搜索（文件名 + 文件夹名 substring 匹配，大小写不敏感） | query `q`（搜索关键词，非空；空 → 400） | `200` + `{ files: string[], dirs: string[], truncated?: boolean }` |
+
+```typescript
+// GET query param
+q: string;   // 搜索关键词（非空；空 → 400）
+
+// 成功响应
+interface WorkspaceSearchResponse {
+  files: string[];        // 文件名匹配的全路径（相对 workspaceDir，POSIX 风格，如 "src/app.ts"）
+  dirs: string[];         // 文件夹名匹配的全路径（相对 workspaceDir，如 "src/components"）
+  truncated?: boolean;    // files+dirs 合计达 200 上限截断时 true（前端提示「结果过多」）
+}
+```
+
+**行为（MANDATORY）**：
+1. method 非 GET → `405`（Allow: GET）。
+2. `deps.store.getSession(id)` 未命中 → `404`。
+3. query `q` 缺失 / 空串（trim 后）→ `400` `{ error: 'q required' }`。
+4. 取 `session.workspaceDir` 缺失 → `500`。
+5. `realpathSync(workspaceDir)` → realRoot（异常 → 500）；`whitelistResolve(realRoot, '')` 校验根可读（复用 tree 安全面）。
+6. 递归遍历（BFS/DFS 均可）：**跳过 `node_modules` / `.git` 目录**（复用 `session-workspace.ts` IGNORED_NAMES 集合）；symlink 目录**跟随**（与 tree 语义一致：workspace 内 symlink = 授权）——但**不跟随到 workspace 外**（目录递归时遇 symlink→dir 目标在 workspace 外 → 跳过该 symlink，防循环/越权）；symlink→file 可列入 files。
+7. 匹配规则：`basename(path)` 大小写不敏感 substring 包含 q。文件命中 → `files.push(relPath)`；目录命中 → `dirs.push(relPath)`（**不递归其下层**——前端拿到 dir 后展示该目录展开内容，后端只返 dir 路径本身）。
+8. 上限：files+dirs 合计 **200 条**；超限截断 + `truncated: true`（超限后停止继续遍历）。
+9. 无匹配 → `200 { files: [], dirs: [] }`（非 404）。
+
+**示例**：
+```bash
+curl "http://127.0.0.1:3710/session/01KV.../workspace/search?q=helper"
+# → 200 {"files":["src/utils/helper.ts"],"dirs":["src/components"],"truncated":false}
+```
+
+> 该端点属确定性搜索契约，AT 覆盖见 `tests/api/workspace/workspace_search_tc3/case.yaml`（v0.0.320 新增 3 条 AT：file version / save 409 / search，均真实调 API）。
 
 ## 3. Session Messages
 

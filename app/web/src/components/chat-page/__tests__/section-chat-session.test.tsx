@@ -15,7 +15,7 @@
  *   - chrome error → 空态兜底不抛
  */
 import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { initI18n } from '../../../i18n';
 
 beforeAll(async () => {
@@ -139,7 +139,9 @@ describe('SectionChatSession — playground 全开（capabilities 全 true）', 
     await waitLoaded();
     expect(document.querySelector('[class*="focus-within"]')).toBeTruthy();
     expect(document.querySelector('[contenteditable="true"]')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '展开用量' })).not.toBeNull();
+    // v0.0.326：topbar 右端只留 usage 环 trigger；Compact/Clear 移入展开面板 head
+    expect(screen.queryByRole('button', { name: '点击查看用量详情' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '点击查看用量详情' }));
     expect(screen.queryByRole('button', { name: '压缩上下文 (Compact)' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: '清空会话 (Clear)' })).not.toBeNull();
     expect(screen.getByText('hero')).toBeTruthy();
@@ -158,9 +160,12 @@ describe('SectionChatSession — readOnly 等价（chrome.readOnly / prop 双入
     expect(container.querySelector('[class*="focus-within"]')).toBeNull();
     expect(screen.queryByRole('button', { name: '清空会话 (Clear)' })).toBeNull();
     expect(container.querySelector('button[aria-haspopup="listbox"]')).toBeNull();
-    // 保留清单：usage + compact + badge + model-tag（max-w-[180px]，旧 model-picker-width 断言随迁）
-    expect(screen.queryByRole('button', { name: '展开用量' })).not.toBeNull();
+    // 保留清单：usage trigger + compact（面板内）+ badge + model-tag（max-w-[180px]，旧 model-picker-width 断言随迁）
+    // v0.0.326：readOnly 时 onClear=null → 面板内不渲 ClearBtn；onCompact 保留
+    expect(screen.queryByRole('button', { name: '点击查看用量详情' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '点击查看用量详情' }));
     expect(screen.queryByRole('button', { name: '压缩上下文 (Compact)' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '清空会话 (Clear)' })).toBeNull();
     const badge = screen.queryByText(/子AGENT/);
     expect(badge).not.toBeNull();
     expect(badge!.textContent).toContain('只读');
@@ -175,7 +180,10 @@ describe('SectionChatSession — readOnly 等价（chrome.readOnly / prop 双入
     expect(document.querySelector('[contenteditable="true"]')).toBeNull();
     expect(screen.queryByText(/子AGENT/)).not.toBeNull();
     expect(screen.queryByRole('button', { name: '清空会话 (Clear)' })).toBeNull();
+    // v0.0.326：compact 在展开面板内（readOnly 保留）
+    fireEvent.click(screen.getByRole('button', { name: '点击查看用量详情' }));
     expect(screen.queryByRole('button', { name: '压缩上下文 (Compact)' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '清空会话 (Clear)' })).toBeNull();
   });
 });
 

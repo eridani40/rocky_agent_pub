@@ -52,3 +52,7 @@ interface Props {
 - 设计稿来源：`demo/04-training-observe.html` `.obs-topbar`。
 - 字体：topbar 任务名 13.5px/600；模式 tag 11px/500；按钮 sm h-26 p-0/9。
 - 配色：tag-gold 进行中；tag-muted paused/pending；tag-violet 模式；按钮 `BTN_SECONDARY`。
+
+## 消费方
+
+- `app/web/src/components/academy-page/section-training-observe.tsx`

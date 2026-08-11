@@ -1,0 +1,77 @@
+# team_sync_import_tc2 — 导入 preview + execute 建队（合法 zip 往返）
+#
+# 覆盖契约：
+#   - specs/tech/version_logs/v0.0.319/change_plan.md D2+D3：POST /squad/import?step=preview
+#     （FormData file → {importKey, manifest}）+ step=execute（FormData importKey+name
+#     → 201 {squadId, created, failed}）；importSquadFromTempDir = createSquadService
+#     （leaderName 取 manifest.leaderName）+ best-effort hire（manifest.members）
+#   - test-plan team_sync_import_tc2：preview 返 {importKey, manifest}；execute 201 + squadId；
+#     新 squad 存在且成员名与 zip 一致
+#
+# 设计权衡（AT 框架限制）：
+#   - case 间无状态共享 + 导出响应是二进制 decode → tc2 不能直接复用 tc1 导出的 zip；
+#     改用结构等价的硬编码合法 zip fixture（manifest + AGENTS.md + .rocky/agents/
+#     + .rocky/skills，与导出格式一致）。真实「导出→导入→比对」往返由 ET 覆盖
+#     （test-plan §5：AT/ET 同机验证往返一致性，跨机器迁移用户验收）。
+#   - zip 内容 DEFLATE 不可见 → manifest 内容正确性由 preview 返回断言（黑盒往返验证）。
+#   - execute 的 modelDefault 走 handler fallback：无 x-session-id → 系统第一个
+#     enabled provider 的第一个 enabled model（AT env 有全局 provider pool）。
+#
+# 不调 LLM：纯 HTTP（preview + execute + GET），全确定性。
+case: team_sync_import_tc2
+module: squad
+timeout: 60
+
+steps:
+  - name: preview 上传合法 zip → 200 importKey + manifest 正确
+    requests:
+      - method: POST
+        path: /squad/import?step=preview
+        multipart:
+          file:
+            filename: team.zip
+            content: "UEsDBBQAAAAIANyJCl08vMhc2AAAACUCAAANAAAAbWFuaWZlc3QuanNvbpWQPW7DMAyF95yC8BxfoGunLL1AURSSzTRE9ROQdDIEvnslKnXdBgnQRYLf9/j45MsGoJMwfXRP0Kn0FI+ZtRceelO3lScX8YY3NKIMTEelnJoDmgMqaJaAbkR++clowhruknK+zjcFyCTz+ImCUs3fuyBoWsTokaVor+UT4GLn767RKfbOMgzRaktl4FZbzCGfFMJzTnuq/+M7s67Lo6VSOiCTLhMF5RMyU3lunZivervn7eNu/kE3/+9uwySa491qi1zAGf27oOPhUIjyhAv884Byvm3mL1BLAwQUAAAACADciQpdiQDzQBUAAAATAAAACQAAAEFHRU5UUy5tZFNWKClWyMwtyC8qUXB0d/ULCeYCAFBLAwQUAAAACADciQpdwK/Y+BcAAAAVAAAAGgAAAC5yb2NreS9hZ2VudHMvdHMtbWF0ZS1hLm1kU1YoKVbITSxJVUhUKEgtKs7PS8zhAgBQSwMEFAAAAAgA3IkKXcHJOmEXAAAAFQAAABoAAAAucm9ja3kvYWdlbnRzL3RzLW1hdGUtYi5tZFNWKClWyE0sSVVIUihILSrOz0vM4QIAUEsDBBQAAAAIANyJCl2XGKM2DQAAAAsAAAAZAAAALnJvY2t5L3NraWxscy90cy1za2lsbC5tZFNWKClWKM7OzMnhAgBQSwECFAMUAAAACADciQpdPLzIXNgAAAAlAgAADQAAAAAAAAAAAAAAgAEAAAAAbWFuaWZlc3QuanNvblBLAQIUAxQAAAAIANyJCl2JAPNAFQAAABMAAAAJAAAAAAAAAAAAAACAAQMBAABBR0VOVFMubWRQSwECFAMUAAAACADciQpdwK/Y+BcAAAAVAAAAGgAAAAAAAAAAAAAAgAE/AQAALnJvY2t5L2FnZW50cy90cy1tYXRlLWEubWRQSwECFAMUAAAACADciQpdwck6YRcAAAAVAAAAGgAAAAAAAAAAAAAAgAGOAQAALnJvY2t5L2FnZW50cy90cy1tYXRlLWIubWRQSwECFAMUAAAACADciQpdlxijNg0AAAALAAAAGQAAAAAAAAAAAAAAgAHdAQAALnJvY2t5L3NraWxscy90cy1za2lsbC5tZFBLBQYAAAAABQAFAEkBAAAhAgAAAAA="
+            content_type: application/zip
+            encoding: base64
+    save:
+      import_key: .importKey
+    check:
+      - .importKey exists
+      - .manifest.name == "ts-import-src"
+      - .manifest.leaderName == "ts-leader"
+      - .manifest.slug == "ts-import-src-slug"
+      - .manifest.builtin == false
+      - .manifest.members[] any .name == "ts-mate-a"
+      - .manifest.members[] any .name == "ts-mate-b"
+
+  - name: execute 建队（importKey + name）→ 201 squadId + created 非空
+    requests:
+      - method: POST
+        path: /squad/import?step=execute
+        multipart:
+          importKey: "{import_key}"
+          name: "ts-import-new"
+    save:
+      new_squad_id: .squadId
+    check:
+      - .squadId exists
+      - .created[] any . == "ts-mate-a"
+      - .created[] any . == "ts-mate-b"
+      - .failed[] all . != "ts-mate-a"
+
+  - name: 新 squad 可查，成员名与 zip 一致（leader=manifest.leaderName）
+    requests:
+      - GET /squad/{new_squad_id}
+    check:
+      - .id exists
+      - .name == "ts-import-new"
+      - .members[] any .name == "ts-leader"
+      - .members[] any .name == "ts-mate-a"
+      - .members[] any .name == "ts-mate-b"
+
+teardown:
+  - name: 清理导入建的新 squad（AT 独立 DATA_DIR，清残留）
+    requests:
+      - method: DELETE
+        path: /squad/{new_squad_id}
+        status: [200, 404]

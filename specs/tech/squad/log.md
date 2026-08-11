@@ -1,10 +1,17 @@
 ---
 type: log
 title: Squad KB 变更记录
-updated: 2026-08-07
+updated: 2026-08-09
 ---
 
 # Squad KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-09 · v0.0.305（squad 聚合视图 + squad_meta SSE — 团队列表 UI 升级后端）
+
+- **新增 `[P1]squad_aggregate.md`**：squad 聚合视图（onlineCount/inProgressCount/lastActiveAt）计算 + `squad_meta` SSE 广播——`squad-aggregate-service.ts`（纯函数 `aggregateFromViews` + 批量 `computeSquadAggregates` 一次 listSessions 内存聚合避免 N+1 + 单点 `computeSquadAggregate`）+ `squad-meta-broadcaster.ts`（仿 SessionMetaBroadcaster 自治订阅 statusBus，触发集合过滤 + 写路径显式 broadcast + sessionStore 延迟注入破循环）+ `squad-event-types.ts`（SQUAD_META_TOPIC/group + SquadAggregate/SquadMetaUpdateEvent）+ 前端 `use-squad-meta.ts`（page-studio 级单例 + onResumed 断连兜底）。口径与 seats 面板完全一致（直连 session 集合 = squadChat + members[].sessionId，不混 subagent 子会话）。
+- **`[P1]data_model.md` 无改动**：3 字段为派生值不落库（squad/member/session 是持久权威源）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① 聚合口径 `aggregateFromViews` 直连集合 + BUSY_STATES 含 suspended ✅；② 批量入口一次 listSessions 分组、单点入口全量过滤、squad 不存在返 null ✅；③ broadcaster 触发集合 5 类型（无 workspace_file_changed）+ wrap fan-out + 异常吞 ✅；④ handler 写路径 broadcast（hire L131/deploy L179/bench L210/create L390）await 落盘后 + patch/delete 不 broadcast ✅；⑤ SSE 白名单 `sse.ts:19` + bus-phase 注册 + 白名单测试 import 真值 ✅；⑥ 前端 useSquadMeta onInit 只订阅不拉 GET + onEvent applyKeyed set + onResumed reloadSquads ✅；⑦ page-studio getAgg 合并（SSE 优先 GET 兜底）双下发 sidebar/seats ✅。
+- 详情：`specs/tech/version_logs/v0.0.305.squad-list-ui-upgrade/change_plan.md` + `architecture.md`
 
 ## 2026-08-07 · v0.0.282（team.reset — mate 上下文重置）
 

@@ -5,6 +5,11 @@
 > 参考: `component-memory-editor-modal.md`（抽出源，字段/校验/testid 契约一致）
 > `specs/api/overall/15-memory-ui.md §4/§5`（POST/PATCH body 校验规则）
 
+## 消费方
+
+- `components/chat-page/component-memory-editor-modal.tsx`
+- `components/chat-page/component-memory-modal.tsx`
+
 ## 职责
 渲染 memory entry 的表单字段（name/intro/type/body/why/howToApply/evolvable）+ 校验 +
 取消/保存按钮行。**不含 fixed 遮罩/居中卡片壳**（壳由承载方各自提供）。

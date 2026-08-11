@@ -76,6 +76,10 @@ MemberSpec:
 
 创建 squad 时复制到 `.rocky/agents/{name}-{memberId}.md`（按 createMemberService 返回的 memberId 改名）。
 
+**[v0.0.321] leader 实名特例**：leader 文件（模板 `leader.md`）复制为 **`{leaderName}-{memberId}.md`**（leaderName = leader 实名，与其他成员 `{name}-{memberId}.md` 前缀一致），不再产出 `leader-{memberId}.md`。实现：`copyTemplateFiles(srcDir, destDir, nameToId, leaderName?)` 第 4 参（`applyTemplate` 第 6 参透传）；创建路径（`handlers/squad.ts` 传 `body.leader.name`）与 zip 导入路径（`team-sync-import-service.ts` 传 `manifest.leaderName`）统一。
+
+**导出还原（对称）**：`team-sync-export-service.ts` `restoreAgentFileName(fileName, leaderName?)`——实名 `{leaderName}-{ULID}.md` → `leader.md`（模板 key）；旧 `leader-{ULID}.md` 走 `stripMemberIdSuffix` 也还原 `leader.md`（兼容）。闭环：模板 `leader.md` → 创建/导入 `{leaderName}-{memberId}.md` → 导出还原 `leader.md`。
+
 ## ③ Builtin 机制
 
 ### 打包位置
@@ -160,6 +164,7 @@ POST /squad { name, modelDefault, leader:{name}, templateSlug }
 ```
 模板 prd.md → .rocky/agents/prd-{memberId}.md
 模板 coder.md → .rocky/agents/coder-{memberId}.md
+模板 leader.md → .rocky/agents/{leaderName}-{memberId}.md（[v0.0.321] 实名特例，leaderName = leader 实名）
 ```
 
 ### 复制策略

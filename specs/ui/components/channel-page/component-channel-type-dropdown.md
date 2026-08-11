@@ -31,3 +31,8 @@
 
 ## 视觉基线
 对齐渠道表单其它 input（border / rounded-md / px-[12px] py-[8px] / text-[13px]）。popover 绝对定位脱离文档流，不挤压下方字段（§11 尺寸稳定性）。
+
+## 消费方
+- `app/web/src/components/channel-page/section-channel-form.tsx`
+- `app/web/src/components/app-dev-config-page/section-see-image-config.tsx`
+- `app/web/src/components/app-dev-config-page/section-web-search-config.tsx`

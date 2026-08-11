@@ -14,15 +14,19 @@ import { useTranslation } from 'react-i18next';
 import { SectionConvPanel } from './section-conv-panel';
 import { SectionChatSession, ChatSessionTopbarLeft } from './section-chat-session';
 import { SectionWorkspacePanel } from './section-workspace-panel';
+import { SectionPreviewArea } from './section-preview-area';
+import { PreviewAreaProvider } from './preview-area-provider';
+import { usePreviewArea } from './preview-area-context';
 import { ComponentEmptyState } from './component-empty-state';
 // [v0.0.182] 三栏响应式布局 hook
 import { useThreeColLayout } from './use-three-col-layout';
 // 挂载 effect（拉 sessions + 订阅 session_meta）；hook 内部走 getSseClient() 单例
 import { usePageChatMount } from './use-page-chat-mount';
 // 列表/拓扑 action handler（发送/HITL/picker 类 handler 已内置 SectionChatSession）
-import { useChatActions } from './use-chat-actions';
+import { useChatActions, type UseChatActionsReturn } from './use-chat-actions';
 import { useSubagentChildren } from './use-subagent-children';
 import { useChatStore } from '../../store/chat-slice';
+import type { Session, ChildrenView } from './types';
 
 export function PageChat() {
   const sessions = useChatStore((s) => s.sessions);
@@ -68,14 +72,60 @@ export function PageChat() {
     ? viewedSession.title
     : (viewedSession?.title ?? t('session.defaultTitle'));
 
-  // [v0.0.182] 三栏响应式布局 hook
-  const threeCol = useThreeColLayout({ hasLeft: true, rightPresent: !!activeSessionId });
+  // [v0.0.182] 三栏响应式布局 hook；[v0.0.320] previewPresent=true → 4 槽引擎（预览区）
+  //   布局 + door 读取在 Provider 内的 PageChatRow（door 来自 PreviewAreaContext，需在 Provider 内消费）
+  return (
+    // [Task 3 偏离] PreviewAreaProvider 顶层包整行：workspace-panel / message-stream（兄弟节点）
+    //   需消费预览区 context（React Context 只能向下传），透明容器不改 flex 布局
+    // [M-1 修复] sessionId 用 activeSessionId（与 SectionPreviewArea/SectionWorkspacePanel 渲染面板对齐）：
+    //   subagent 激活时（viewedSessionId=sub）右栏仍是 parent workspace 树，若 Provider 用 viewedSessionId
+    //   会读错 workspace（readWorkspaceFile(subagent) → 404 error pill）
+    <PreviewAreaProvider sessionId={activeSessionId ?? ''}>
+      <PageChatRow
+        sessions={topSessions}
+        activeSessionId={activeSessionId}
+        viewedSessionId={viewedSessionId}
+        viewedTitle={viewedTitle}
+        childrenByParent={childrenByParent}
+        activeSubId={activeSubId}
+        error={error}
+        actions={actions}
+        refreshChildren={refreshChildren}
+      />
+    </PreviewAreaProvider>
+  );
+}
+
+/**
+ * 四槽布局行（Provider 内消费 PreviewAreaContext）。
+ * [v0.0.329 门模型] 读 context door：chatCollapsed=door==='left' 传引擎；
+ *   door==='left' 时 SectionChatSession 不渲染（chat 宽 0、preview 占满门框）。
+ */
+function PageChatRow({ sessions, activeSessionId, viewedSessionId, viewedTitle, childrenByParent, activeSubId, error, actions, refreshChildren }: {
+  sessions: Session[];
+  activeSessionId: string | null;
+  viewedSessionId: string;
+  viewedTitle: string;
+  childrenByParent: Record<string, ChildrenView>;
+  activeSubId: string | null;
+  error: string | null;
+  actions: UseChatActionsReturn;
+  refreshChildren: (pid: string) => Promise<void> | void;
+}) {
+  // [v0.0.329 门模型] 读 context door（无 Provider/tabs 时缺省 center → 不影响布局）
+  const preview = usePreviewArea();
+  const door = preview?.door ?? 'center';
+  const chatCollapsed = door === 'left';
+
+  // [v0.0.182] 三栏响应式布局 hook；[v0.0.320] previewPresent=true → 4 槽引擎（预览区）
+  // [v0.0.329] chatCollapsed 透传（door=left → chat 宽 0、preview 吞并门框）
+  const threeCol = useThreeColLayout({ hasLeft: true, rightPresent: !!activeSessionId, previewPresent: !!activeSessionId, chatCollapsed });
 
   return (
     <div ref={threeCol.containerRef} className="h-full min-h-0 overflow-x-auto">
       <div className="flex h-full min-h-0 w-full" style={{ minWidth: threeCol.rowMinWidth }}>
         <SectionConvPanel
-          sessions={topSessions}
+          sessions={sessions}
           activeId={activeSessionId}
           childrenByParent={childrenByParent}
           activeSubId={activeSubId ?? undefined}
@@ -97,16 +147,29 @@ export function PageChat() {
           }}
         />
         {/* 主区：统一装配层（key remount 保证切会话零残留帧）。
-            emptyStateSlot = 欢迎 hero（无会话 / active 空会话都渲，onNewConversation 复用 handleCreate） */}
-        <SectionChatSession
-          key={viewedSessionId}
-          sessionId={viewedSessionId || null}
-          rootTag="section"
-          topbarLeft={(chrome) => (
-            <ChatSessionTopbarLeft chrome={chrome} readOnly={chrome.readOnly} titleOverride={viewedTitle} />
-          )}
-          emptyStateSlot={<ComponentEmptyState onNewConversation={() => void actions.handleCreate()} />}
-        />
+            emptyStateSlot = 欢迎 hero（无会话 / active 空会话都渲，onNewConversation 复用 handleCreate）。
+            [v0.0.329] door==='left' → chat 槽隐藏（条件不渲染；middleWidth=0 preview 占满门框） */}
+        {!chatCollapsed && (
+          <SectionChatSession
+            key={viewedSessionId}
+            sessionId={viewedSessionId || null}
+            rootTag="section"
+            topbarLeft={(chrome) => (
+              <ChatSessionTopbarLeft chrome={chrome} readOnly={chrome.readOnly} titleOverride={viewedTitle} />
+            )}
+            emptyStateSlot={<ComponentEmptyState onNewConversation={() => void actions.handleCreate()} />}
+          />
+        )}
+        {/* [v0.0.320] 预览区（三栏 chat|preview|ws；SectionChatSession 后插） */}
+        {activeSessionId && (
+          <SectionPreviewArea
+            sessionId={activeSessionId}
+            renderWidth={threeCol.previewRenderWidth}
+            dragMaxWidth={threeCol.previewDragMaxWidth}
+            onLayoutChange={threeCol.reportPreviewPanel}
+            onDragModeChange={threeCol.setPreviewDragging}
+          />
+        )}
         {activeSessionId && (
           <SectionWorkspacePanel
             sessionId={activeSessionId}

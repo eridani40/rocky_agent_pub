@@ -3,7 +3,10 @@
     "title": "Squads",
     "newSquadAria": "New squad",
     "empty": "No squads yet. Click + above to create one.",
-    "copySessionId": "Copy Session ID"
+    "copySessionId": "Copy Session ID",
+    "status": "{{online}} online · {{working}} working",
+    "pin": "Pin",
+    "unpin": "Unpin"
   },
   "squadPanel": {
     "subtitle": "squad · admin panel"
@@ -137,6 +140,11 @@
       "max": "Max"
     },
     "save": "Save meta"
+  },
+  "saveBar": {
+    "discardTitle": "Discard changes?",
+    "discardBody": "The current tab has unsaved changes. Switching tabs will discard them.",
+    "discardConfirm": "Discard"
   },
   "deleteSquad": {
     "sectionLabel": "Danger Zone",

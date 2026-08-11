@@ -20,7 +20,6 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ComponentGroupListItem } from '../common/component-group-list-item';
 import { ComponentKeyCard, type KeyInfo } from './component-key-card';
-import { ComponentGroupSaveBar } from './component-group-save-bar';
 
 /** 单个 group 信息 */
 export interface GroupInfo {
@@ -124,23 +123,13 @@ export function SectionConfigLayout({
         </ul>
       </aside>
 
-      {/* 右栏：配置区 + 该 group 保存条 */}
+      {/* 右栏：配置区（[v0.0.317] group 底部 save-bar 已废弃，统一走 tab 级 SaveBar） */}
       <section className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto py-6 px-8">
           {current ? renderArea(current, renderGroupArea, onKeyChange, t('layout.emptyGroup')) : (
             <p className="text-muted text-sm">{t('layout.emptyGroups')}</p>
           )}
         </div>
-        {/* 整组保存粒度才渲染底部 save-bar；逐项保存（item）的 group（如 providers）自管保存，无底部条 */}
-        {current && (current.saveMode ?? 'group') === 'group' && (
-          <ComponentGroupSaveBar
-            groupId={currentId}
-            dirty={dirtyOf(currentId)}
-            saving={savingOf(currentId)}
-            saved={savedOf?.(currentId) ?? false}
-            onSave={() => onSaveGroup(currentId)}
-          />
-        )}
       </section>
     </div>
   );

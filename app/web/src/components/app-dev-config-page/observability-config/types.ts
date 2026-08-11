@@ -60,12 +60,12 @@ export function generateObsId(): string {
 
 /**
  * 判定 detail 是否有未保存改动（dirty）。
- * enabled 不计 dirty（toggle 即时生效，对齐 spec §3 + 设计稿 isDirty 逻辑 `k !== 'enabled'`）。
+ * [v0.0.317 D9] enabled 计入 dirty（detail toggle 不再即时生效，攒 draft 走 tab 级统一保存；
+ *   list 级 toggle 仍即时——D10 范式 C list 级 = 即时，不经此函数）。
  */
 export function isObservabilityDirty(draft: ObservabilityConfig, saved: ObservabilityConfig): boolean {
   const keys = Object.keys(draft) as (keyof ObservabilityConfig)[];
   for (const k of keys) {
-    if (k === 'enabled') continue;
     if (draft[k] !== saved[k]) return true;
   }
   return false;

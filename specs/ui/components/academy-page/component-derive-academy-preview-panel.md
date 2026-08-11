@@ -38,3 +38,7 @@ interface Props {
 - 字体：preview-summary 11px/600 fg-2（同 sel-label 字号但不大写）；group label 11px/600/uppercase muted-2（与 sel-label 一致）；项名 13px/500 fg；status-badge 11px/500。
 - 边框：preview-summary 顶部 bottom border 分隔 select-cols；group 之间无额外 divider（靠 group label + padding 自然分隔）；项行 hover bg-bg-warm（同 pick-item hover）。
 - 配色：status-badge sage（bg-sage-bg text-sage）=「新增」/「将带入」；amber（bg-gold-bg text-[#b45309]）=「同名 · 保留原 squad」；toggle off 灰 / on accent（沿用 primitive-toggle-switch 配色）；不同名项 toggle 槽位 invisible 透明占位。
+
+## 消费方
+
+- `app/web/src/components/academy-page/component-derive-academy-picker.tsx`

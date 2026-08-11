@@ -44,9 +44,11 @@ import { createCrudSqlDriver } from './persistence/crud-sqlite-driver-factory';
 import { TokenUsageStatStore } from './persistence/token-usage-stat-store';
 import { TokenUsageAggregator } from './squad/token-usage/token-usage-aggregator';
 import { setTokenUsageSubscriberDeps } from './squad/token-usage/token-usage-subscriber';
-import { SquadStore } from './stores/squad-store';
+import { SquadStore, MemberStore } from './stores/squad-store';
 // [v0.0.210] AcademyStore —— academy 域 7 entity CrudStore facade（classroom/student/version/task/turn/dataset/grader）
 import { AcademyStore } from './academy/academy-store';
+// [v0.0.305] squad 层聚合 meta 广播器（订阅 statusBus 自治广播 squad 聚合状态）
+import { SquadMetaBroadcaster } from './squad/squad-meta-broadcaster';
 
 /**
  * Phase 7 装配：SessionStore + SessionUnreadRuntime + SessionTaskLock + AcademyStore。
@@ -54,11 +56,12 @@ import { AcademyStore } from './academy/academy-store';
  * @param dataDir 数据根目录绝对路径
  * @param sessionStatusBus session_panel topic 的 bus（来自 bus-phase）
  * @param sessionMetaBus session_meta topic 的 bus（来自 bus-phase）
+ * @param squadMetaBus squad_meta topic 的 bus（来自 bus-phase；SquadMetaBroadcaster 注入）
  * @param sseChannel SseChannel（来自 bus-phase，作为 unreadRuntime.presenceProbe）
  * @param logWriter dev-logs 写入器
- * @returns store + unreadRuntime + sessionMetaBroadcaster + taskLock + academyStore
+ * @returns store + unreadRuntime + sessionMetaBroadcaster + taskLock + academyStore + squadMetaBroadcaster
  */
-export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: ReplayableEventBus, sessionMetaBus: ReplayableEventBus, sseChannel: SseChannel, logWriter: LogWriter): Promise<{
+export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: ReplayableEventBus, sessionMetaBus: ReplayableEventBus, squadMetaBus: ReplayableEventBus, sseChannel: SseChannel, logWriter: LogWriter): Promise<{
   store: SessionStore;
   unreadRuntime: SessionUnreadRuntime;
   sessionMetaBroadcaster: SessionMetaBroadcaster;
@@ -68,6 +71,8 @@ export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: Rep
   tokenUsageAggregator?: TokenUsageAggregator;
   /** [v0.0.210] academy 域统一 store（bootstrap.ts 装配 TrainingEngine 用） */
   academyStore: AcademyStore;
+  /** [v0.0.305] squad 聚合 meta 广播器（handler 写路径 broadcast + wrap fan-out 触发） */
+  squadMetaBroadcaster: SquadMetaBroadcaster;
 }> {
   // SessionStore：CompositeStore mount 4 schema（session/transcript/summary/runs）到 fs engine
   const fs = new FsCrudStore({ root: dataDir });
@@ -87,6 +92,16 @@ export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: Rep
     crud,
     sessionMetaBus,
   });
+  // [v0.0.305] SquadMetaBroadcaster —— squad 层聚合 meta 广播器（architecture D3）：
+  //   squadStore/memberStore 先于 store 构造（无 sessionStore 依赖），sessionStore 延迟注入
+  //   （store 构造后 setSessionStore，打破 store↔wrap↔broadcaster 循环依赖）。
+  //   触发路径：① wrapStatusBusForUnread fan-out（session 状态事件 → 路由 squadId）② handler
+  //   写路径显式 broadcast（hire/deploy/bench/create 落盘后）。
+  const squadMetaBroadcaster = new SquadMetaBroadcaster({
+    squadStore: new SquadStore({ root: dataDir }),
+    memberStore: new MemberStore({ root: dataDir }),
+    squadMetaBus,
+  });
   const unreadRuntime = new SessionUnreadRuntime({
     crud,
     presenceProbe: sseChannel,
@@ -94,8 +109,11 @@ export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: Rep
   });
   const statusBusForStore = wrapStatusBusForUnread(sessionStatusBus, unreadRuntime, {
     metaBroadcaster: sessionMetaBroadcaster,
+    squadMetaBroadcaster,
   });
   const store = new SessionStore({ crud, fsRoot: dataDir, statusBus: statusBusForStore, logWriter });
+  // store 构造后注入 sessionStore（broadcaster 的 handleSessionEvent 依赖 getSession 路由 squadId）
+  squadMetaBroadcaster.setSessionStore(store);
 
   // 注入持久 SessionStore 到 persistent_session_store EP impl 的 server 侧 delegate holder。
   //   default scope 的 assemble/ingest 经 ContextEngine.resolveStore('default') 拿本 EP impl，
@@ -148,5 +166,7 @@ export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: Rep
   return { store, unreadRuntime, sessionMetaBroadcaster, taskLock, appTaskLock, ...(tokenUsageAggregator ? { tokenUsageAggregator } : {}),
     // [v0.0.210] AcademyStore 装配（AcademyStore 构造内部已 mount 7 entity；root=dataDir 绝对路径，PACKAGED-GUARD-2）
     academyStore: new AcademyStore({ root: dataDir }),
+    // [v0.0.305] squad 聚合 meta 广播器（bootstrap.ts 透传到 BootstrapResult → handler/routes）
+    squadMetaBroadcaster,
   };
 }

@@ -50,3 +50,7 @@ interface Props extends VersionMemoryTarget {
 - 字体：modal-title 15px/600；entry name mono 12.5px/600；preview mono 13px/1.6；size 11px muted。
 - 边框：modal `rounded-xl` + shadow-lg；head/foot border；entry-card border + `rounded-md`。
 - 配色：与 chat-page memory-entry-card 一致（surface 底 + border + bg-warm head）；无 edit/archive 按钮（只读）。
+
+## 消费方
+
+- `app/web/src/components/academy-page/page-academy.tsx`

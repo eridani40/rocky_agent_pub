@@ -14,7 +14,7 @@
  * 实现：优先调系统 `rg`（ripgrep），不可用降级为 JS 正则遍历。
  * 默认不遵循 .gitignore（含隐藏文件）。
  */
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -108,12 +108,20 @@ export const fileGrepTool: Tool = {
 // ripgrep 实现
 // ============================================================
 
-/** 检测 rg 是否可用（结果缓存） */
+/** rg 探测/调用超时（ms）：rg 卡死时强杀，不拖垮 worker/主线程（P3 崩溃加固） */
+const RG_TIMEOUT_MS = 5000;
+
+/** 检测 rg 是否可用（结果缓存；spawn 异常/超时 → 视为不可用，不抛 native） */
 let _rgAvailable: boolean | null = null;
 function rgAvailable(): boolean {
   if (_rgAvailable !== null) return _rgAvailable;
-  const r = spawnSync('rg', ['--version'], { stdio: 'ignore' });
-  _rgAvailable = r.status === 0;
+  try {
+    const r = spawnSync('rg', ['--version'], { stdio: 'ignore', timeout: RG_TIMEOUT_MS });
+    _rgAvailable = r.status === 0;
+  } catch {
+    // spawnSync 异常（rg 二进制损坏/环境异常）→ 不可用，降级 JS（不崩进程）
+    _rgAvailable = false;
+  }
   return _rgAvailable;
 }
 
@@ -127,7 +135,7 @@ interface RgOpts {
   glob: string | null;
 }
 
-/** 调 ripgrep，返回 stdout（成功）/ null（启动失败需降级） */
+/** 调 ripgrep，返回 stdout（成功）/ null（启动失败/超时/异常需降级） */
 function runRipgrep(o: RgOpts): string | null {
   const args: string[] = [
     '--no-ignore', // 默认不遵循 .gitignore（overall §5.5）
@@ -141,10 +149,20 @@ function runRipgrep(o: RgOpts): string | null {
   if (o.glob) args.push('-g', o.glob);
   args.push(o.pattern, o.root);
 
-  const r = spawnSync('rg', args, { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
+  let r: SpawnSyncReturns<string>;
+  try {
+    r = spawnSync('rg', args, {
+      encoding: 'utf8',
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: RG_TIMEOUT_MS,
+    });
+  } catch {
+    // spawnSync 异常（rg 二进制加载失败/损坏/环境异常）→ 降级 JS（不抛 native）
+    return null;
+  }
   // status=1 是 rg「无匹配」的正常退出码，返回空
   if (r.error) return null; // 启动失败 → 降级
-  if (r.signal) return null; // 被信号杀 → 降级
+  if (r.signal) return null; // 被信号杀（含 timeout 强杀）→ 降级
   // status 0/1 都算正常，>1 是错误（此处简化：>1 也降级）
   if (r.status !== null && r.status > 1) return null;
   return r.stdout ?? '';

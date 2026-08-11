@@ -245,9 +245,26 @@ describe('PageAppSettingsMerged — tab 树 + page-tab 级保存', () => {
     expect(screen.getByText('长期记忆')).toBeTruthy();
   });
 
-  it('通用 tab 不显 page-save-bar（无 KV group 参与 dirty，语言切即生效）', async () => {
+  it('通用 tab 初始不显 page-save-bar（无改动时无 dirty）', async () => {
     await renderMerged();
     expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
+  });
+
+  it('[v0.0.317 D8] 选语言后显示 SaveBar（语言走 SaveBar 不再切即生效）', async () => {
+    await renderMerged();
+    // 选 English → dirty → SaveBar 出现（dirty 时按钮文案含 ● 前缀，用 data-action-key 定位）
+    fireEvent.click(screen.getByText('English'));
+    const saveBtn = document.querySelector('[data-action-key$=".tab.save"]') as HTMLButtonElement;
+    expect(saveBtn).toBeTruthy();
+  });
+
+  it('[v0.0.317 D8] 选语言后取消 → SaveBar 消失（draft 清零）', async () => {
+    await renderMerged();
+    fireEvent.click(screen.getByText('English'));
+    const cancelBtn = document.querySelector('[data-action-key$=".tab.cancel"]') as HTMLButtonElement;
+    expect(cancelBtn).toBeTruthy();
+    fireEvent.click(cancelBtn);
+    expect(document.querySelector('[data-action-key$=".tab.save"]')).toBeNull();
   });
 
   it('切可观测性 tab（展开后）→ 右栏渲染可观测性/日志 group', async () => {

@@ -30,6 +30,8 @@ import type { SessionPresenceProbe } from '../sse/sse-channel';
 import type { SessionStatusUpdateEvent, SessionEvent } from './session-event-types';
 import { markUnreadTrue } from './session-unread-ops';
 import type { SessionMetaBroadcaster } from './session-meta-broadcaster';
+// [v0.0.305] squad 层聚合 meta 广播器（wrap fan-out 触发类型集合内 → broadcast）
+import type { SquadMetaBroadcaster } from '../squad/squad-meta-broadcaster';
 
 /**
  * 完成信号监听器：session 层收到 session_status_update(state∈{idle,error}) 时回调。
@@ -133,6 +135,8 @@ interface StatusBusLike {
 export interface WrapStatusBusOptions {
   /** [v0.0.27] session meta 广播器（statusBus 任意 session 事件触发 broadcast） */
   metaBroadcaster?: SessionMetaBroadcaster;
+  /** [v0.0.305] squad 聚合 meta 广播器（触发类型集合内 → 路由 squadId → broadcast） */
+  squadMetaBroadcaster?: SquadMetaBroadcaster;
 }
 
 /**
@@ -156,6 +160,7 @@ export function wrapStatusBusForUnread<Bus extends StatusBusLike>(
 ): Bus {
   const realEmit = realBus.emit.bind(realBus);
   const metaBroadcaster = opts.metaBroadcaster;
+  const squadMetaBroadcaster = opts.squadMetaBroadcaster;
   const wrappedBus = Object.create(realBus) as Bus;
   wrappedBus.emit = (group: string, event: { data: unknown; timestamp: string }): void => {
     // 1. 委托给原 bus：hub/前端订阅、replay buffer、其他订阅者全部照旧
@@ -169,6 +174,10 @@ export function wrapStatusBusForUnread<Bus extends StatusBusLike>(
         // 2b. [v0.0.27] meta 广播器（触发类型集合内 → broadcast，broadcaster 内再过滤）
         if (metaBroadcaster) {
           metaBroadcaster.handleSessionEvent(data);
+        }
+        // 2c. [v0.0.305] squad 聚合 meta 广播器（触发类型集合内 → 路由 squadId → broadcast）
+        if (squadMetaBroadcaster) {
+          squadMetaBroadcaster.handleSessionEvent(data);
         }
       }
     } catch {

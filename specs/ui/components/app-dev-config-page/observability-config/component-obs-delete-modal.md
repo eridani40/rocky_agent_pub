@@ -17,3 +17,6 @@
 - 「取消」按钮 → `onCancel`；关闭图标 → `onCancel`。
 - 「确认删除」按钮（danger）→ `onConfirm(target.id)`。
 - 按 ESC → `onCancel`（标准 modal 行为）。
+
+## 消费方
+- `app/web/src/components/app-dev-config-page/observability-config/section-observability-list.tsx`

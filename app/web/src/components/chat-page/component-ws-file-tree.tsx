@@ -25,6 +25,8 @@ interface WsFileTreeProps {
   onOpen: (node: WsTreeNode) => void;
   /** stale 路径触发 re-fetch（父组件 effect 监听 stalePaths + 已展开 → GET） */
   onStaleRefetch: (parentPath: string) => void;
+  /** [v0.0.324 D5] 搜索态截断提示（满 100 → 底部「结果超过 100 条」文案） */
+  tooMany?: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ export function ComponentWsFileTree({
   onCollapse,
   onOpen,
   onStaleRefetch,
+  tooMany,
 }: WsFileTreeProps) {
   // 记录上次已触发的 stale refetch（避免重复请求；reducer 标 stale 后 effect 拉完清 stale）
   const refetchedRef = useRef<Set<string>>(new Set());
@@ -82,6 +85,12 @@ export function ComponentWsFileTree({
           onCollapse={onCollapse}
           onOpen={onOpen}
         />
+      )}
+      {/* [v0.0.324 D5] 搜索态截断提示（满 100 → 底部文案） */}
+      {tooMany && (
+        <div className="px-2 py-3 text-[12px] text-muted text-center">
+          {t('workspace.preview.searchTooMany')}
+        </div>
       )}
     </div>
   );

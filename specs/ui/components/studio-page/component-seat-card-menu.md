@@ -22,3 +22,9 @@
 ## 视觉基线
 - z-index：`var(--z-popover)`
 - 无 hex，无 animate class（INV-3 严肃基调）
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-seat-card.tsx`
+- `app/web/src/components/studio-page/component-seat-row.tsx`
+- `app/web/src/components/studio-page/use-seat-menu.ts`

@@ -38,3 +38,7 @@ i18n key（`studio:panorama.idle.*`）：v0.0.243 恢复组件时直接复用；
 ## 复用关系
 - 被 `component-panorama-route.tsx` 在 `activeTab === 'more'` 时渲染（固定「更多」tab 永远在最右，`PANORAMA_MORE_TAB_ID='more'`）。
 - 不组合子组件；图标走 `<IconBox>`（common）+ `<Icon name="chat">`（studio-icons）。
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-panorama-route.tsx`

@@ -68,3 +68,7 @@ since: v0.0.240
 - tab 条：`border-b` 分隔，按钮 `-mb-px border-b-2 px-3 py-1.5 text-[12.5px]`；激活 `border-b-fg font-semibold text-fg`，未激活 `border-b-transparent text-muted hover:text-fg-2`。
 - task tab label「任务」（TASK_VIEW_DEF.label 配死中文，后端落盘）；「更多」tab label = i18n `studio:panorama.tabs.more`。
 - 无设计稿 → 功能 PASS + token 对齐即验收。
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-seats-body.tsx`

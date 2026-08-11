@@ -308,8 +308,9 @@ describe('PageStudio', () => {
     fireEvent.click(row);
     // 落 seats 首页（无展开树，chat 入口迁首页）
     expect(await seatsPanelSignal()).toBeTruthy();
-    // 树节点族 grep 归零：侧栏内仅「新建按钮 + squad 行」两个 button，无任何展开树子节点
-    expect(within(sidebarOf(container)).getAllByRole('button')).toHaveLength(2);
+    // 树节点族 grep 归零：侧栏内仅「新建按钮 + squad 行 + pin 按钮」三个 button，无任何展开树子节点
+    // [v0.0.305] pin 按钮 hover 显隐（visibility 占位），getAllByRole 能查到
+    expect(within(sidebarOf(container)).getAllByRole('button')).toHaveLength(3);
   });
 
   it('首页坐席卡「进入对话」→ 真聊页（chat 入口收敛到首页）', async () => {

@@ -74,3 +74,7 @@ interface Props {
 - 结构：head（title 13.5px/600 + sub 11px mono muted + toggle + ✕，底 border）→ body（左树 250px + 右 `flex-1`，左树 `bg-surface-2` + 右分隔 border）→ foot（提示 + 关闭 + 保存，顶 border）。
 - 字体：markdown 13.5px/1.75；`<pre>` 与 textarea mono 12px/1.6；文件路径条 11px mono muted。
 - 配色：toggle 激活 `bg-accent` + 白字；保存 `BTN_PRIMARY`；关闭 `BTN_SECONDARY`。
+
+## 消费方
+
+- `app/web/src/components/academy-page/component-academy-modals.tsx`

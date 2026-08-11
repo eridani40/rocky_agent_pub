@@ -253,12 +253,3 @@ export function TodoIcon({ size = 16, ...rest }: IconProps) {
   );
 }
 
-/** pin icon —— conv-item 置顶标记（v0.0.231：图钉形，stroke 风格对齐其他 icon，currentColor 继承父色） */
-export function PinIcon({ size = 12, ...rest }: IconProps) {
-  return (
-    <svg {...base(size)} {...rest}>
-      <path d="M12 17v5" />
-      <path d="M9 10.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V16a1 1 0 001 1h12a1 1 0 001-1v-.76a2 2 0 00-1.11-1.79l-1.78-.9A2 2 0 0115 10.76V6h1a2 2 0 002-2H6a2 2 0 002 2h1z" />
-    </svg>
-  );
-}

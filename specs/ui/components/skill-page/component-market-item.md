@@ -27,3 +27,6 @@
 - **font**：name `.mkt-name` 13.5px/600 `var(--fg)`；ref `.mkt-author` 11px `var(-
 - **color**：卡底 `var(--surface)`；icon-box 浅底 `--hue-*-bg` + 主色 `--hue-*`（同 ref ha
 - **双主题**：全 token（银灰）。
+
+## 消费方
+- `app/web/src/components/skill-page/section-skill-market.tsx`

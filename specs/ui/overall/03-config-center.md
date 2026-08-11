@@ -19,7 +19,7 @@
 
 ## 2. app / dev config 页（三栏 + group 独立保存）
 
-两页结构一致（`section-config-layout` + `common/section-group-list` + `component-key-card` + `component-group-save-bar` 共用），差异仅 group 集合（app: appearance / providers / locale / tools 等；dev: `llm_request` + `observability` + `logs`）。**两页数据均归 `app_config` entity**（端点走 `/config/app`；group schema 见 `specs/tech/config/[P0]app_config.md §3`）。
+两页结构一致（`section-config-layout` + `common/section-group-list` + `component-key-card` 共用），差异仅 group 集合（app: appearance / providers / locale / tools 等；dev: `llm_request` + `observability` + `logs`）。**两页数据均归 `app_config` entity**（端点走 `/config/app`；group schema 见 `specs/tech/config/[P0]app_config.md §3`）。
 
 ### 2.1 三栏结构
 
@@ -30,19 +30,18 @@
 │ rail   │ group-list   │  ├─ component-key-card（每 key）   │
 │ 图标栏  │ appearance   │  ├─ component-key-card             │
 │        │ providers    │  └─ ...                            │
-│        │ ...          │ component-group-save-bar（底部固定）│
 └────────┴──────────────┴────────────────────────────────────┘
 ```
 
 - **中栏 group 列表**：列出所有 group，点击切换右栏配置区域；选中项左竖条 + 浅底。
-- **右栏配置区域**：选中 group 下所有 key，每 key 一张 `component-key-card`（key 名 + 说明 + 控件：primitive-key-input / -choice-cards / -boolean）；底部固定 `component-group-save-bar`（保存该 group 按钮，脏状态显「●」高亮）。
-- **group 独立保存**：每个 group 一个保存按钮，提交该 group 全部 key（PUT `/config/app` 带 `{group, items[]}` 整组提交）。多 group 改动互不串扰。
+- **右栏配置区域**：选中 group 下所有 key，每 key 一张 `component-key-card`（key 名 + 说明 + 控件：primitive-key-input / -choice-cards / -boolean）。
+- **tab 级统一保存（v0.0.317）**：group 底部独立保存条已废弃，统一走 tab 级 SaveBar（`common/component-save-bar`）——当前 tab 内任一改动 → dirty 高亮 + 显示取消；保存 = 当前 tab 全部 dirty 整体提交；取消 = 重置 draft。
 
 ### 2.2 app config 特有 group
 
 - **`appearance` group**：theme 选项（dark/light 选项卡），切立即生效（CSS 变量切换 + PUT 持久化）。沿用 theme-init 首屏机制（见 `02-llm-chat.md §5`）。
 - **`providers` group**：provider/model 实例 CRUD 入口（端点 `/provider` + `/provider/:id/model`）。由 `SectionProviders`（`app/web/src/components/providers/section-providers.tsx`）自管理三级流（list → detail → model 弹层）+ 统一 diff-save。二级页含 protocol 单选（复用 `primitive-key-choice-cards`，禁原生 `<select>`）+ 拼接地址 mono 只读展示。交互要点：「确定 ≠ 保存」（model 弹层确定只回写 draft，provider-save 才触后端）；dirty 指示（改前 ● / 保存后 ✓）。详见 `specs/ui/components/providers/_overview.md`。
-- **`locale` group**：语言选择器卡片（key=`language`），控件 = `primitive-key-choice-cards`（两选项卡 `zh-CN` / `en`）。**选项 label 语言自指**：「中文」始终显示「中文」、「English」始终显示「English」（不随当前 locale 变）。**切即生效，不走 save-bar**：onChange → `i18n.changeLanguage(lng)`（实时切，无需刷新）+ `document.documentElement.lang = lng` + PUT `/config/app` 整组提交。启动期 `initI18nFromConfig()` 在 React 渲染前 await（对齐 theme-init 范式）。i18n 范式见 `_conventions.md §8a`。
+- **`locale` group**：语言选择器卡片（key=`language`），控件 = `primitive-key-choice-cards`（两选项卡 `zh-CN` / `en`）。**选项 label 语言自指**：「中文」始终显示「中文」、「English」始终显示「English」（不随当前 locale 变）。**v0.0.317（D8）改为受控**：选语言只进 draft（UI 不切），走 tab 级 SaveBar 统一保存；点保存才调 `i18n.changeLanguage(lng)`（切 UI + PUT 持久化一起做），与配置面板其他控件统一。启动期 `initI18nFromConfig()` 在 React 渲染前 await（对齐 theme-init 范式）。i18n 范式见 `_conventions.md §8a`。
 - **工具 tab**（tabId=`tools`）：三个自渲染 section——
   - **web_search（网络搜索）**：描述 + type 下拉选择框（2 option：`zhipu_coding_plan` / `zhipu_api`，选中项 `aria-selected='true'`）+ 选中 impl 的 apiKey SecretInput + 保存/重置按钮；无候选 impl 时显空态提示。数据 = `app_config.web_search.default`（GET/PUT `/config/app?group=web_search`）。
   - **web_fetch（网络抓取）**：描述 + jinaApiKey SecretInput（展示态/编辑态/✓ 提交按钮）+ 保存/重置。数据 = `app_config.web.jinaApiKey`（GET `/config/app?group=web`，单 key PUT）。
@@ -51,6 +50,8 @@
 - **整理 tab**（tabId=`consolidation`，系统设置收起区，与 observability/plugin 同级）：自渲染 `section-consolidation-config`（组件 spec `specs/ui/components/app-dev-config-page/section-consolidation-config.md`）——`enabled`（天级二级整理开关）+ `dailyTime`（每天触发时刻）+ `modelId`（模型选择）三字段走 `useAppSettingsConfig` dirty 跟踪与整组保存（PUT `/config/app?group=consolidation`）；下方**任务面板**：「立即整理」按钮（POST `/consolidation/run`，202 触发 / 409 已在跑）+ 上次整理时间/一句话摘要只读区（`GET /consolidation/status`）。
   - **running 状态正确反映** [v0.0.205.t2_cons]：`GET /consolidation/status` 响应含 `status: 'running'|'idle'|'failed'` + `startedAt`；面板 onInit 据此初始化 `isRunning`（不再写死 false）——整理进行中切走 tab 再切回，按钮仍禁用显「整理中...」（修切走切回按钮可点 UX bug）；running→done/failed 迁移由 SSE `consolidation_task_update`（topic `app_task`/`_all`）驱动（配置中心唯一有 SSE 的 group）。
   - **超时自愈 UX 语义**：任务 hang 超 1h 后，下次触发（cron 到点或手动点击）服务端自动接管旧锁正常开跑，按钮随 SSE 事件恢复可点——用户无需干预（实现细节归 `specs/tech/agent/session/[P0]app_task_lock.md §3.1`，本页只呈现结果）。
+- **配置同步 tab**（tabId=`config_sync`，[v0.0.318] 用户设置区 memory 紧邻下方）：自渲染 `section-config-sync`（组件 spec `specs/ui/components/app-dev-config-page/section-config-sync.md`）——**独立操作页**（即时操作，不走 SaveBar / page-tab dirty，`TAB_KV_GROUPS.config_sync=[]`）。landing 两入口（导出配置 / 导入配置）→ export（ConfigTree 默认全选 + 导出下载 `rocky_agent_config_YYYYMMDD_HHmmss.json`）/ import（文件选择 → 解密解析 → ConfigTree 默认全选 + 重名标签「存在重名」+ ConfirmModal → 执行导入）。模型 provider 注入（POST 生成新 id）+ 工具整 tab 覆盖（web_search/web_fetch/see_image/bash）。详见 `specs/ui/version_logs/v0.0.318-config-sync/change_log.md`。
+- **团队同步 tab**（tabId=`team_sync`，[v0.0.319] 用户设置区 config_sync 之后）：自渲染 `section-team-sync`（组件 spec `specs/ui/components/app-dev-config-page/section-team-sync.md`）——**独立操作页**（即时操作，不走 SaveBar / page-tab dirty，`TAB_KV_GROUPS.team_sync=[]`）。landing 两入口（导出团队 / 导入团队）→ **[v0.0.321] 导出 = 弹选择器**（`component-export-team-picker-modal`：`listSquads()` 全量列表 → 默认选中当前 `squadId` ?? 第一项 → 确定 `exportSquad(selectedId)` 下载 zip；4 态 loading/error+重试/empty/列表；`exportGenRef` 竞态守卫）→ 不再直下当前团队、无 studio 会话也不再禁用（可弹层选其他团队）/ 导入两阶段（文件选择 → preview 信息卡 + 新团队名 + 重名提醒不阻止 → ConfirmModal → execute）。**squadId 来源（v0.0.319 ET 修复后）**：`listStudioSessions()`（GET /session?biz=studio 按 updatedAt desc）取最近活跃带 squadId 的 studio 会话，**不用 useChatStore**（playground 专属 store 拒纳 biz=studio）。详见 `specs/ui/version_logs/v0.0.319-team-sync/change_log.md` + `specs/ui/version_logs/v0.0.321-team-export-picker/change_log.md`。
 
 ### 2.3 dev config 特有 group
 

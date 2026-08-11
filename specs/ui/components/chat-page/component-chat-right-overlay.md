@@ -5,6 +5,10 @@
 > （coder T2 前置产出）
 > 视觉参考: 无设计稿——纯定位容器，无自身视觉外观（承载内容各自有基线）。
 
+## 消费方
+
+- `components/chat-page/section-chat-session.tsx`
+
 ## 1. 定位 + 设计意图（一句话）
 
 ## Props

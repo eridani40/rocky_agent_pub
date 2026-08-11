@@ -3,13 +3,13 @@
  * 参考: specs/ui/components/chat-page/component-usage-panel.md（权威视觉契约 + testid 总表 §5）
  *       reqs/v0.0.16/mqnbr367-easy-opc-chat-v9a.html §143-258（设计稿 CSS，视觉权威源）
  *
- * 6 子组件（§1）：UsageRing / UsageTrigger / UsageExpandBtn / UsagePanel / CompactBtn / ClearBtn。
- * UsageRing 拆到 component-usage-ring.tsx（primitive，§4.2 SVG 圆环）；本文件含其余 5 子组件 +
- * 顶层 ComponentUsagePanel（组合 usage trigger + expand + panel + tooltip）。
+ * 子组件（§1）：UsageRing / UsageTrigger / UsagePanel / CompactBtn / ClearBtn。
+ * UsageRing 拆到 component-usage-ring.tsx（primitive，§4.2 SVG 圆环）；本文件含其余子组件 +
+ * 顶层 ComponentUsagePanel（组合 usage trigger + panel）。
  *
- * 三态交互（§3）：
- *   - 收起（默认）：圆环 28×28 + 「已用/总」k 格式 + chevron；hover trigger 显 tooltip
- *   - 展开（.open）：浮层 280px，大圆环 52×52 + 4 分段进度条 + 图例 + 累积消耗表格
+ * 三态交互（§3，v0.0.326 重构）：
+ *   - 收起（默认）：圆环 36×36 内叠百分比整数（text-fg-2 统一色）；整环 onClick toggle，无 fmtK 文字/tooltip/chevron
+ *   - 展开（open）：浮层 300px 向左下展开，head 右侧 CompactBtn/ClearBtn（size='sm'），内容区不变（大环 52×52 + 分段 + 图例 + 表格）
  *   - CompactBtn：summaryTask.status=running → disabled+spinner；idle/done/failed 可点
  *   - ClearBtn：hover danger 色；点击弹 clear-confirm-modal（独立组件）
  *
@@ -19,13 +19,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionUsageView, SummaryTaskStatus } from './types';
 import { ComponentUsageRing, usageRingColor } from './component-usage-ring';
-import { ChevronIcon, CompressIcon, TrashIcon } from './icons';
+import { CompressIcon, TrashIcon } from './icons';
 import { formatTraffic } from '../../lib/format-traffic';
-
-/** k 格式化：n>=1000 → 「{k}k」，否则原值字符串（§4.3） */
-function fmtK(n: number): string {
-  return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
-}
 
 /** toLocaleString 兜底（SSR / 旧环境） */
 function fmtNum(n: number): string {
@@ -51,13 +46,21 @@ interface CumRow {
 
 interface UsagePanelProps {
   usage: SessionUsageView;
+  /** 压缩回调（caps.compact 开时由 caller 透传；null=不渲染压缩按钮） */
+  onCompact?: (() => void) | null;
+  /** 清理回调（caps.clear && !readOnly 时透传；null=不渲染清理按钮） */
+  onClear?: (() => void) | null;
+  /** summaryTask 状态（CompactBtn disabled+spinner 绑定） */
+  summaryTask?: SummaryTaskStatus | null;
+  /** session running（CompactBtn sessionBusy 透传，兼容签名） */
+  sessionBusy?: boolean;
 }
 
 /**
- * 顶层 usage-panel 组件（收起 trigger + expand btn + 展开浮层 + tooltip）。
- * 挂于 chat-page topbar 右侧（§4.4）；CompactBtn / ClearBtn 由父 topbar 横排（§1 末段）。
+ * 顶层 usage-panel 组件（收起 trigger + 展开浮层）。
+ * 挂于 chat-page topbar 右侧（§4.4）；v0.0.326 起 CompactBtn/ClearBtn 移入浮层 head（props 透传）。
  */
-export function ComponentUsagePanel({ usage }: UsagePanelProps) {
+export function ComponentUsagePanel({ usage, onCompact, onClear, summaryTask, sessionBusy }: UsagePanelProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   // usage 面板文案走 chat ns
@@ -109,51 +112,46 @@ export function ComponentUsagePanel({ usage }: UsagePanelProps) {
   return (
     <div
       ref={containerRef}
-      className={'relative flex items-center gap-0.5 ' + (open ? 'open' : '')}
+      className={'relative flex items-center ' + (open ? 'open' : '')}
     >
-      {/* 收起态 trigger：圆环 + 「已用/总」k 格式 + hover tooltip（§3.1：group 驱动 group-hover） */}
-      <div className="group flex items-center gap-1.5 px-1.5 py-1 rounded-lg relative hover:bg-bg-warm transition-colors">
-        <ComponentUsageRing used={used} total={total} />
-        <span className="text-[11px] text-fg-2 font-medium font-mono whitespace-nowrap">
-          {fmtK(used)}<span className="text-muted mx-px">/</span>{fmtK(total)}
-        </span>
-        {/* hover tooltip（仅收起态显示；opacity 由 group-hover 驱动，无内联覆盖） */}
-        {!open && (
-          <div
-
-            className="absolute top-full right-0 mt-2 bg-surface border border-border rounded-[10px] shadow-[0_8px_24px_rgba(40,30,20,0.12)] px-3 py-2.5 min-w-[184px] z-[var(--z-popover)] opacity-0 pointer-events-none -translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-opacity"
-          >
-            <div className="text-[9px] font-semibold text-muted-2 uppercase tracking-wider mb-1.5">{t('usage.cumulative')}</div>
-            <div className="flex justify-between gap-4 text-[11px] py-0.5">
-              <span className="text-muted">{t('usage.row.total')}</span>
-              <span className="text-fg-2 font-mono">{fmtNum(usage.total.total_tokens ?? 0)}</span>
-            </div>
-          </div>
-        )}
-      </div>
-      {/* expand 按钮（chevron，.open 时 rotate 180°） */}
-      <button
-        type="button"
-        data-action-key="chat.usage.toggle"
+      {/* 收起态 trigger：整环可点击（onClick toggle），环内叠百分比整数；无 fmtK 文字/tooltip/chevron（v0.0.326） */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={t('usage.clickToExpand')}
+        title={t('usage.clickToExpand')}
         onClick={() => setOpen((o) => !o)}
-        title={open ? t('usage.toggle.collapse') : t('usage.toggle.expand')}
-        aria-label={open ? t('usage.toggle.collapse') : t('usage.toggle.expand')}
-        className="w-[22px] h-[30px] rounded-lg flex items-center justify-center text-muted hover:bg-bg-warm hover:text-fg-2 transition-colors"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o); } }}
+        className="relative w-9 h-9 flex items-center justify-center rounded-lg cursor-pointer hover:bg-bg-warm transition-colors"
       >
-        <ChevronIcon size={12} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
-      </button>
+        <ComponentUsageRing used={used} total={total} size={36} />
+        <span className="absolute text-[9px] font-bold text-fg-2 font-mono pointer-events-none select-none">
+          {Math.round(pct * 100)}%
+        </span>
+      </div>
 
       {/* 展开浮层（panel） */}
       {open && (
         <div
 
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-full right-0 mt-1.5 bg-surface border border-border rounded-xl shadow-[0_12px_32px_rgba(40,30,20,0.16)] p-3.5 w-[300px] z-[var(--z-popover)]"
+          // 左下展开 + 避让右侧功能区（v0.0.328 修复 326）：panel 右缘向左偏 96px，
+          //   让开 chat 右缘 float-menu 竖排（overlay right-6=24px + 本体宽 42px + 30px 视觉缓冲 = 96px），
+          //   不再 right-0 贴环右缘（那样 panel 300px 宽会盖住 float-menu 列）。
+          className="absolute top-full right-[96px] mt-1.5 bg-surface border border-border rounded-xl shadow-[0_12px_32px_rgba(40,30,20,0.16)] p-3.5 w-[300px] z-[var(--z-popover)]"
         >
-          {/* head */}
-          <div className="mb-3">
-            <div className="text-[13px] font-bold text-fg">{t('usage.title')}</div>
-            <div className="text-[10px] text-muted mt-0.5 font-mono">{fmtNum(total)} context</div>
+          {/* head：标题左 + CompactBtn/ClearBtn 右（v0.0.326 移入面板，size='sm'） */}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[13px] font-bold text-fg">{t('usage.title')}</div>
+              <div className="text-[10px] text-muted mt-0.5 font-mono">{fmtNum(total)} context</div>
+            </div>
+            {(onCompact || onClear) && (
+              <div className="flex items-center gap-1">
+                {onCompact && <CompactBtn summaryTask={summaryTask ?? null} sessionBusy={sessionBusy ?? false} onClick={onCompact} size="sm" />}
+                {onClear && <ClearBtn onClick={onClear} size="sm" />}
+              </div>
+            )}
           </div>
           {/* 大圆环 + 数字 */}
           <div className="flex items-center gap-3 mb-2">
@@ -247,15 +245,18 @@ interface CompactBtnProps {
    */
   sessionBusy: boolean;
   onClick: () => void;
+  /** 尺寸档：'sm' = h-7 w-7（面板 head 紧凑场景，v0.0.326）；缺省 w-[30px] h-[30px] */
+  size?: 'sm';
 }
 
-export function CompactBtn({ summaryTask, sessionBusy: _sessionBusy, onClick }: CompactBtnProps) {
+export function CompactBtn({ summaryTask, sessionBusy: _sessionBusy, onClick, size }: CompactBtnProps) {
   const running = summaryTask?.status === 'running';
   // disabled 只看 summaryTask.running——任何 session.state 都可点 compact。
   // _sessionBusy 入参保留为 caller 兼容，不影响 disabled 计算。
   const disabled = running;
   // compact title 走 chat ns
   const { t } = useTranslation('chat');
+  const sizeCls = size === 'sm' ? 'h-7 w-7' : 'w-[30px] h-[30px]';
   return (
     <button
       type="button"
@@ -264,7 +265,7 @@ export function CompactBtn({ summaryTask, sessionBusy: _sessionBusy, onClick }: 
       disabled={disabled}
       aria-disabled={disabled || undefined}
       title={t('usage.compact')}
-      className="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-muted hover:bg-bg-warm hover:text-fg-2 transition-colors bg-transparent border-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      className={`${sizeCls} rounded-lg flex items-center justify-center text-muted hover:bg-bg-warm hover:text-fg-2 transition-colors bg-transparent border-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed`}
     >
       {running ? (
         <span className="inline-block w-[9px] h-[9px] border-[1.5px] border-[var(--color-border-strong)] border-t-[var(--color-accent)] rounded-full animate-spin" />
@@ -278,18 +279,21 @@ export function CompactBtn({ summaryTask, sessionBusy: _sessionBusy, onClick }: 
 /** ClearBtn 子组件（§3.4，hover danger 色，点击弹确认 modal 由 caller 管理） */
 interface ClearBtnProps {
   onClick: () => void;
+  /** 尺寸档：'sm' = h-7 w-7（面板 head 紧凑场景，v0.0.326）；缺省 w-[30px] h-[30px] */
+  size?: 'sm';
 }
 
-export function ClearBtn({ onClick }: ClearBtnProps) {
+export function ClearBtn({ onClick, size }: ClearBtnProps) {
   // clear title 走 chat ns
   const { t } = useTranslation('chat');
+  const sizeCls = size === 'sm' ? 'h-7 w-7' : 'w-[30px] h-[30px]';
   return (
     <button
       type="button"
       data-action-key="chat.session.clear"
       onClick={onClick}
       title={t('usage.clear')}
-      className="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-muted hover:bg-[var(--danger-bg)] hover:text-[var(--danger)] transition-colors bg-transparent border-none cursor-pointer"
+      className={`${sizeCls} rounded-lg flex items-center justify-center text-muted hover:bg-[var(--danger-bg)] hover:text-[var(--danger)] transition-colors bg-transparent border-none cursor-pointer`}
     >
       <TrashIcon size={15} />
     </button>

@@ -5,7 +5,7 @@
 
 ## 职责
 单个 key 的配置卡片：label + 说明 + 按 `key.type` 路由到对应 primitive 输入控件。
-边界：不持有编辑态本地副本，输入即时上抛 `onChange`；不做保存（保存由 `component-group-save-bar` 在 group 粒度执行）；不解析 enum 的可选项（options 由 page 透传或 keyInfo 携带）。
+边界：不持有编辑态本地副本，输入即时上抛 `onChange`；不做保存（保存由 tab 级 SaveBar 统一执行）；不解析 enum 的可选项（options 由 page 透传或 keyInfo 携带）。
 
 ## Props
 - key: string
@@ -24,3 +24,9 @@
 
 ## 复用关系
 - 被组合：`section-config-layout`
+
+## 消费方
+- `app/web/src/components/app-dev-config-page/app-settings-config-defs.ts`
+- `app/web/src/components/app-dev-config-page/section-config-layout.tsx`
+- `app/web/src/components/app-dev-config-page/section-tab-panel.tsx`
+- `app/web/src/components/app-dev-config-page/use-app-settings-config.ts`

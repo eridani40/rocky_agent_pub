@@ -38,15 +38,23 @@ No cloud relay. No usage tracking. No lock-in.
 
 ## 🚀 Features
 
-**🤝 Agent squads** — A leader agent spawns member agents, delegates work, and keeps everyone in sync over SSE. Members inherit context and resolved models; they reply asynchronously and report back.
+**🤝 Agent squads** — A leader agent spawns member agents, delegates work, and keeps everyone in sync over SSE. Members inherit context and resolved models; they reply asynchronously and report back. Export or import an entire team as a zip — templates, members, memory & skills included.
 
 **🧠 Bring your own LLM** — Anthropic, OpenAI, MiniMax, GLM (Zhipu), DeepSeek, OpenRouter, or any OpenAI-compatible endpoint. Configure once in-app; keys never touch the filesystem outside `DATA_DIR`.
+
+**📄 File preview & editing** — Open files from the workspace tree or chat links into a preview column: multi-tab, built-in editor with markdown rendering, structured formats (JSON/YAML/XML/TOML/CSV/TSV) with format & validate, plain-text files (`.env`/`Dockerfile`/`Makefile`/…), and image previews. Saves are version-checked — external edits surface a 409 conflict dialog (reload / force overwrite), and an edit-state guard protects unsaved work.
+
+**🚪 The Door layout** — The chat↔preview divider is a sliding three-state door: split view, document-fills-frame, or chat-fills-frame. One click, per-session persistence, layouts never shift.
+
+**🔍 Workspace search** — Debounced, backend-powered search over the whole workspace with a pruned result tree — find and open any file without leaving the flow.
 
 **🖱️ Computer Use** — The agent captures your screen and clicks/types through a native loopback channel — automate real apps, not just sandboxes.
 
 **🛠️ Tools with human-in-the-loop** — `file`, `bash`, `web_fetch`, `cron`, `search`, `ask_question`. Risky actions gate behind explicit approval.
 
 **🧩 Skills & plugins** — A built-in skill marketplace plus a TypeScript plugin system: declare an extension point, ship new providers, tools, context sources, skills or channels.
+
+**🔄 Live everything** — SSE-driven realtime UI: task kanban, todo panel, cron panel, squad status, session unread, workspace file changes — no manual refresh.
 
 **💾 Memory & history** — Persistent cross-session memory plus full-text search over every conversation.
 
@@ -134,7 +142,7 @@ app/
 └── computer-native/  # native helpers (screen capture, accessibility)
 ```
 
-A single `server` process runs the agent loop (LLM call → tool dispatch → SSE stream), orchestrates squads, and persists everything to SQLite. The Electron main process hosts the renderer and injects a **zero-secret** runtime config into the packaged app.
+A single `server` process runs the agent loop (LLM call → tool dispatch → SSE stream), orchestrates squads, and persists everything to SQLite. Tool execution runs through a **worker pool** (`worker_threads`) so heavy tools (bash, file ops, searches) never block the event loop. The Electron main process hosts the renderer and injects a **zero-secret** runtime config into the packaged app.
 
 ---
 

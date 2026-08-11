@@ -23,12 +23,12 @@ import {
 /** 候选上下文文件名（项目根目录，按顺序读首个存在的） */
 const CANDIDATE_FILES = ['AGENTS.md', 'CLAUDE.md'];
 /** 主文件读取上限（char，避免超大文件灌满 prompt；对齐既有 context_files mapper） */
-const MAX_FILE_CHARS = 20000;
+const MAX_FILE_CHARS = 100000;
 /**
- * 个人差异文件读取上限（char）。两级合计 ≤28000，与 memory_session 在
+ * 个人差异文件读取上限（char）。两级合计 ≤200000，与 memory_session 在
  * budget_truncate floor（40000）内共存（change_plan E 节架构结论）。
  */
-export const MAX_PERSONAL_FILE_CHARS = 8000;
+export const MAX_PERSONAL_FILE_CHARS = 100000;
 
 /** 截断标记（readFirst / readPersonalFile 共用） */
 const TRUNCATE_NOTE = '\n…[context file truncated by context_files handler]';

@@ -32,3 +32,6 @@
 
 ## 复用关系
 - 项内含「配置」入口时（impl.configSchema 存在）：齿轮按钮 `component-impl-config-btn`→ 父级挂载 `compo
+
+## 消费方
+- `app/web/src/components/plugin-config-page/component-ext-impl-router.tsx`

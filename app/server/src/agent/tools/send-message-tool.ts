@@ -37,10 +37,10 @@ export const sendMessageTool: Tool = {
           description: 'AgentRef {type,sessionId,name} | sessionId string | "parent" alias',
         },
         content: {
-          type: 'array',
+          // [v0.0.311] 去掉 type:'array' 硬约束——engine.ts checkPrimitive 会在 tool.run() 前
+          // 拦截非数组 content（string/object），导致 normalizeSendMessageInput 容错永远没机会执行。
+          // 保留 items 供 LLM 参考结构，类型检查由 normalizeSendMessageInput 兜底（string/object→array）。
           description: 'message content blocks (array of {type:"text", text:string})',
-          // [BUG-031] 自描述 ContentBlock 结构：让 LLM 知道 content 是 text block 数组，
-          // 而非把 content 当对象、把 needReply 嵌进 content 里。
           items: {
             type: 'object',
             properties: {
@@ -128,7 +128,10 @@ export const sendMessageTool: Tool = {
     try {
       // deliverTo 统一投递（inbox.append + activate），fire-and-forget 忽略返回的 run
       await rtc.agentManager.deliverTo(targetSid, msg);
-      return textResult(JSON.stringify({ messageId: msg.id }));
+      // [v0.0.311] 返回 targetName 供前端信封显示可读名（覆盖 subagent 等 non-squad-member 场景）
+      // 优先级：AgentRef object 的 .name → session record 的 .title → undefined（前端 fallback '...'）
+      const targetName = await resolveTargetDisplayName(target, targetSid, rtc);
+      return textResult(JSON.stringify({ messageId: msg.id, ...(targetName ? { targetName } : {}) }));
     } catch (e) {
       return errorResult(`send_message: deliverTo failed: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -297,4 +300,29 @@ function normalizeSendMessageInput(input: ToolInput): {
     result.inReplyTo = inReplyTo;
   }
   return result;
+}
+
+/**
+ * [v0.0.311] 解析 target 的可读显示名（供前端信封 targetName）。
+ * 优先级：① AgentRef object 的 .name（LLM 已填）→ ② session record 的 .title → ③ undefined
+ * 覆盖 subagent 等 non-squad-member 场景（前端只有 squad members 列表，查不到 subagent）。
+ */
+async function resolveTargetDisplayName(
+  target: unknown,
+  targetSid: string,
+  rtc: ReturnType<typeof readRuntimeContext>,
+): Promise<string | undefined> {
+  // 优先级 1：AgentRef object 带 .name
+  if (target && typeof target === 'object') {
+    const name = (target as { name?: unknown }).name;
+    if (typeof name === 'string' && name.length > 0) return name;
+  }
+  // 优先级 2：从 session record 取 title
+  try {
+    const session = await rtc.store.getSession(targetSid);
+    if (session?.title && session.title.length > 0) return session.title;
+  } catch {
+    // getSession 失败不阻塞投递结果，fallback undefined
+  }
+  return undefined;
 }

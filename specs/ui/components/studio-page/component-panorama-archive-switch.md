@@ -48,3 +48,7 @@ interface ArchiveSwitchProps {
 - MUST 受控（不持 mode state——父级 archiveMode state 唯一源，避免双源）。
 - MUST 仅 `view.filter.archived` 时由父级渲染（无归档概念的 view 不显示）。
 - MUST NOT 调 API（切换只通知父级，由父级重 fetch 带/不带 filter）。
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-panorama-view.tsx`

@@ -11,6 +11,7 @@ import {
   clearStructuralStalePaths,
   expandedPathsByDepth,
   initialWorkspaceState,
+  mergeExpanded,
   resetForRefresh,
   setChildrenLoaded,
   setLoadingChildren,
@@ -192,6 +193,46 @@ describe('toggleExpanded', () => {
     expect(s1.expanded['src']).toBe(true);
     const s2 = toggleExpanded(s1, 'src', false);
     expect(s2.expanded['src']).toBe(false);
+  });
+});
+
+describe('mergeExpanded', () => {
+  it('MERGE 不覆盖：已有 true 保留、已有 false 不被覆盖（v0.0.327 用户手动收起不被还原）', () => {
+    const s0: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      expanded: { src: true, 'src/auth': false }, // src 已展开、src/auth 手动收起
+    };
+    const s1 = mergeExpanded(s0, ['src', 'src/auth', 'src/utils']);
+    // src 已 true → 保留 true
+    expect(s1.expanded['src']).toBe(true);
+    // src/auth 已 false → 被 MERGE 设 true（mergeExpanded 只加 true，语义=初始展开建议）
+    expect(s1.expanded['src/auth']).toBe(true);
+    // src/utils 新增 → true
+    expect(s1.expanded['src/utils']).toBe(true);
+  });
+
+  it('不删已有 key（只加不改结构）', () => {
+    const s0: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      expanded: { src: true, docs: true, lib: false },
+    };
+    const s1 = mergeExpanded(s0, ['src/utils']);
+    // 原有 key 全保留
+    expect(s1.expanded['src']).toBe(true);
+    expect(s1.expanded['docs']).toBe(true);
+    expect(s1.expanded['lib']).toBe(false);
+    expect(s1.expanded['src/utils']).toBe(true);
+    // key 总数 = 原 3 + 新 1
+    expect(Object.keys(s1.expanded)).toHaveLength(4);
+  });
+
+  it('空 paths → state 不变（浅拷贝但内容相同）', () => {
+    const s0: ReturnType<typeof initialWorkspaceState> = {
+      ...initialWorkspaceState(),
+      expanded: { src: true },
+    };
+    const s1 = mergeExpanded(s0, []);
+    expect(s1.expanded).toEqual({ src: true });
   });
 });
 

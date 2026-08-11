@@ -24,3 +24,6 @@
 - **layout**：overlay  `rgba(24,24,27,0.32)` 居中。modal `width 72
 - **font**：name 18px/700；ref 行 13px `var(--muted)` + mono 仓库地址；readme
 - **border**：modal `radius-2xl`；head/foot 分隔 `1px var(--border)`；readme code `ra
+
+## 消费方
+- `app/web/src/components/skill-page/section-skill-market.tsx`

@@ -26,7 +26,9 @@ export type StudioIconName =
   | 'chat'
   | 'refresh'
   | 'archive'
-  | 'restore';
+  | 'restore'
+  | 'pin'
+  | 'pin-filled';
 
 const PATHS: Record<StudioIconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -110,6 +112,18 @@ const PATHS: Record<StudioIconName, ReactNode> = {
     <>
       <polyline points="1 4 1 10 7 10" />
       <path d="M3.51 15a9 9 0 1 0 2.13-3.36L1 10" />
+    </>
+  ),
+  pin: (
+    <>
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79L16 12.7V5a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2v7.7l-1.89.74A2 2 0 0 0 5 15.24V17z" />
+    </>
+  ),
+  'pin-filled': (
+    <>
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79L16 12.7V5a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2v7.7l-1.89.74A2 2 0 0 0 5 15.24V17z" fill="currentColor" />
     </>
   ),
 };

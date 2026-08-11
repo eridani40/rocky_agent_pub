@@ -10,7 +10,9 @@
 import type { KeyInfo } from './component-key-card';
 
 /** tab id（ET 锚点 tab-tree-item-{tabId}） */
-export type TabId = 'general' | 'session' | 'models' | 'tools' | 'memory' | 'observability' | 'consolidation' | 'plugin';
+/** [v0.0.318] config_sync：配置同步 tab（导入导出，自渲染，不走 SaveBar） */
+/** [v0.0.319] team_sync：团队同步 tab（导入导出，自渲染，不走 SaveBar） */
+export type TabId = 'general' | 'session' | 'models' | 'tools' | 'memory' | 'config_sync' | 'team_sync' | 'observability' | 'consolidation' | 'plugin';
 
 /** default_models record data 形状（chat optional；v0.0.158 起 summary 字段整删） */
 export interface DefaultModelsData {
@@ -99,6 +101,10 @@ export const APP_SETTINGS_TABS: readonly TabDef[] = [
   { id: 'models', labelKey: 'tab.models.label', groups: ['providers'], inSystemArea: false },
   { id: 'tools', labelKey: 'tab.tools.label', groups: ['web_search', 'web_fetch', 'see_image'], inSystemArea: false },
   { id: 'memory', labelKey: 'tab.memory.label', groups: ['user_memory'], inSystemArea: false },
+  // [v0.0.318] 配置同步 tab：用户设置区，memory 紧邻下方（自渲染，不走 SaveBar）
+  { id: 'config_sync', labelKey: 'tab.config_sync.label', groups: ['config_sync'], inSystemArea: false },
+  // [v0.0.319] 团队同步 tab：独立操作页（导入导出不走 SaveBar/dirty），位于 config_sync 之后
+  { id: 'team_sync', labelKey: 'tab.team_sync.label', groups: ['team_sync'], inSystemArea: false },
   { id: 'observability', labelKey: 'tab.observability.label', groups: ['observability', 'logs'], inSystemArea: true },
   // 系统设置收起区「整理」tab，位于 observability 之后、plugin 之前
   { id: 'consolidation', labelKey: 'tab.consolidation.label', groups: ['consolidation'], inSystemArea: true },
@@ -119,6 +125,10 @@ export const TAB_KV_GROUPS: Record<TabId, string[]> = {
   models: [],
   tools: [],
   memory: [],
+  // [v0.0.318] config_sync：自渲染即时操作（导入导出），不走 KV dirty
+  config_sync: [],
+  // [v0.0.319] team_sync 自渲染（即时操作），不进 KV dirty 跟踪
+  team_sync: [],
   observability: ['logs'],
   // consolidation 是自渲染 group（不进 KV_GROUPS 通用网格），
   // 但仍参与 page-tab dirty 跟踪/保存（同 default_models/session/llm_request 惯例）

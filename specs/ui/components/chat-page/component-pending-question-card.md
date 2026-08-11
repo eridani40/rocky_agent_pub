@@ -8,6 +8,10 @@
 > - `component-pending-question-block.tsx` — 单题选项区块（radio/checkbox + 「其他」toggle/textarea）
 > 后端契约：`specs/api/overall/04-agent-session.md §3.6`（GET /pending-tool-call）+ `§3.2`（POST /messages toolReply）+ agent_event §7（require_human_input payload=pending）
 
+## 消费方
+
+- `components/chat-page/base-chat-input-bar.tsx`
+
 ## 职责
 - 渲染队首 `subState==='need_feedback'` 的 PendingToolCall（data=FeedbackData）：挂 chat-input-bar composer 上方（与 enqueue-view 互斥），SSE require_human_input 驱动 mount，提交后乐观清 unmount（多 pending 串行 INV-4）；`key=toolCallId` 切 pending 天然 remount、本地态（selections/activeQuestionId）全重置。
 - 多题（questions.length>1）左侧竖向步骤导航分题作答，一次只渲染 active 题的选项区块；单题不渲染导航列、内容区独占。

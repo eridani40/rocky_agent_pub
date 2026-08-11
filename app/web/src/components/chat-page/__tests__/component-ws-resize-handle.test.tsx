@@ -83,14 +83,14 @@ describe('ComponentWsResizeHandle [v0.0.182] 薄 wrapper', () => {
     expect(onResize).toHaveBeenLastCalledWith(WS_WIDTH_MIN);
   });
 
-  it('clamp 到静态上限 WS_WIDTH_MAX=560：raw>560 → 560', () => {
+  it('clamp 到静态上限 WS_WIDTH_MAX=1600：raw>1600 → 1600', () => {
     const onResize = vi.fn();
     render(
       <ComponentWsResizeHandle currentWidth={540} onResize={onResize} />,
     );
     const handle = screen.getByRole('separator');
-    // dx=-1000（左移 1000）→ raw = 540-(-1000) = 1540 → clamp(232, 560, 1540) = 560
-    fireEvent.mouseDown(handle, { clientX: 1000 });
+    // dx=-2000（左移 2000）→ raw = 540-(-2000) = 2540 → clamp(232, 1600, 2540) = 1600
+    fireEvent.mouseDown(handle, { clientX: 2000 });
     fireEvent.mouseMove(window, { clientX: 0 });
     expect(onResize).toHaveBeenLastCalledWith(WS_WIDTH_MAX);
   });

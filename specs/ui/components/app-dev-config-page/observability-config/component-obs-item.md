@@ -24,3 +24,6 @@
 
 ## 复用关系
 - 被组合：`section-observability-list`
+
+## 消费方
+- `app/web/src/components/app-dev-config-page/observability-config/section-observability-list.tsx`

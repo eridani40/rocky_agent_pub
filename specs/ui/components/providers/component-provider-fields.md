@@ -38,3 +38,6 @@
 ## 复用关系
 - 被组合：component-provider-detail
 - 组合了：（protocol 单选）/ （enabl
+
+## 消费方
+- `app/web/src/components/providers/component-provider-detail.tsx`

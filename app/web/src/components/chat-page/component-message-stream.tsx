@@ -16,12 +16,13 @@ import { useTranslation } from 'react-i18next';
 import type { ContentBlock, FlattenedView, LoadingPhase, Message, RunFinish, RunRetryStatus } from './types';
 import { flattenAndGroup } from './message-flatten';
 import { buildRenderRows } from './build-render-rows';
+import type { RenderRow } from './build-render-rows';
 import { ComponentToolBatch } from './component-tool-batch';
 import { ScrollGuideBubble } from './component-scroll-guide-bubble';
 import { PrimitiveBubble } from '../common/primitive-bubble';
 import { PrimitiveMarkdownView } from '../common/primitive-markdown-view';
 // [v0.0.295] a2a 消息信封折叠渲染
-import { isA2aInbox } from './chat-actor-strategy';
+import { isA2aInbox, a2aRefOf } from './chat-actor-strategy';
 import { ComponentA2aEnvelope } from './component-a2a-envelope';
 import { ComponentRunFinish } from './component-run-finish';
 import { MentionRender } from './component-mention-render';
@@ -29,9 +30,12 @@ import { ComponentLoadingStatus } from './component-loading-status';
 import { useMessageScrollPagination } from './use-message-scroll-pagination';
 import { DefaultAgentAvatar, DefaultUserAvatar } from './component-message-stream-avatars';
 import { MsgTime } from './component-msg-time';
-// v0.0.253: chat 链接 viewer 挂载 + Context Provider（primitive-markdown-view `<a>` onClick 经 Context 拿 onLocalViewer）
-import { ComponentChatLinkViewer, ChatLinkHandlerProvider } from './component-chat-link-viewer';
-import type { ChatLinkTarget } from '../../lib/link-target';
+// [v0.0.253] chat 链接 Context Provider（[v0.0.320 D12] 弹层退役：12 格式复用预览区 openTab，image 保留内置 viewer 弹层）
+import { ChatLinkHandlerProvider } from './chat-link-handler-context';
+import { ComponentWsImageViewer, type WsImageTarget } from './component-ws-image-viewer';
+import { usePreviewArea } from './preview-area-context';
+import { openLocalPath } from '../../lib/open-local-path';
+import { openWorkspaceItem } from '../../lib/chat-api';
 // [CHAT-DEBUG] 临时观测（定位 tool_call 回放渲染缺失；排查完连同 lib/chat-debug-log 整体删除）
 import { chatDebug } from '../../lib/chat-debug-log';
 
@@ -85,6 +89,11 @@ interface MessageStreamProps {
   onLoadMore?: () => void;
   /** loadMore 进行中（跳过自动滚底 + 触发 prepend 保持位置 effect） */
   isLoadingMore?: boolean;
+  /**
+   * [v0.0.311] squad 成员列表（用于 send_message 信封 target sessionId → 可读名解析）。
+   * 不传 = Playground 零回归（buildRenderRows 不收 resolveSessionName，string 原样返回）。
+   */
+  members?: { id: string; name: string }[];
 }
 
 /**
@@ -122,11 +131,23 @@ export function ComponentMessageStream({
   hasMore = false,
   onLoadMore,
   isLoadingMore = false,
+  members,
 }: MessageStreamProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation('chat');
-  const [chatLinkTarget, setChatLinkTarget] = useState<ChatLinkTarget | null>(null);
+  // [v0.0.320 D12] 弹层退役：image 分支保留内置 viewer 弹层（12 格式走预览区 openTab / 无 Provider 降级系统打开）
+  const [wsImageTarget, setWsImageTarget] = useState<WsImageTarget | null>(null);
+  // [Task 3 偏离③] 有预览区 Provider → chat 链接 12 格式 openTab；无 → 系统打开（image 仍走弹层）
+  const preview = usePreviewArea();
+  // [v0.0.311] 追踪信封展开的行 key（展开→渲染时间戳，收起→隐藏）
+  const [expandedEnvelopes, setExpandedEnvelopes] = useState<Set<string>>(new Set());
   const { elements, batches, elementBatch } = flattened ?? flattenAndGroup(messages, { messageFilter, blockFilter });
+
+  // [v0.0.311] send_message 信封 target sessionId → 可读名解析闭包（members 非空时构造，空=undefined 零回归）
+  const resolveSessionName = useMemo(
+    () => (members && members.length > 0 ? (sid: string) => members.find((m) => m.id === sid)?.name : undefined),
+    [members],
+  );
   // [CHAT-DEBUG] 渲染入口核对：toolCallItems 是 flatten 产出的 tool_call 视图节点数。
   //   与 reducer 的 toolCallBlocks 对照：blocks=133 而 toolCallItems<K = 断在 flatten/过滤；
   //   toolCallItems=133 而屏幕上少 = 断在折叠/滚动（看 tool-batch 行的 open/calls）
@@ -137,7 +158,7 @@ export function ComponentMessageStream({
   );
 
   // batch key → 该 batch 内的 tool-call-item 组（rows 折叠用，见 build-render-rows.ts）
-  const rows = buildRenderRows(elements, elementBatch, batches);
+  const rows = buildRenderRows(elements, elementBatch, batches, resolveSessionName);
 
   // messageId → Message（actor 解析 + side 判定都需要，始终构建）
   const msgById = new Map<string, Message>();
@@ -157,8 +178,9 @@ export function ComponentMessageStream({
   const contentSignature = useMemo(() => {
     let textLenSum = 0;
     for (const row of rows) {
-      // tool-batch 行无 text（calls 数组），跳过
-      if (row.type !== 'tool-batch') textLenSum += row.text.length;
+      // tool-batch / send-message-envelope 行无 text，跳过
+      if (row.type === 'tool-batch' || row.type === 'send-message-envelope') continue;
+      textLenSum += row.text.length;
     }
     return `${rows.length}:${textLenSum}`;
   }, [rows]);
@@ -170,7 +192,32 @@ export function ComponentMessageStream({
 
 
   return (
-    <ChatLinkHandlerProvider value={{ onLocalViewer: setChatLinkTarget, sessionId }}>
+    <ChatLinkHandlerProvider
+      value={{
+        sessionId,
+        // [v0.0.320 D12] 弹层退役：chat 链接复用 openLocalPath 共享分流（≡ 右侧文件区）
+        //   image → 内置 viewer 弹层保留；12 格式 → preview.openTab（有 Provider）/ 系统打开（无 Provider 降级偏离③）
+        onLocalViewer: (target) => {
+          openLocalPath(target.path, {
+            sessionId,
+            source: target.source,
+            onEditor: preview
+              ? (t) => preview.openTab(t)
+              : (t) => {
+                  // 无 Provider 降级：系统打开（对齐无 onLocalViewer 消费方行为）
+                  if (target.source === 'workspace') {
+                    void openWorkspaceItem(sessionId, { path: t.path, kind: 'file' }).catch((e) =>
+                      console.warn('openWorkspaceItem failed:', e),
+                    );
+                  } else if (typeof window !== 'undefined' && window.rockyShell) {
+                    void window.rockyShell.openPath(t.path).catch((e) => console.warn('openPath failed:', e));
+                  }
+                },
+            onImageViewer: (t) => setWsImageTarget({ path: t.path, fileName: t.fileName, subtitle: t.subtitle }),
+          });
+        },
+      }}
+    >
       {/* [v0.0.262] relative wrapper：为 absolute 气泡提供定位上下文（scroll 容器内部不能挂——
           absolute 随内容滚动）；scroll div className 原样保留（布局稳定性），气泡不占文档流 */}
       <div className="relative flex-1 min-h-0 flex flex-col">
@@ -194,8 +241,9 @@ export function ComponentMessageStream({
           const side = msg && sideResolver ? sideResolver(msg) : sideOfMessage(msg);
           const actor = actorOf(row.messageId);
           const isToolBatch = row.type === 'tool-batch';
-          // text 仅 tool-batch 无；user-text / agent-answer 都有
-          const text = isToolBatch ? '' : (row as { text: string }).text;
+          const isSendMsgEnvelope = row.type === 'send-message-envelope';
+          // text 仅 tool-batch / send-message-envelope 无；user-text / agent-answer 都有
+          const text = isToolBatch || isSendMsgEnvelope ? '' : (row as { text: string }).text;
           // 三区布局：user=左空占位|内容|右头像；assistant=左头像|内容|右空占位
           if (side === 'user') {
             // [v0.0.107] 来源徽标：非 client channel（flatten 派生的 row.name）→ 气泡下渲「来自 {type}」muted 小字。
@@ -233,7 +281,12 @@ export function ComponentMessageStream({
               id={`msg-${row.messageId}`}
               className="flex gap-2.5 max-w-[820px] w-full"
             >
-              {actor ? actor.avatar : <DefaultAgentAvatar messageId={row.messageId} />}
+              {/* out 信封（send-message-envelope）左侧头像隐藏，用空占位保布局（和 in 信封一致） */}
+              {isSendMsgEnvelope ? (
+                <div className="w-9 shrink-0" aria-hidden />
+              ) : (
+                actor ? actor.avatar : <DefaultAgentAvatar messageId={row.messageId} />
+              )}
               <div className="flex-1 min-w-0 flex flex-col items-start gap-1.5 pt-0.5">
                 {/* a2a 角色名前缀行（群聊：actor.showNameAsPrefix 时渲染） */}
                 {actor?.showNameAsPrefix && actor.name && !isA2aInbox(msg as Message) && (
@@ -243,9 +296,59 @@ export function ComponentMessageStream({
                 )}
                 {isToolBatch ? (
                   <ComponentToolBatch calls={row.calls} runActive={runActive} />
+                ) : isSendMsgEnvelope ? (
+                  /* send_message 信封：out 方向信封渲染 */
+                  (() => {
+                    const envRow = row as Extract<RenderRow, { type: 'send-message-envelope' }>;
+                    // [v0.0.311] done 态展开正文从 arguments.content[].text 提取（发送的消息内容）
+                    const argContent = envRow.arguments['content'];
+                    const bodyText =
+                      Array.isArray(argContent)
+                        ? argContent
+                            .filter((c) => typeof c === 'object' && c !== null && (c as Record<string, unknown>).type === 'text')
+                            .map((c) => (c as { text: string }).text)
+                            .join('\n') ?? ''
+                        : '';
+                    // error 态仍从 result 提取失败原因（不是发送内容）
+                    const errText =
+                      envRow.status === 'error'
+                        ? envRow.result?.content
+                            ?.filter((c) => c.type === 'text')
+                            .map((c) => (c as { type: 'text'; text: string }).text)
+                            .join('\n') ?? '发送失败'
+                        : undefined;
+                    return (
+                      <ComponentA2aEnvelope
+                        direction="out"
+                        senderName={envRow.targetName}
+                        status={envRow.status}
+                        errorContent={errText}
+                        onToggle={(exp) =>
+                          setExpandedEnvelopes((prev) => {
+                            const next = new Set(prev);
+                            if (exp) next.add(row.key);
+                            else next.delete(row.key);
+                            return next;
+                          })
+                        }
+                      >
+                        {bodyText}
+                      </ComponentA2aEnvelope>
+                    );
+                  })()
                 ) : isA2aInbox(msg as Message) ? (
                   /* [v0.0.295] a2a 消息用信封折叠组件，替代普通 assistant 气泡 */
-                  <ComponentA2aEnvelope senderName={actor?.name ?? ''}>
+                  <ComponentA2aEnvelope
+                    senderName={a2aRefOf(msg as Message)?.name ?? actor?.name ?? ''}
+                    onToggle={(exp) =>
+                      setExpandedEnvelopes((prev) => {
+                        const next = new Set(prev);
+                        if (exp) next.add(row.key);
+                        else next.delete(row.key);
+                        return next;
+                      })
+                    }
+                  >
                     {text}
                   </ComponentA2aEnvelope>
                 ) : (
@@ -253,8 +356,12 @@ export function ComponentMessageStream({
                     <PrimitiveMarkdownView source={text} />
                   </PrimitiveBubble>
                 )}
-                {/* 消息时间行（仅 answer bubble 后；tool-batch 组不加，非「消息」语义） */}
-                {!isToolBatch && (
+                {/* 消息时间行：普通消息始终显示；信封仅在展开时显示（tool-batch 不加） */}
+                {!isToolBatch && !isSendMsgEnvelope && !isA2aInbox(msg as Message) && (
+                  <MsgTime iso={msg?.createdAt ?? ''} side="assistant" />
+                )}
+                {/* [v0.0.311] 信封行（in/out）展开时在信封外部下方渲染时间戳 */}
+                {(isSendMsgEnvelope || isA2aInbox(msg as Message)) && expandedEnvelopes.has(row.key) && (
                   <MsgTime iso={msg?.createdAt ?? ''} side="assistant" />
                 )}
               </div>
@@ -271,7 +378,8 @@ export function ComponentMessageStream({
 
         {/* sessionRunning 门控 run-finish（不传 sessionRunning = false = 不显示） */}
         {!sessionRunning && lastRunFinish && <ComponentRunFinish finish={lastRunFinish} />}
-        <ComponentChatLinkViewer target={chatLinkTarget} sessionId={sessionId} onClose={() => setChatLinkTarget(null)} />
+        {/* [v0.0.320 D12] 弹层退役：仅 image 分支保留内置 viewer 弹层（12 格式已走预览区 openTab） */}
+        <ComponentWsImageViewer sessionId={sessionId} target={wsImageTarget} onClose={() => setWsImageTarget(null)} />
       </div></div>
       {/* [v0.0.262] 滚动引导气泡：用户不在底部时显示（新消息/回到底部），点击平滑滚底。
           absolute 定位不占文档流（wrapper 提供定位上下文）；nearBottom/scrollToBottom 来自 hook（行 1/2 扩展） */}

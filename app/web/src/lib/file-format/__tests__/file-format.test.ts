@@ -69,24 +69,69 @@ describe('getFileFormat — 多扩展名取最后一段', () => {
   });
 });
 
-describe('getFileFormat — unsupported（编程语言/二进制 → null）', () => {
+describe('getFileFormat — unsupported（未并入白名单 → null）', () => {
   const unsupported = [
-    'a.py',
-    'main.js',
-    'Main.java',
-    'a.cpp',
-    'a.go',
-    'a.ts',
     'a.png',
     'a.jpg',
     'a.pdf',
     'a.exe',
-    'Makefile', // 无扩展名
+    'a.zip',
+    'a.bin',
+    'Vagrantfile', // 无扩展名且不在 KNOWN_TEXT_BASENAMES（Makefile 已并入 txt 白名单，v0.0.328）
     '', // 空字符串
   ];
   for (const p of unsupported) {
     it(`getFileFormat('${p}') === null`, () => {
       expect(getFileFormat(p)).toBeNull();
+    });
+  }
+});
+
+describe('getFileFormat — [v0.0.320 D11] 编程语言后缀 → code', () => {
+  const codeCases: Array<[string, FileFormat]> = [
+    ['a.py', 'code'],
+    ['main.js', 'code'],
+    ['Main.java', 'code'],
+    ['a.cpp', 'code'],
+    ['a.go', 'code'],
+    ['a.ts', 'code'],
+    ['a.tsx', 'code'],
+    ['a.jsx', 'code'],
+    ['a.rs', 'code'],
+    ['a.c', 'code'],
+    ['a.h', 'code'],
+    ['a.hpp', 'code'],
+    ['a.cs', 'code'],
+    ['a.rb', 'code'],
+    ['a.php', 'code'],
+    ['a.swift', 'code'],
+    ['a.kt', 'code'],
+    ['a.sh', 'code'],
+    ['a.vue', 'code'],
+    ['a.svelte', 'code'],
+    ['a.dart', 'code'],
+    ['a.lua', 'code'],
+    ['a.r', 'code'],
+    ['a.pl', 'code'],
+    ['a.scala', 'code'],
+    ['a.groovy', 'code'],
+    ['a.zig', 'code'],
+    ['a.erl', 'code'],
+    ['a.ex', 'code'],
+    ['a.hs', 'code'],
+    ['a.clj', 'code'],
+    ['a.sql', 'code'],
+    ['a.css', 'code'],
+    ['a.scss', 'code'],
+    ['a.less', 'code'],
+    ['a.html', 'code'],
+    ['a.htm', 'code'],
+    ['a.PY', 'code'], // 大小写不敏感
+    ['dir/sub/main.go', 'code'], // 带路径前缀
+  ];
+  for (const [path, expected] of codeCases) {
+    it(`getFileFormat('${path}') === '${expected}'`, () => {
+      expect(getFileFormat(path)).toBe(expected);
     });
   }
 });
@@ -101,7 +146,7 @@ describe('getFileFormat — 带路径前缀（basename 取最后一段）', () =
   });
 });
 
-describe('getCategory — 12 FileFormat case 闭合', () => {
+describe('getCategory — 13 FileFormat case 闭合（[v0.0.320 D11] code → plain）', () => {
   const table: Array<[FileFormat, FileFormatCategory]> = [
     ['md', 'md'],
     ['json', 'structured'],
@@ -115,6 +160,7 @@ describe('getCategory — 12 FileFormat case 闭合', () => {
     ['ini', 'plain'],
     ['env', 'plain'],
     ['log', 'plain'],
+    ['code', 'plain'], // [v0.0.320 D11] code 行为 = plain（pre 渲染 + 无格式/校验按钮）
   ];
   for (const [fmt, expected] of table) {
     it(`getCategory('${fmt}') === '${expected}'`, () => {
@@ -138,13 +184,27 @@ describe('isBuiltinEditable — 与 getFileFormat 一致', () => {
     '.env',
     '.env.local',
     'a.md',
+    // [v0.0.320 D11] 编程语言并入白名单 → 可编辑
+    'a.py',
+    'main.js',
+    'Main.java',
+    'a.cpp',
+    'a.go',
+    'a.ts',
+    'a.sh',
+    'index.html',
+    // [v0.0.328] 无扩展名纯文本白名单并入 → 可编辑
+    'Makefile',
+    'Dockerfile',
+    '.gitignore',
   ];
   for (const p of supported) {
     it(`isBuiltinEditable('${p}') === true`, () => {
       expect(isBuiltinEditable(p)).toBe(true);
     });
   }
-  const unsupported = ['a.py', 'a.png', 'a.pdf', 'a.java', 'Makefile'];
+  // [v0.0.328] Makefile 已并入 KNOWN_TEXT_BASENAMES → txt 可编辑（从 unsupported 移到 supported）
+  const unsupported = ['a.png', 'a.pdf', 'a.exe', 'a.zip'];
   for (const p of unsupported) {
     it(`isBuiltinEditable('${p}') === false（走系统打开）`, () => {
       expect(isBuiltinEditable(p)).toBe(false);

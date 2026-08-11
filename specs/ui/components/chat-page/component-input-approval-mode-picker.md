@@ -5,6 +5,11 @@ updated: 2026-07-15
 
 # component-input-approval-mode-picker
 
+## 消费方
+
+- `components/chat-page/component-chat-session-input.tsx`
+- `components/chat-page/use-chat-chrome.ts`
+
 ## 0. 职责
 session 级审批模式选择器（2 档 enum），位于 input-bar 按钮行**最左位**（effort picker 左侧）。
 - 21px 纯图标 trigger（AlertIcon，语义=注意/审批区）

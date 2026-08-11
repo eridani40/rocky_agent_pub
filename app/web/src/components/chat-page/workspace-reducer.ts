@@ -11,6 +11,7 @@ import {
   applyWorkspaceFileChanged,
   clearStructuralStalePaths,
   initialWorkspaceState,
+  mergeExpanded,
   resetForRefresh,
   setChildrenLoaded,
   setLoadingChildren,
@@ -28,7 +29,8 @@ export type WsAction =
   | { type: 'fresh' }
   | { type: 'file-changed'; payload: Parameters<typeof applyWorkspaceFileChanged>[1] }
   | { type: 'dir-changed'; payload: Parameters<typeof applyWorkspaceDirChanged>[1] }
-  | { type: 'clear-structural' };
+  | { type: 'clear-structural' }
+  | { type: 'merge-expanded'; payload: { paths: string[] } };
 
 /** workspace reducer（委托 workspace-slice-reducer 纯函数） */
 export function wsReducer(s: WorkspaceState, action: WsAction): WorkspaceState {
@@ -51,6 +53,8 @@ export function wsReducer(s: WorkspaceState, action: WsAction): WorkspaceState {
       return applyWorkspaceDirChanged(s, action.payload);
     case 'clear-structural':
       return clearStructuralStalePaths(s);
+    case 'merge-expanded':
+      return mergeExpanded(s, action.payload.paths);
     default:
       return s;
   }

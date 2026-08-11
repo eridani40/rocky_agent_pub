@@ -4,7 +4,12 @@
 > 文件: app/web/src/components/chat-page/component-ws-image-viewer.tsx
 > since: v0.0.269
 > 数据契约: specs/api/overall/04-agent-session.md §2.6.7（GET /workspace/file?binary=1 → base64）
-> 分流入口: section-workspace-panel.tsx handleOpen（isImagePath → 本组件）/ component-chat-link-viewer.tsx（image 分支 → 本组件，v0.0.280）
+> 分流入口: section-workspace-panel.tsx handleOpen（isImagePath → 本组件）/ component-message-stream.tsx chat 链接 image 分支（经 openLocalPath onImageViewer → 本组件，v0.0.280；~~component-chat-link-viewer.tsx~~ **v0.0.320 退役**）
+
+## 消费方
+
+- `components/chat-page/component-message-stream.tsx`（chat 链接 image 分支，openLocalPath onImageViewer 回调 → 本组件）
+- `components/chat-page/section-workspace-panel.tsx`
 
 ## 职责
 
@@ -92,5 +97,5 @@ interface WsImageViewerProps {
 ## 复用关系
 
 - 组合：Portal + CloseIcon + readWorkspaceFileBinary（workspace-api）。
-- 挂载：section-workspace-panel.tsx（handleOpen image 分支 → wsImageTarget state）。
-- 兄弟：component-ws-file-editor.tsx（文本 editor——image 与 editor 互斥，同一时刻只开一个）。
+- 挂载：section-workspace-panel.tsx（handleOpen image 分支 → wsImageTarget state）+ component-message-stream.tsx（chat 链接 image 分支，openLocalPath onImageViewer 回调，v0.0.320）。
+- 兄弟：~~component-ws-file-editor.tsx~~（**v0.0.320 退役**——文本 editor 进预览区 tab；无 Provider 降级 `component-ws-file-editor-fallback.tsx`。image 与 editor 互斥语义保留：image 走弹层、文本走预览区）。

@@ -1,0 +1,114 @@
+# team_sync_export_tc1 — 导出成功（GET /squad/:id/export → zip 下载流）
+#
+# 覆盖契约：
+#   - specs/tech/version_logs/v0.0.319/change_plan.md D1+D3：GET /squad/:id/export
+#     → 200 application/zip；zip 含 manifest.json + AGENTS.md + .rocky 全套；
+#     agents 文件名去 memberId 后缀；排除 members/outputs/reports/states/
+#     specs/panorama/images/project
+#
+# 框架限制（设计依据）：
+#   - AT http_request 不返回 headers → content-type/content-disposition 由 UT 断言
+#     （team-sync-handler.test.ts）；AT 用 zip 魔数 'PK' 间接验证二进制流
+#   - adm-zip 默认 DEFLATE → entry 名在 zip 明文可见（断言 entry 存在/排除），
+#     文件内容不可见（manifest 内容正确性由 import preview 往返验证 tc2）
+#   - 新建 squad 目录骨架无 AGENTS.md/.rocky 文件 → setup 用 files 原语植入
+#     fixture 再导出（files 写 DATA_DIR/squads/{id}/...）
+#   - fresh hire 不写 .rocky/agents/ → 植入 {name}-{ULID}.md 验证去后缀契约
+#
+# 不调 LLM：纯 HTTP（建队 + hire + GET 导出），全确定性。
+case: team_sync_export_tc1
+module: squad
+timeout: 60
+
+setup:
+  - name: 建源 squad（leader + 目录骨架，modelDefault 过建队写入校验）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "ts-export-src"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "ts-leader"
+    save:
+      squad_id: .id
+    check:
+      - .id exists
+
+  - name: hire 2 mates（导出 manifest.members 数据源；首个 fail 即 step fail）
+    requests:
+      - method: POST
+        path: /squad/{squad_id}/member
+        body:
+          mode: "fresh"
+          name: "ts-mate-a"
+          intro: "team sync export mate a"
+      - method: POST
+        path: /squad/{squad_id}/member
+        body:
+          mode: "fresh"
+          name: "ts-mate-b"
+          intro: "team sync export mate b"
+    check:
+      - .member.id exists
+
+  - name: 植入导出 fixture（AGENTS.md + .rocky 全套 + 应排除目录 marker）
+    files:
+      - path: "squads/{squad_id}/AGENTS.md"
+        content: { marker: "ts-export-agents" }
+      - path: "squads/{squad_id}/.rocky/agents/ts-leader-01KZA6D535N86AM008T34N1B82.md"
+        content: { marker: "ts-leader-personal" }
+      - path: "squads/{squad_id}/.rocky/agents/ts-mate-a-01KZA6D535N86AM008T34N1B82.md"
+        content: { marker: "ts-mate-a-personal" }
+      - path: "squads/{squad_id}/.rocky/agents/ts-mate-b-01KZA6D535N86AM008T34N1B82.md"
+        content: { marker: "ts-mate-b-personal" }
+      - path: "squads/{squad_id}/.rocky/skills/ts-skill.md"
+        content: { marker: "ts-skill" }
+      - path: "squads/{squad_id}/.rocky/memory/ts-memory.md"
+        content: { marker: "ts-memory" }
+      - path: "squads/{squad_id}/.rocky/settings.json"
+        content: { marker: "ts-settings" }
+      - path: "squads/{squad_id}/outputs/marker.txt"
+        content: { marker: "excluded-outputs" }
+      - path: "squads/{squad_id}/reports/marker.txt"
+        content: { marker: "excluded-reports" }
+      - path: "squads/{squad_id}/states/marker.txt"
+        content: { marker: "excluded-states" }
+      - path: "squads/{squad_id}/panorama/marker.txt"
+        content: { marker: "excluded-panorama" }
+      - path: "squads/{squad_id}/specs/marker.txt"
+        content: { marker: "excluded-specs" }
+      - path: "squads/{squad_id}/images/marker.txt"
+        content: { marker: "excluded-images" }
+
+steps:
+  - name: 导出 zip（200 + 魔数 + 必备 entry 存在 + 排除目录不打包 + 去 memberId）
+    requests:
+      - method: GET
+        path: /squad/{squad_id}/export
+    check:
+      - . ~= "PK"
+      - . ~= "manifest.json"
+      - . ~= "AGENTS.md"
+      - . ~= ".rocky/agents/ts-leader.md"
+      - . ~= ".rocky/agents/ts-mate-a.md"
+      - . ~= ".rocky/agents/ts-mate-b.md"
+      - . ~= ".rocky/skills/ts-skill.md"
+      - . ~= ".rocky/memory/ts-memory.md"
+      - . ~= ".rocky/settings.json"
+      - . !~= "01KZA6D535N86AM008T34N1B82"
+      - . !~= "outputs/"
+      - . !~= "reports/"
+      - . !~= "states/"
+      - . !~= "panorama/"
+      - . !~= "specs/"
+      - . !~= "images/"
+      - . !~= "members/"
+      - . !~= "project"
+
+teardown:
+  - name: 删除源 squad（AT 独立 DATA_DIR，清残留）
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+        status: [200, 404]

@@ -4,6 +4,11 @@
 > 文件: app/web/src/components/chat-page/component-memory-entry-card.tsx（或 common/，按 coder 决定——chat/studio/app-settings 三处复用）
 > 本文是单 memory entry 卡的**概念权威源**：渲染字段 + testid + 操作回调 + 视觉基线（待 coder 按设计稿填）。
 
+## 消费方
+
+- `components/app-dev-config-page/section-user-memory.tsx`
+- `components/chat-page/component-memory-modal.tsx`
+
 ## 1. 定位 + 设计意图
 单 memory entry 卡片，**被三处复用**：
 - chat 右侧 ws-panel 长期记忆 tab（`section-memory-panel`，session scope）

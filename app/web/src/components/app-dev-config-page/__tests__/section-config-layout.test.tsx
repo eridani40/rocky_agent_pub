@@ -108,7 +108,7 @@ describe('SectionConfigLayout', () => {
     expect(onKeyChange).toHaveBeenCalledWith('llm_request', 'stall_timeout_s', 45);
   });
 
-  it('dirty 高亮 → 保存条按钮带 ●；点保存触发 onSaveGroup(groupId)', () => {
+  it('[v0.0.317] GroupSaveBar 已废弃 → group 底部不渲染保存条', () => {
     const onSave = vi.fn();
     render(
       <SectionConfigLayout
@@ -121,13 +121,12 @@ describe('SectionConfigLayout', () => {
         savingOf={() => false}
       />,
     );
-    const btn = screen.getByRole('button', { name: '● 保存' }) as HTMLButtonElement;
-    expect(btn.textContent).toContain('●');
-    fireEvent.click(btn);
-    expect(onSave).toHaveBeenCalledWith('llm_request');
+    // group 底部不再有保存条（saveMode='group' 的 save bar 已废弃，统一走 tab 级 SaveBar）
+    expect(screen.queryByRole('button', { name: '● 保存' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
   });
 
-  it('saving=true → 保存条按钮禁用', () => {
+  it('[v0.0.317] GroupSaveBar 已废弃 → saving 状态不影响渲染（无保存条）', () => {
     render(
       <SectionConfigLayout
         groups={groups}
@@ -139,8 +138,8 @@ describe('SectionConfigLayout', () => {
         savingOf={(g) => g === 'llm_request'}
       />,
     );
-    const btn = screen.getByRole('button', { name: '保存中…' }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
+    // group 底部不再有保存条（含 saving 态）
+    expect(screen.queryByRole('button', { name: '保存中…' })).toBeNull();
   });
 
   it('renderGroupArea 注入自定义节点（替代默认 KV 网格）', () => {

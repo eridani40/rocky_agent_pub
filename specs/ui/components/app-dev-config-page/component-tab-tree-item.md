@@ -15,3 +15,6 @@
 ## 视觉基线
 - active： + 左 3px accent 竖条
 - 字体 weight 仅 400/600（收敛，禁 serif/mono）
+
+## 消费方
+- `app/web/src/components/app-dev-config-page/page-app-settings-merged.tsx`

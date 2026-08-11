@@ -139,8 +139,10 @@ describe('openLocalPath — workspace 源', () => {
 
   it('⑤ 其余（不认识扩展名）→ openWorkspaceItem kind=file', () => {
     const onEditor = vi.fn();
-    openLocalPath('readme.bak', { sessionId: 's1', source: 'workspace', onEditor, onImageViewer: vi.fn() });
-    expect(openWorkspaceItemMock).toHaveBeenCalledWith('s1', { path: 'readme.bak', kind: 'file' });
+    // [v0.0.328] readme.bak 词干 readme ∈ KNOWN_TEXT_STEMS → 已识别 txt；换真正不认识的 app.unknownext
+    //   （扩展名不在表 + 词干 app 不在白名单）→ 仍走 openWorkspaceItem kind=file
+    openLocalPath('app.unknownext', { sessionId: 's1', source: 'workspace', onEditor, onImageViewer: vi.fn() });
+    expect(openWorkspaceItemMock).toHaveBeenCalledWith('s1', { path: 'app.unknownext', kind: 'file' });
     expect(onEditor).not.toHaveBeenCalled();
   });
 });

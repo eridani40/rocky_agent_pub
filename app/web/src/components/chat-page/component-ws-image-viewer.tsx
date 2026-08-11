@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Portal } from '../../lib/portal';
 import { readWorkspaceFileBinary } from '../../lib/chat-api';
+import { mediaTypeFromPath } from '../../lib/media-type';
 import { ICON_BTN } from '../academy-page/academy-styles';
 
 /** image viewer 目标（handleOpen isImagePath 命中时设置，关闭置空） */
@@ -35,20 +36,6 @@ interface Props {
   /** 目标（null = 不渲染） */
   target: WsImageTarget | null;
   onClose: () => void;
-}
-
-/** 扩展名 → media type（6 格式白名单闭合；兜底 octet-stream 防御） */
-function mediaTypeFromPath(path: string): string {
-  const ext = path.toLowerCase().split('.').pop() ?? '';
-  const map: Record<string, string> = {
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
-    webp: 'image/webp',
-    svg: 'image/svg+xml',
-  };
-  return map[ext] ?? 'application/octet-stream';
 }
 
 /**

@@ -92,10 +92,12 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-/** 触发某文件节点的打开（点 ws-tree-item 的「打开文件」按钮） */
+/** 触发某文件节点的打开（点 ws-tree-item 的 hover「打开文件」按钮；[v0.0.320 D7] item 本体也是 role=button，
+ *  用 .ws-act 精确定位打开动作按钮，避免与 item 本体 aria-label 多匹配） */
 async function clickOpenFile() {
-  await screen.findByRole('button', { name: '打开文件' });
-  fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
+  await vi.waitFor(() => expect(document.querySelector('.ws-act')).toBeTruthy());
+  const openAct = document.querySelector('.ws-act') as HTMLElement;
+  fireEvent.click(openAct);
 }
 
 describe('SectionWorkspacePanel .md 拦截（v0.0.227）', () => {
@@ -196,12 +198,12 @@ describe('SectionWorkspacePanel 未支持扩展名回归保护（v0.0.269 前置
     expect(readWorkspaceFileMock).not.toHaveBeenCalled();
   });
 
-  it('.py 文件（编程语言，不在白名单）→ 系统打开（kind=file，无占位 pill）', async () => {
+  it('.py 文件（[v0.0.320 D11] code 分类）→ 命中拦截走内置 editor（原系统打开契约已废）', async () => {
     getWorkspaceTreeMock.mockResolvedValue(treeWith({ name: 'main.py', path: 'main.py', type: 'file' }));
     render(<SectionWorkspacePanel sessionId="sess-1" />);
     await clickOpenFile();
-    await vi.waitFor(() => expect(openWorkspaceItemMock).toHaveBeenCalledWith('sess-1', { path: 'main.py', kind: 'file' }));
-    expect(readWorkspaceFileMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(readWorkspaceFileMock).toHaveBeenCalledWith('sess-1', { path: 'main.py' }));
+    expect(openWorkspaceItemMock).not.toHaveBeenCalled();
   });
 
   it('文件夹 → openWorkspaceItem 被调（kind=folder，系统打开）', async () => {

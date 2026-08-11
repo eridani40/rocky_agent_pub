@@ -15,6 +15,7 @@ import { listSquads } from '../../lib/squad-api';
 import { useMemberPanelHandlers } from './use-member-panel-handlers';
 import { useStudioUnreadMeta } from './use-studio-unread-meta';
 import { useSquadMutations } from './use-squad-mutations';
+import { useSquadMeta, type SquadAggregate } from './use-squad-meta';
 import { StudioSidebar } from './section-studio-sidebar';
 import { StudioChatRouter } from './component-studio-chat-router';
 import { MemberPanel } from './section-member-panel';
@@ -67,7 +68,7 @@ export function PageStudio() {
   // mutation handler 簇（含 reloadSquads/reloadDetail/refresh 三 fetch 工具）。
   // [v0.0.276] fallbackToSeats 后移以引用 reloadDetail（hook 输出）；fallbackToHome 用 inline 箭头延迟解析无 TDZ
   const {
-    reloadDetail, refresh,
+    reloadSquads, reloadDetail, refresh,
     handleCreateSquad, handleHire, handleBench, handleDeploy,
     handleSaveMeta, handleDeleteSquad,
   } = useSquadMutations({
@@ -82,6 +83,17 @@ export function PageStudio() {
     onSelectSquad: (id) => selectSquad(id),
     flash, t,
   });
+
+  // [v0.0.305] squad_meta SSE 单例订阅（page-studio 级）→ aggregateMap 下发 sidebar/seats
+  const { aggregateMap } = useSquadMeta({ reloadSquads });
+
+  /** 统一数据源合并：SSE 值优先，GET /squad 3 字段兜底（旧后端无字段 → undefined 降级） */
+  const getAgg = useCallback(
+    (squadId: string): SquadAggregate | undefined => {
+      return aggregateMap[squadId] ?? (squads.find((s) => s.id === squadId) as SquadAggregate | undefined);
+    },
+    [aggregateMap, squads],
+  );
 
   // v0.0.168：mutation 后统一回落首页 seats；无选中 squad 时保持空 seats（占位）
   // [v0.0.276] seats 激活即刷新：回落 seats 时 void reloadDetail 重拉 detail（fire-and-forget，幂等无害）
@@ -187,6 +199,7 @@ export function PageStudio() {
         onHire={() => setMainView({ kind: 'member-create' })}
         onSaveMeta={handleSaveMeta}
         onDelete={handleDeleteSquad}
+        getAgg={getAgg}
         onAtLeader={() => {
           // 业务全景「更多」tab「找 leader 搭看板」：切 leader 单聊 + composer 预填模板请求文本
           const d = detail?.id === mainView.squadId ? detail : null;
@@ -277,6 +290,7 @@ export function PageStudio() {
         selectedSquadId={selectedSquadId}
         onSelectSquad={selectSquad}
         onNewSquad={() => setModal({ kind: 'new-squad' })}
+        getAgg={getAgg}
       />
       {mainArea}
 

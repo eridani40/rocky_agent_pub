@@ -26,8 +26,8 @@ beforeAll(async () => {
 const observabilityPath = vi.hoisted(() =>
   require('node:path').resolve(__dirname, '../observability-config/section-observability'),
 );
-const componentKeyCardPath = vi.hoisted(() =>
-  require('node:path').resolve(__dirname, '../component-key-card'),
+const logsConfigPath = vi.hoisted(() =>
+  require('node:path').resolve(__dirname, '../section-logs-config'),
 );
 
 // mock SectionObservability：暴露两个按钮模拟 list↔detail 切换（上抛 onDetailViewChange）
@@ -40,27 +40,20 @@ vi.mock(observabilityPath, () => ({
     </div>
   ),
 }));
-// mock ComponentKeyCard：纯展示 key 名，避开 i18n desc 解析
-vi.mock(componentKeyCardPath, () => ({
-  ComponentKeyCard: ({ keyInfo }: { keyInfo: { key: string } }) => (
-    <div>key-card-{keyInfo.key}</div>
-  ),
+// mock SectionLogsConfig：logs group 不再走 kvGroups，改由 SectionLogsConfig 自行 GET /config/app?group=logs
+vi.mock(logsConfigPath, () => ({
+  SectionLogsConfig: () => <div>logs-config-mock</div>,
 }));
 
 import { SectionTabPanel } from '../section-tab-panel';
 import type { SectionTabPanelProps } from '../section-tab-panel';
 
-/** 构造 observability tab 所需的最小 props（kvGroups 只需 logs） */
+/** 构造 observability tab 所需的最小 props（logs 由 SectionLogsConfig 自行 GET，不经 kvGroups） */
 function renderObservabilityTab() {
   return render(
     <SectionTabPanel
       selectedTab="observability"
-      kvGroups={{
-        logs: {
-          groupId: 'logs',
-          keys: [{ key: 'logLevel', type: 'string', value: 'info' }],
-        },
-      }}
+      kvGroups={{}}
       defaultModelsDraft={{}}
       onDefaultModelsChange={() => {}}
       onKeyChange={() => {}}
@@ -77,8 +70,8 @@ describe('SectionTabPanel — observability tab detail 视图隐藏 logs group�
     renderObservabilityTab();
     expect(screen.getByRole('heading', { name: '可观测性' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '日志' })).toBeTruthy();
-    // logs group 的 key-card 也渲染
-    expect(screen.getByText('key-card-logLevel')).toBeTruthy();
+    // logs group 渲染 SectionLogsConfig
+    expect(screen.getByText('logs-config-mock')).toBeTruthy();
   });
 
   it('detail 态（onDetailViewChange(true)）：「可观测性」标题 + 「日志」group 均不渲染（核心 bug 修复）', () => {
@@ -88,7 +81,7 @@ describe('SectionTabPanel — observability tab detail 视图隐藏 logs group�
     // 标题 + logs group 都应消失
     expect(screen.queryByRole('heading', { name: '可观测性' })).toBeNull();
     expect(screen.queryByRole('heading', { name: '日志' })).toBeNull();
-    expect(screen.queryByText('key-card-logLevel')).toBeNull();
+    expect(screen.queryByText('logs-config-mock')).toBeNull();
     // SectionObservability 本体仍渲染（两种态都渲染）
     expect(screen.getByText('observability-mock')).toBeTruthy();
   });
@@ -102,7 +95,7 @@ describe('SectionTabPanel — observability tab detail 视图隐藏 logs group�
     fireEvent.click(screen.getByRole('button', { name: '模拟返回列表' }));
     expect(screen.getByRole('heading', { name: '可观测性' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '日志' })).toBeTruthy();
-    expect(screen.getByText('key-card-logLevel')).toBeTruthy();
+    expect(screen.getByText('logs-config-mock')).toBeTruthy();
   });
 
   it('切离 observability tab 后 obsInDetail 重置：切回时 logs/标题不被错误隐藏', () => {
@@ -110,12 +103,7 @@ describe('SectionTabPanel — observability tab detail 视图隐藏 logs group�
     // 若 obsInDetail 不重置，切回时 stale=true 会错误隐藏 list 态的 logs/标题。
     const props: SectionTabPanelProps = {
       selectedTab: 'observability',
-      kvGroups: {
-        logs: {
-          groupId: 'logs',
-          keys: [{ key: 'logLevel', type: 'string', value: 'info' }],
-        },
-      },
+      kvGroups: {},
       defaultModelsDraft: {},
       onDefaultModelsChange: () => {},
       onKeyChange: () => {},
@@ -132,6 +120,6 @@ describe('SectionTabPanel — observability tab detail 视图隐藏 logs group�
     // obsInDetail 应已被 useEffect 重置：list 态正常渲染标题 + logs
     expect(screen.getByRole('heading', { name: '可观测性' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '日志' })).toBeTruthy();
-    expect(screen.getByText('key-card-logLevel')).toBeTruthy();
+    expect(screen.getByText('logs-config-mock')).toBeTruthy();
   });
 });

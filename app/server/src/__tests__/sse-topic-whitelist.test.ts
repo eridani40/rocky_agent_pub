@@ -20,6 +20,8 @@ import { join } from 'node:path';
 import { ALLOWED_TOPICS } from '../handlers/sse';
 import { AGENT_LOOP_TOPIC, SESSION_PANEL_TOPIC, PANORAMA_TOPIC } from '../bootstrap-bus-phase';
 import { SESSION_META_TOPIC, APP_TASK_TOPIC } from '../agent/session-event-types';
+// [v0.0.305] squad_meta topic 真值（squad 层事件类型文件导出）
+import { SQUAD_META_TOPIC } from '../squad/squad-event-types';
 
 /** src 根目录（app/server/src）。__dirname = .../app/server/src/__tests__ */
 const SRC_ROOT = join(__dirname, '..');
@@ -38,6 +40,7 @@ const TOPIC_VALUE_BY_IDENT: Record<string, string> = {
   SESSION_META_TOPIC,
   APP_TASK_TOPIC,
   PANORAMA_TOPIC,
+  SQUAD_META_TOPIC,
 };
 
 /** 从 bootstrap-bus-phase.ts 源码提取全部 hub.registerTopic(IDENT, ...) 的标识符 */

@@ -5,6 +5,10 @@
 > （被 `component-chat-float-menu` 承载，取代 ws-panel「长期记忆」tab）
 > 以 `crud` prop 下传，与 badge 同一实例 —— **不在本组件内重新调用 `useMemoryCrud`**）
 
+## 消费方
+
+- `components/chat-page/component-chat-float-menu.tsx`
+
 ## 职责
 state**）+ 顶部返回按钮 + idle 空态。list 态复用 `component-memory-entry-card`；editor 态复用 `component-memory-editor-fields`。**不弹层套 modal**——editor 是同一弹层内的二级视图，非叠加。
 

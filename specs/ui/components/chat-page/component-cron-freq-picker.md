@@ -4,6 +4,10 @@
 > 文件: app/web/src/components/chat-page/component-cron-freq-picker.tsx
 > 本文是 cron 频率选择器的**概念权威源**：4 预设 + 高级折叠 + cron expr 程序生成 + 实时预览。
 
+## 消费方
+
+- `components/chat-page/component-cron-new-form.tsx`
+
 ## 1. 定位 + 设计意图
 让用户用**人话选择**频率（不直接写 cron expr），程序生成对应 5 字段 cron expr。覆盖 90% 场景的 4 个预设；剩下高级用户走折叠的「自定义 cron」raw 输入。**展示态用 cronstrue 翻译反向校验**（实时预览人话）。
 **核心约束（PRD §5）**：raw cron expr 不直接暴露给普通用户路径——只在此组件的「高级」折叠区可见。

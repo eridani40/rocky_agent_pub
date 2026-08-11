@@ -67,3 +67,7 @@ SeatsPanel `activeTab === 'seats'` 时渲染的主体。[v0.0.288] 从双列指�
 - 新增 `studio:task.statusLabels`（todo→未开始 / waiting→等待中 / in_progress→进行中 / done→已结束）
 - 删除 `studio:teamEntry.*`（TeamEntryRow 废，中英同步清）
 - 实际 i18n 路径：`app/web/src/i18n/locales/{zh-CN,en}/studio.json`（非 `app/web/src/locales/`）
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-seats-panel.tsx`

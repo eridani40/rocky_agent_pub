@@ -57,3 +57,6 @@ interface SourceFilterProps {
 - **border**：每选项底 2px 下划线（激活 `border-accent` / 非激活 `border-transparent`），`-mb-px` 压栏底线
 - **color**：激活 `text-accent`；非激活 `text-muted-2`；hover → `text-fg-2`
 - **a11y**：`role="radiogroup"` + 选项 `role="radio"`（单选筛选语义，区别于 tabs 的导航语义——避免与 nav tab 在 a11y tree/name 查询上冲突）；容器 aria-label = `sourceFilter.ariaLabel`
+
+## 消费方
+- `app/web/src/components/skill-page/page-skill.tsx`

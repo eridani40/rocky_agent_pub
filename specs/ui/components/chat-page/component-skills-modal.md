@@ -5,6 +5,10 @@
 > （被 `component-chat-float-menu` 承载，v0.0.205.t2_cons 新增；PRD 定案 1）
 > `catalog` prop 下传，与 float-menu 恒挂载的 `useSkillsCatalog` 同一实例 —— **不在本组件内重新调用 hook**。
 
+## 消费方
+
+- `components/chat-page/component-chat-float-menu.tsx`
+
 ## 职责
 展示「当前会话实际可见的 skills」的只读弹层：3 tab（session/group/global，默认 session）+ 卡片列表（渐变星形 logo + name + desc + 来源徽标）。**只展示，无开关**——不挂 enabled/evolvable toggle、无预览/删除按钮（避免与 SKILLS 全局管理页职责重叠，管理走全局页）。
 边界：不持有数据（catalog 由父传入）；不做写操作；不展示被 enabled 覆盖掉的 global 下游版本（global 组只留 enabled=true）。

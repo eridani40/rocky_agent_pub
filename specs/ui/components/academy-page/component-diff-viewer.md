@@ -72,3 +72,9 @@ interface Props {
 - 字体：diff-name 13.5px/600；diff-sum 11.5px muted；code-block mono 12px/1.7。
 - 边框：diff-item 1px border；head bottom border（open 态）；cmp-col 之间 1px border。
 - 配色：cmp-col-tag tag-base surface-2/muted；tag-cand sage-bg/sage；diff-add `--color-sage-bg`；diff-del `--color-danger-light` + line-through muted。
+
+## 消费方
+
+- `app/web/src/components/academy-page/build-diff-items.ts`
+- `app/web/src/components/academy-page/component-skill-diff-list.tsx`
+- `app/web/src/components/academy-page/skill-diff.ts`

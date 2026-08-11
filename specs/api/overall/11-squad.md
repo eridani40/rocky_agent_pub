@@ -135,11 +135,11 @@ interface Session {
 
 复用 v0.0.27 `session_meta_update`（topic=`session_meta`，group=`_all`，`04-agent-session.md §4.2`）——**所有 session 变更**（含建 squad 时建的 leader session + 群聊 session + hire member 时建的 mate session）都经此广播，会话列表据此更新 + 树形分组。
 
-### 5.2 squad/member 变更（v0.0.33.1 用 refetch，SSE 留 v4）
+### 5.2 squad/member 变更（v0.0.33.1 用 refetch；[v0.0.305] squad 聚合状态走 squad_meta SSE）
 
 squad/member 变更（hire / bench / deploy / edit / charter PUT）**v0.0.33.1 不走 SSE**——单用户操作场景，操作后前端 **refetch `GET /squad/:id`** 拉最新详情（够用）。
 
-> **`squad_meta` SSE 留 v4**：心跳多 member 变化时再加（design.md §3.5）。
+> **`[v0.0.305]` `squad_meta` SSE 已实现**（design.md §3.5 的 v4 backlog 落地）：squad 聚合状态（onlineCount/inProgressCount/lastActiveAt）变化实时推送到 `(squad_meta, _all)`——session 状态变化（statusBus 自治订阅）+ member hire/deploy/bench + squad create（handler 落盘后显式 broadcast）。契约见 `11a-squad-endpoints.md §4.5`；技术权威 `specs/tech/squad/[P1]squad_aggregate.md`。
 
 ## 6. 错误码汇总
 

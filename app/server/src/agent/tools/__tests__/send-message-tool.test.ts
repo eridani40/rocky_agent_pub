@@ -236,3 +236,82 @@ describe('send_message：subagent scope 拓扑校验（a2a_protocol §6）', () 
     expect(text).toMatch(/parent/i);
   });
 });
+
+// ============================================================
+// [v0.0.311] result targetName 返回（后端解析可读名覆盖 subagent 等场景）
+// ============================================================
+describe('send_message [v0.0.311]：result 含 targetName', () => {
+  /** 构造带 store.getSession mock 的 subagent rtc */
+  function makeRtcWithStore(
+    captured: { delivered: Message | null },
+    sessionTitle: string | null,
+  ): AgentToolRuntimeContext {
+    return {
+      parentSessionId: 'PARENT-001',
+      parentRunId: 'parent-run-001',
+      parentType: 'leader',
+      parentName: 'parent-session-title',
+      parentScope: 'subagent',
+      selfSessionId: 'CHILD-001',
+      selfType: 'subagent',
+      selfName: 'subagent',
+      agentManager: {
+        deliverTo: async (_sid: string, msg: Message) => {
+          captured.delivered = msg;
+          return { sessionId: _sid, runId: 'r', state: 'running', promise: Promise.resolve({} as never) } as never;
+        },
+      } as never,
+      store: {
+        getSession: async () =>
+          sessionTitle
+            ? ({ id: 'PARENT-001', title: sessionTitle } as never)
+            : null,
+      } as never,
+      sessionDeps: {} as never,
+    };
+  }
+
+  async function runWithStore(
+    inputFields: Record<string, unknown>,
+    sessionTitle: string | null,
+  ): Promise<{ text: string }> {
+    const captured = { delivered: null as Message | null };
+    const ctx: ToolCtx = { config: { agentToolContext: makeRtcWithStore(captured, sessionTitle) } } as unknown as ToolCtx;
+    const res = await sendMessageTool.run(inputFields as unknown as ToolInput, ctx);
+    const blocks = (res.content ?? []) as Array<{ type?: string; text?: string }>;
+    return { text: blocks.map((b) => b?.text ?? '').join('') };
+  }
+
+  it('target=parent 别名 → result JSON 含 targetName（从 session.title 解析）', async () => {
+    const { text } = await runWithStore(
+      { target: 'parent', content: [{ type: 'text', text: 'hi' }], needReply: false },
+      'Darvin',
+    );
+    const parsed = JSON.parse(text);
+    expect(parsed.messageId).toBeDefined();
+    expect(parsed.targetName).toBe('Darvin');
+  });
+
+  it('target=AgentRef object 带 name → result JSON targetName 用 ref.name（优先于 session.title）', async () => {
+    const { text } = await runWithStore(
+      {
+        target: { type: 'leader', sessionId: 'PARENT-001', name: 'boss' },
+        content: [{ type: 'text', text: 'hi' }],
+        needReply: false,
+      },
+      'should-not-use-title',
+    );
+    const parsed = JSON.parse(text);
+    expect(parsed.targetName).toBe('boss');
+  });
+
+  it('session.title 为空 → result JSON 不含 targetName 字段（前端 fallback）', async () => {
+    const { text } = await runWithStore(
+      { target: 'parent', content: [{ type: 'text', text: 'hi' }], needReply: false },
+      null,
+    );
+    const parsed = JSON.parse(text);
+    expect(parsed.messageId).toBeDefined();
+    expect(parsed.targetName).toBeUndefined();
+  });
+});

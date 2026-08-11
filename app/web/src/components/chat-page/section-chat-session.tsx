@@ -22,7 +22,7 @@ import { BaseChatPage } from './base-chat-page';
 import { ComponentMessageStream } from './component-message-stream';
 import { ComponentChatRightOverlay } from './component-chat-right-overlay';
 import { ComponentChatFloatMenu } from './component-chat-float-menu';
-import { ComponentUsagePanel, CompactBtn, ClearBtn } from './component-usage-panel';
+import { ComponentUsagePanel } from './component-usage-panel';
 import { ChatTopbarBackBtn } from './component-chat-topbar-back-btn';
 import { ComponentChatSessionInput } from './component-chat-session-input';
 import { ChatSessionTopbarLeft } from './component-chat-session-topbar-left';
@@ -188,15 +188,17 @@ function SectionChatSessionLoaded({
   // 缺省 topbarLeft：title(+tag) + readOnly 时 badge + model-tag（组件化，宿主可复用）
   const defaultTopbarLeft = <ChatSessionTopbarLeft chrome={chrome} readOnly={readOnly} />;
 
-  // topbar 右侧：usage/compact 按 capabilities；Clear 另叠 readOnly 隐藏（readOnly 保留 usage+Compact）
-  const topbarRight = (caps.usage || caps.compact || caps.clear) && (
-    <div className="flex items-center gap-2 relative">
-      {caps.usage && <ComponentUsagePanel usage={usageHook.usage ?? emptyUsage} />}
-      {caps.usage && caps.compact && <div className="w-px h-[18px] bg-border mx-1 shrink-0" />}
-      {caps.compact && (
-        <CompactBtn summaryTask={summaryHook.summaryTask} sessionBusy={sessionRunning} onClick={handleCompact} />
-      )}
-      {caps.clear && !readOnly && <ClearBtn onClick={() => setClearModalOpen(true)} />}
+  // topbar 右侧：caps.usage 单门控（v0.0.326：CompactBtn/ClearBtn 移入 panel head，props 透传；
+  // pr-0.5=2px 右 padding 使环中心右移对齐 float-menu 中心线）
+  const topbarRight = caps.usage && (
+    <div className="flex items-center pr-0.5">
+      <ComponentUsagePanel
+        usage={usageHook.usage ?? emptyUsage}
+        onCompact={caps.compact ? handleCompact : null}
+        onClear={caps.clear && !readOnly ? () => setClearModalOpen(true) : null}
+        summaryTask={summaryHook.summaryTask}
+        sessionBusy={sessionRunning}
+      />
     </div>
   );
 
@@ -218,6 +220,7 @@ function SectionChatSessionLoaded({
       messageFilter={strategy.messageFilter}
       resolveActor={strategy.resolveActor}
       sideResolver={strategy.sideResolver}
+      members={chrome.members}
       hasMore={messagesHook.hasMore}
       onLoadMore={() => void loadMore()}
       isLoadingMore={isLoadingMore}

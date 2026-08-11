@@ -29,3 +29,6 @@ model 编辑弹层：底部「确定」回写父级 draft（**不调后端、非
 ## 复用关系
 - 被组合：component-provider-detail（model 添加/编辑入口）
 - 不组合其他 component（最末端渲染层）
+
+## 消费方
+- `app/web/src/components/providers/component-provider-detail.tsx`

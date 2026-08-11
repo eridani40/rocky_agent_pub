@@ -97,3 +97,7 @@ tab 激活时的**全景工作面板**（渲染当前 view 的渲染原语 + too
 - toolbar 高度 28px。
 - kanban 列 / 卡片 / table / bar_chart 样式复用 board 已有视觉模式（颜色 = DSL display.status_colors）。
 - 无设计稿 → 功能 PASS + token 对齐即验收。
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-panorama-route.tsx`

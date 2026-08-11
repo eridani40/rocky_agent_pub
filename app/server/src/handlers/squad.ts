@@ -8,6 +8,9 @@
  */
 import { SquadStore, MemberStore } from '../stores/squad-store';
 import type { SquadEntity, MemberEntity } from '../stores/squad-store';
+// [v0.0.305] squad 聚合服务（GET /squad 批量聚合）+ 广播器（写路径 broadcast）
+import { computeSquadAggregates } from '../squad/squad-aggregate-service';
+import type { SquadMetaBroadcaster } from '../squad/squad-meta-broadcaster';
 import { createSquadService, type CreateSquadInput } from '../services/squad-service';
 import { applyTemplate, TemplateNotFoundError, type MemberSpec } from '../services/squad-template-service';
 import { dissolveSquad } from '../squad/squad-dissolve';
@@ -68,6 +71,16 @@ export interface SquadHandlerDeps {
   tokenUsageAggregator?: TokenUsageAggregatorPort;
   /** appConfig：modelDefault 写入校验（v0.0.158 起 summaryModelDefault 已删）。省略时跳过（旧测试不回归） */
   appConfig?: AppConfigService;
+  /**
+   * [v0.0.305] squad 聚合 meta 广播器（写路径落盘后 broadcast squad_meta_update）。
+   * 可选——UT/旧装配无 broadcaster 时 no-op（写路径不受影响）。
+   */
+  squadMetaBroadcaster?: SquadMetaBroadcaster;
+  /**
+   * [v0.0.305] MemberStore（squad 聚合计算 listMembers 用）。可选——缺省时内部 new
+   * （makeStores 兜底，与既有 handler 自包含惯例一致）。
+   */
+  memberStore?: MemberStore;
 }
 
 /** POST /squad 请求体（11a §1.1 CreateSquadBody；v0.0.155 加 ModelRef 复合 providerId 字段） */
@@ -141,6 +154,12 @@ export interface SquadSummary {
   enableGroupChat: boolean;
   createdAt: string;
   updatedAt: string;
+  /** [v0.0.305] 在线成员数 = member.state==='deployed' 数（与 seats onlineCount 同口径；optional 向后兼容） */
+  onlineCount?: number;
+  /** [v0.0.305] 工作中 session 数 = squadChat + members 直连 session state∈{running,interrupting,suspended} 数（与 seats 同口径） */
+  inProgressCount?: number;
+  /** [v0.0.305] 成员最后会话时间 = max(直连 session.updatedAt)；无 session 时 fallback squad.updatedAt（恒有值可排序） */
+  lastActiveAt?: string;
 }
 
 /** SquadDetail（11a §1.3 GET /squad/:id 响应；v0.0.155 加 ModelRef 复合 providerId 字段回显） */
@@ -285,9 +304,12 @@ function toDetail(s: SquadEntity, members: MemberEntity[]): SquadDetail {
   };
 }
 
-/** 内部构造 squad/member store（handler 自包含） */
+/** 内部构造 squad/member store（handler 自包含；[v0.0.305] memberStore 优先用注入实例——聚合计算共用句柄） */
 function makeStores(deps: SquadHandlerDeps): { squadStore: SquadStore; memberStore: MemberStore } {
-  return { squadStore: new SquadStore({ root: deps.dataDir }), memberStore: new MemberStore({ root: deps.dataDir }) };
+  return {
+    squadStore: new SquadStore({ root: deps.dataDir }),
+    memberStore: deps.memberStore ?? new MemberStore({ root: deps.dataDir }),
+  };
 }
 
 /** /squad 路由分发（POST/GET/GET:id/PATCH/DELETE；DELETE=team 硬删除，v0.0.111 块②）。 */
@@ -344,6 +366,8 @@ async function handleCreateSquad(req: Request, deps: SquadHandlerDeps): Promise<
       body as CreateSquadInput,
     );
     // 从模板创建：建 squad 成功后批量 hire mate + 复制配置（§⑤）
+    // [v0.0.319-fix] 传 leaderMember.id → applyTemplate 补 nameToId['leader'] 映射，
+    //   leader.md 才能改名 leader-{memberId}.md（对齐注入扫描约定）
     if (body.templateSlug) {
       try {
         await applyTemplate(deps.dataDir, created.squad.id, body.templateSlug, {
@@ -352,7 +376,7 @@ async function handleCreateSquad(req: Request, deps: SquadHandlerDeps): Promise<
           memberStore,
           dataDir: deps.dataDir,
           ...(deps.appConfig ? { appConfig: deps.appConfig } : {}),
-        });
+        }, created.leaderMember.id, body.leader.name);
       } catch (e) {
         if (e instanceof TemplateNotFoundError) {
           return json(400, { error: 'template_not_found' });
@@ -364,6 +388,8 @@ async function handleCreateSquad(req: Request, deps: SquadHandlerDeps): Promise<
     }
     // 201 + SquadDetail（11a §1.1；fetch members 给 detail，含模板 hire 的 mate）
     const members = await memberStore.listMembers(created.squad.id);
+    // [v0.0.305] 落盘成功后 broadcast 新 squad 聚合（PRD §4.4.2；await 落盘后再调，v0.0.163 race 教训）
+    deps.squadMetaBroadcaster?.broadcast(created.squad.id);
     return json(201, toDetail(created.squad, members));
   } catch (e) {
     // 事务失败（已补偿回滚，11a §1.1 500）
@@ -372,13 +398,34 @@ async function handleCreateSquad(req: Request, deps: SquadHandlerDeps): Promise<
   }
 }
 
-/** GET /squad — 列表（按 updatedAt desc，11a §1.2） */
+/** GET /squad — 列表（按 updatedAt desc，11a §1.2；[v0.0.305] 合并聚合 3 字段） */
 async function handleListSquads(deps: SquadHandlerDeps): Promise<Response> {
-  const { squadStore } = makeStores(deps);
+  const { squadStore, memberStore } = makeStores(deps);
   const list = await squadStore.listSquads();
   // listSquads 返回 createdAt desc；spec 要求 updatedAt desc，再排一次
   const sorted = list.slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return json(200, { items: sorted.map(toSummary) });
+  // [v0.0.305] 批量聚合（一次 listSessions 全量，避免 N+1；单个 squad 失败降级跳过不 500）
+  let aggregates: Map<string, { onlineCount: number; inProgressCount: number; lastActiveAt: string }> | null = null;
+  try {
+    aggregates = await computeSquadAggregates(
+      { sessionStore: deps.sessionStore, squadStore, memberStore },
+      sorted.map((s) => s.id),
+    );
+  } catch {
+    // 聚合服务异常降级：列表返回无 3 字段（旧行为），不 500
+  }
+  return json(200, {
+    items: sorted.map((s) => {
+      const summary = toSummary(s);
+      const agg = aggregates?.get(s.id);
+      if (agg) {
+        summary.onlineCount = agg.onlineCount;
+        summary.inProgressCount = agg.inProgressCount;
+        summary.lastActiveAt = agg.lastActiveAt;
+      }
+      return summary;
+    }),
+  });
 }
 
 /** GET /squad/:id — 详情（含 members + charter，11a §1.3） */

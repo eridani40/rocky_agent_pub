@@ -32,3 +32,8 @@ interface Props {
 - 字体：轴标签 11px mono muted；tooltip 12px。
 - 边框：图区无 border，仅网格线 1px surface-2。
 - 配色：折线 `--color-accent` 黑；基线点 sage；普通点 accent；base 虚线 muted-2 dashed。
+
+## 消费方
+
+- `app/web/src/components/academy-page/component-train-view-col.tsx`
+- `app/web/src/components/academy-page/section-training-observe.tsx`

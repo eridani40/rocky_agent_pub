@@ -49,3 +49,7 @@ interface SeatsViewSwitchProps {
 - MUST 恒渲染（不条件于存在 benched 成员——全 deployed 时也在场，稳定锚点）。
 - MUST 文案走 t()（双语 key `seats.viewSwitch.active/all` 须 zh-CN + en 全加；defaultValue 被 parseMissingKeyHandler 覆盖失效，禁依赖）。
 - MUST NOT 调 API / 自行过滤 rows（过滤单点 = SeatsPanel `deriveViewRows`）。
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-seats-body.tsx`

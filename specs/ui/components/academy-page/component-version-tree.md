@@ -61,3 +61,8 @@ interface Props {
 - 字体：badge mono 12px/600；ver-name 12.5px/500；ver-sub 10.5px muted。
 - 边框：行 hover 无边框（仅底色）；sel 态 border-1 + border-border-2；过程版分组左 2px border。
 - 配色：vb-formal `--color-accent` 黑底白字；vb-proc `--color-violet-bg` + `--color-violet` 字；tag-sage 当前；tag-gold 训练中；tag-muted 已完成。
+
+## 消费方
+
+- `app/web/src/components/academy-page/section-student-detail.tsx`
+- `app/web/src/components/academy-page/version-tree-nodes.ts`

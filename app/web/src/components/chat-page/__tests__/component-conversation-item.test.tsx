@@ -64,6 +64,8 @@ interface ItemOpts {
   onDelete?: () => void;
   onRefreshChildren?: () => void;
   onRenameTitle?: () => void;
+  /** [v0.0.306] pin 回调 spy（可选；未注入 → 按钮不渲染） */
+  onTogglePin?: (id: string, pinned: boolean) => void;
 }
 
 function renderItem(session: Session, opts: ItemOpts = {}) {
@@ -79,6 +81,7 @@ function renderItem(session: Session, opts: ItemOpts = {}) {
       onContextMenu={() => {}}
       onRefreshChildren={opts.onRefreshChildren}
       onRenameTitle={opts.onRenameTitle ?? (() => {})}
+      onTogglePin={opts.onTogglePin}
     />,
   );
 }
@@ -385,5 +388,72 @@ describe('ComponentConversationItem subagent-tree 选中子会话保持展开（
       />,
     );
     expect(subagentQuery()).toBeNull();
+  });
+});
+
+
+/**
+ * [v0.0.306] hover pin 按钮（对齐 SquadRow）：替换 v0.0.231 只读 PinIcon。
+ * 覆盖 5 用例（PRD §4.3 / change_plan B 组）：
+ *   ① 未 pin + 非 hover → 按钮存在 + opacity-0（visibility visible 恒占位，零 reflow）
+ *   ② 未 pin + group-hover → class 组合含 group-hover:opacity-100（hover 显示）
+ *   ③ pinned → 按钮常驻 opacity-100 + text-accent（不依赖 hover）
+ *   ④ 点击 → onTogglePin(id, true) 被调 + 不触发 onSelect（stopPropagation 验证）
+ *   ⑤ 未注入 onTogglePin → 无按钮（向后兼容）
+ * 断言基于 class/aria-label（非视觉）；aria-label 用 chat:convPanel.pin/unpin（i18n 已存在）。
+ */
+describe('ComponentConversationItem hover pin 按钮（v0.0.306）', () => {
+  it('① 未 pin + 非 hover → 按钮存在 + opacity-0（visibility visible 恒占位）', () => {
+    const onTogglePin = vi.fn();
+    renderItem(mkSession({ id: 's1', pinned: false }), { active: false, onTogglePin });
+    const btn = screen.getByRole('button', { name: '置顶' });
+    expect(btn.className).toContain('opacity-0');
+    expect(btn.className).toContain('group-hover:opacity-100');
+    expect(btn.style.visibility).toBe('visible');
+    // 未 pin：text-muted（非 accent）
+    expect(btn.className).toContain('text-muted');
+    expect(btn.className).not.toContain('text-accent');
+  });
+
+  it('② 未 pin → class 组合含 group-hover:opacity-100（hover 显示）', () => {
+    const onTogglePin = vi.fn();
+    renderItem(mkSession({ id: 's1', pinned: false }), { active: false, onTogglePin });
+    const btn = screen.getByRole('button', { name: '置顶' });
+    // jsdom 无法真 hover，断言 Tailwind group-hover class 存在（hover 时 opacity-100 生效）
+    expect(btn.className).toContain('group-hover:opacity-100');
+    // 非 hover 基态 opacity-0 与 hover class 共存（Tailwind 层叠生效）
+    expect(btn.className).toContain('opacity-0');
+  });
+
+  it('③ pinned → 按钮常驻 opacity-100 + text-accent（不依赖 hover）', () => {
+    const onTogglePin = vi.fn();
+    renderItem(mkSession({ id: 's1', pinned: true }), { active: false, onTogglePin });
+    // pinned 时 aria-label 为「取消置顶」
+    const btn = screen.getByRole('button', { name: '取消置顶' });
+    expect(btn.className).toContain('opacity-100');
+    expect(btn.className).toContain('text-accent');
+    // pinned 常驻：不含 opacity-0 / group-hover 依赖
+    expect(btn.className).not.toContain('opacity-0');
+    expect(btn.className).not.toContain('group-hover:opacity-100');
+    expect(btn.style.visibility).toBe('visible');
+  });
+
+  it('④ 点击按钮 → onTogglePin(id, true) 被调 + 不触发 onSelect（stopPropagation）', () => {
+    const onTogglePin = vi.fn();
+    const onSelect = vi.fn();
+    renderItem(mkSession({ id: 's1', pinned: false }), { active: false, onTogglePin, onSelect });
+    const btn = screen.getByRole('button', { name: '置顶' });
+    fireEvent.click(btn);
+    expect(onTogglePin).toHaveBeenCalledTimes(1);
+    expect(onTogglePin).toHaveBeenCalledWith('s1', true);
+    // stopPropagation：行 onClick 未触发（onSelect 未被调）
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('⑤ 未注入 onTogglePin → 无按钮（向后兼容）', () => {
+    renderItem(mkSession({ id: 's1', pinned: true }), { active: false });
+    // 未注入 onTogglePin：即便 pinned 也无按钮（v0.0.231 只读图标已被按钮取代，不叠加）
+    expect(screen.queryByRole('button', { name: '取消置顶' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '置顶' })).toBeNull();
   });
 });

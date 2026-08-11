@@ -3,6 +3,11 @@
 > 层级: component
 > 文件: app/web/src/components/common/component-group-list-item.tsx
 
+## 消费方
+
+- `components/app-dev-config-page/section-config-layout.tsx`
+- `components/common/section-group-list.tsx`
+
 ## 职责
 单个 group 列表项：展示 groupId + 选中态视觉 + 可选 count 徽章。是 `section-group-list` / `section-config-layout` 的最小单元。
 边界：只管展示一项 + 转发 onSelect；不感知列表全貌、不持有选中状态（受控，active 由父级比对得出）。

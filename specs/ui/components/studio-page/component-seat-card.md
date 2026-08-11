@@ -1,3 +1,14 @@
+---
+type: spec
+title: component-seat-card — 队长 mini 卡
+priority: P1
+status: deprecated
+updated: 2026-08-09
+since: v0.0.165
+---
+
+> **DEPRECATED（v0.0.288 重构后零引用，代码待清理）**：首页成员列表/坐席卡已由 `component-member-roster-list.tsx`（MemberRosterList 三分区）取代；`component-seat-card.tsx` 生产代码无任何 import（队长入 MemberRosterList 行内 isLeader badge 区分）。本文保留作历史契约。
+
 # component-seat-card
 
 > 层级: component
@@ -35,3 +46,8 @@
 - 名：Inter 14px/600 fg truncate；名行 =  容器（gap-1.5 统一间距防挤）内顺序：名 → LEADER badge（若队长）→ 可选 running spinner；**LEADER badge 行内**  + `background:var(--hue-amber-bg)` + `color:var(--hue-amber)` +
 - meta 行：mt-0.5， Inter 12px muted 单行 truncate = 脉冲点  + `statusText · state`
 - **群聊按钮右键**：`stopPropagation + preventDefault` 后上抛 `onGroupChatContextMenu(x, y)`——stopPropagation 必需（否则冒泡到根卡右键 handler 触发 leader sessionId 浮层，双重弹层）
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-seat-row.tsx`
+- `app/web/src/components/studio-page/use-seat-menu.ts`

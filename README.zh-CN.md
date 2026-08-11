@@ -38,15 +38,23 @@ Rocky Agent 是一个**桌面原生多 agent 编排器**。起一个 *leader* ag
 
 ## 🚀 特性
 
-**🤝 agent 小队** —— leader agent 派生 member agent、分派任务、经 SSE 全员同步。member 继承上下文与已解析模型，异步回复、回报。
+**🤝 agent 小队** —— leader agent 派生 member agent、分派任务、经 SSE 全员同步。member 继承上下文与已解析模型，异步回复、回报。整个团队可一键导出/导入为 zip——模板、成员、记忆与技能都在内。
 
 **🧠 自带 LLM** —— Anthropic、OpenAI、MiniMax、GLM（智谱）、DeepSeek、OpenRouter，或任意 OpenAI 兼容端点。app 内一次配置；密钥除 `DATA_DIR` 外不落任何地方。
+
+**📄 文件预览 + 编辑** —— 从工作区文件树或聊天链接把文件打开进预览栏：多 tab、内置编辑器，支持 markdown 渲染、结构化格式（JSON/YAML/XML/TOML/CSV/TSV）格式化与校验、纯文本文件（`.env`/`Dockerfile`/`Makefile`/…）、图片预览。保存带版本校验——外部改动会弹 409 冲突对话框（重载 / 强制覆盖），编辑态守卫保护未保存内容。
+
+**🚪 门模型布局** —— chat↔预览 的分隔是一扇可横向滑动的三态门：分栏、文档占满、对话占满。一键切换，per-session 持久化，布局永不移位。
+
+**🔍 工作区搜索** —— 防抖 + 后端驱动的全工作区搜索，带裁剪式结果树——不离开当前流程就能找到并打开任意文件。
 
 **🖱️ Computer Use** —— agent 截屏并通过原生 loopback 通道点击/输入——自动化真实 app，不只是沙箱。
 
 **🛠️ 工具 + HITL 审批** —— `file`、`bash`、`web_fetch`、`cron`、`search`、`ask_question`；高风险动作需人工放行。
 
 **🧩 技能 + 插件** —— 内置技能市场 + TypeScript 插件系统：声明一个扩展点，就能加新的 provider、工具、上下文源、技能或 channel。
+
+**🔄 全实时** —— SSE 驱动的实时 UI：任务看板、todo 面板、cron 面板、团队状态、会话未读、工作区文件变化——无需手动刷新。
 
 **💾 记忆 + 历史** —— 跨会话持久记忆 + 全文搜索每一段对话。
 
@@ -134,7 +142,7 @@ app/
 └── computer-native/  # 原生辅助（截屏、辅助功能）
 ```
 
-单个 `server` 进程跑 agent loop（LLM 调用 → 工具派发 → SSE 流），编排 squad，一切持久化到 SQLite。Electron 主进程托管渲染层，向打包后的 app 注入**零密钥**运行时配置。
+单个 `server` 进程跑 agent loop（LLM 调用 → 工具派发 → SSE 流），编排 squad，一切持久化到 SQLite。工具执行走 **worker pool**（`worker_threads`）异步化——重工具（bash、文件操作、搜索）不阻塞事件循环。Electron 主进程托管渲染层，向打包后的 app 注入**零密钥**运行时配置。
 
 ---
 

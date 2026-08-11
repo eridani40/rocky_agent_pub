@@ -99,5 +99,7 @@ squad = **一个自主协作单元**——在 multi_agent 地基之上，加「�
 | **业务全景** | | |
 | `panorama_*.md` | Panorama DSL 看板（独立子体系，8 份 spec） | [link]([P1]panorama_overview.md) |
 | `panorama_builtin.md`（v0.0.243） | task 普通 entity + system 标记 + lazy migration（首个系统固定 entity + 自动依赖 hook + reminder） | [link]([P1]panorama_builtin.md) |
+| **聚合视图 / SSE** | | |
+| `squad_aggregate.md`（v0.0.305） | squad 聚合视图（onlineCount/inProgressCount/lastActiveAt）+ `squad_meta` SSE 广播（squad-aggregate-service + squad-meta-broadcaster + useSquadMeta） | [link]([P1]squad_aggregate.md) |
 
 > 变更历史见 `log.md`；跨版本发布说明见 `specs/tech/version_logs/vX.Y/change_log.md`。

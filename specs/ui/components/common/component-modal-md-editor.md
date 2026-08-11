@@ -2,15 +2,15 @@
 
 > 层级: component（common/，跨页共享）
 > 文件: app/web/src/components/common/component-modal-md-editor.tsx
-> 消费方：academy 版本内容编辑（`component-academy-modals.tsx` 挂载，不传 format → 缺省 'md' 行为不变）+ workspace 文件查看/编辑（`chat-page/component-ws-file-editor.tsx` 挂载，附带 format）+ chat 链接 viewer（只读，`chat-page/component-chat-link-viewer.tsx` 挂载，readOnly=true 强制——第三消费场景）
+> 消费方：academy 版本内容编辑（`component-academy-modals.tsx` 挂载，不传 format → 缺省 'md' 行为不变）+ workspace 文件查看/编辑降级（**v0.0.320 起** `chat-page/component-ws-file-editor-fallback.tsx` 挂载，附带 format——仅无预览区 Provider 场景；原 `component-ws-file-editor.tsx` 已退役）+ ~~chat 链接 viewer~~（**v0.0.320 退役**——chat 链接 12 格式进预览区 tab，不再挂本 modal）
 
 > **命名说明**：文件名「md-editor」是 v0.0.227 历史——v0.0.241 扩展为通用 file editor（覆盖 md + 11 种格式），命名泛化（md-editor → file-editor）留 follow-up。modal 不改名 = 向后兼容 academy 引用 + `mdEditor.*` i18n key + 既有 UT。
 
 ## 职责
 跨页统一的文件查看/编辑弹层：modal shell + md-head（文件名 + mode-toggle + 关闭）+ md-body（view 模式按 format 分流：md 走 markdown 渲染 / 其余走 `<pre>` 朴素预览；edit 模式 textarea）+ md-foot（hint + 关闭 + [结构化格式]「格式化」「校验」按钮 + 保存）。
 - academy 场景：版本内容编辑（AGENTS.md / SKILL.md / 记忆 .md），不传 format → 缺省 'md' → 走 markdown 渲染（v0.0.227 既有行为）。
-- workspace 场景：点 `.md/.json/.yaml/.xml/.toml/.csv/.tsv/.jsonl/.txt/.ini/.env/.log` 文件拦截后内置查看/编辑（挂载层透传 format）。
-- chat 链接场景（只读）：聊天消息 markdown 链接点击 12 格式本地文件 → 内置**只读**查看（`readOnly=true` 强制：无 mode-toggle/保存按钮；挂载层 `component-chat-link-viewer.tsx` 按路径来源分流取内容——workspace 相对走 HTTP readWorkspaceFile，绝对路径走 Electron `shell:readFileText` IPC；不写回）。
+- workspace 场景（降级）：无预览区 Provider 时点 `.md/.json/.yaml/.xml/.toml/.csv/.tsv/.jsonl/.txt/.ini/.env/.log` 文件拦截后内置查看/编辑（挂载层 `component-ws-file-editor-fallback.tsx` 透传 format，v0.0.320 起）。
+- ~~chat 链接场景~~（**v0.0.320 退役**）：聊天消息 markdown 链接点击 12 格式本地文件 → 预览区 tab（`section-preview-area.md`），不再挂本 modal。
 
 边界：只编辑文本型字段；不编辑 version.json（模型）或 tools 白名单（那些走专属 picker）；不管版本树（编辑后版本号不变，design §2.1）。落盘不耦合本组件——`onSave` 是纯回调，由挂载层接线（academy 落 academy API；workspace 落 `POST /workspace/file/save`）。
 
@@ -41,7 +41,7 @@ interface Props {
 - **md-head**（p-13/18 + bottom border）：icon 📝（17px）+ `md-file` mono 13.5px/600 fileName + `md-sub` 11px muted subtitle + 右 `mode-toggle`（二段「👁 查看 / ✏️ 编辑」sm，激活 `--color-accent` 黑底白字）+ ✕ 关闭按钮。
 - **md-body**（flex-1 overflow-y-auto，min-h 280px）：
   - **view 模式**（默认）按 `category` 分流（v0.0.241）：
-    - `category === 'md'` → `md-view` markdown 渲染（p-18/22 + 13.5px/1.75 行高；h1 17px/600 mb-8；ul pl-20；li m-3/0；code mono 12px + surface-2 bg + 4px radius + p-1/5）。academy 调用不传 format 走此分支（回归保护）。**`md` 走 `PrimitiveMarkdownView` 渲染内核，v0.0.286 起新增 block 级 `![alt](url)` 图片渲染**：`filePath` prop derive `baseDir` → 传给 `PrimitiveMarkdownView` → 相对路径图片 resolve 到 md 文件目录 → workspace 相对走 `readWorkspaceFileBinary` HTTP / 绝对走 `readFileBinary` IPC → base64 → data URL → `<img>`；网络图片 `http(s)://` 直渲。**`filePath` 不传**（academy 场景）→ 无 baseDir → 相对图片降级 alt 文本（网络/绝对路径不受影响）。
+    - `category === 'md'` → `md-view` markdown 渲染（p-18/22 + 13.5px/1.75 行高；h1 17px/600 mb-8；ul pl-20；li m-3/0；code mono 12px + surface-2 bg + 4px radius + p-1/5）。academy 调用不传 format 走此分支（回归保护）。**`md` 走 `PrimitiveMarkdownView` 渲染内核**：① block 级 `![alt](url)` 图片渲染——`filePath` prop derive `baseDir` → 传给 `PrimitiveMarkdownView` → 相对路径图片 resolve 到 md 文件目录 → workspace 相对走 `readWorkspaceFileBinary` HTTP / 绝对走 `readFileBinary` IPC → base64 → data URL → `<img>`；网络图片 `http(s)://` 直渲（`filePath` 不传（academy 场景）→ 无 baseDir → 相对图片降级 alt 文本，网络/绝对路径不受影响）。② **有序列表编号重置/跳变检测**：多个独立的 `1.` 列表各自从 1 开始（断行检测——遇到非首项的 `1.` → 断开当前 `<ol>` 开新 `<ol>`；遇到非连续编号如 `1.` → `3.` → 断开），保证同一段 markdown 中多处 `1.` 开头的列表各自独立编号而非连续累加。
     - `category === 'structured' | 'plain'` → `<pre>` 朴素预览（p-18/22 + mono 13px/1.7 + `whitespace-pre-wrap break-words`；保留缩进/换行，**无**语法高亮 / 行号 / 折叠——PRD §2.2 极简风格）。
   - **edit 模式**：`md-edit` textarea 全宽全高（p-18/22 mono 13px/1.7）；所有 format 统一用 textarea（不引入 CodeMirror/Monaco）。
 - **md-foot**（p-12/18 + top border）：
@@ -54,7 +54,7 @@ interface Props {
   - **可见文案**（E2E）：fileName / subtitle / 「👁 查看」「✏️ 编辑」/ ✕ 关闭 tooltip / hint 文案（默认模板或 `hint` 覆盖值或 validateResult 状态文案）/ 「关闭」「保存」/ 「格式化」「校验」（仅 edit + structured）。
 
 ## 复用关系
-- **跨页共享（common/）**：academy + workspace 双消费触发提升（design §8.2「跨 ≥2 页复用时提升 common/」预告，v0.0.227 落实；v0.0.241 扩 format Props 不会破坏 academy 调用——缺省 'md'）。academy 侧由 `section-student-detail` 四元组卡触发（如 System Prompt 卡「查看 / 编辑」）；workspace 侧由 `section-workspace-panel.handleOpen` 点 md/json/yaml 等 12 格式文件触发（挂载层 `component-ws-file-editor.tsx`，v0.0.241 改名自 `component-ws-md-editor.tsx`）；chat 链接侧由 `component-message-stream` 内链接点击触发（挂载层 `component-chat-link-viewer.tsx`，readOnly=true 强制只读，详见 `../chat-page/component-chat-link-viewer.md`）。
+- **跨页共享（common/）**：academy + workspace 降级双消费触发提升（design §8.2「跨 ≥2 页复用时提升 common/」预告，v0.0.227 落实；v0.0.241 扩 format Props 不会破坏 academy 调用——缺省 'md'）。academy 侧由 `section-student-detail` 四元组卡触发（如 System Prompt 卡「查看 / 编辑」）；workspace 侧由 `section-workspace-panel.handleOpen` 点 md/json/yaml 等 12 格式文件触发（**v0.0.320 起仅无预览区 Provider 场景降级**，挂载层 `component-ws-file-editor-fallback.tsx`，v0.0.241 原挂载层 `component-ws-file-editor.tsx` 已退役）；chat 链接侧 **v0.0.320 退役**（12 格式进预览区 tab，不再挂本 modal，详见 `../chat-page/section-preview-area.md`）。
 - ver-hero 不再持编辑入口（槽位留给过程版「进入观察」）。
 - 不复用 studio-page 的 charter-editor（那有 4 字段 + history，语义不同）。
 - **已知技术债**：组件反向引用 `../academy-page/academy-styles`（BTN_PRIMARY / BTN_SECONDARY / ICON_BTN tokens）——common 依赖 academy 样式是层级倒置，follow-up 可把 BTN tokens 提到 common 样式层；命名泛化（md-editor → file-editor）亦留 follow-up。

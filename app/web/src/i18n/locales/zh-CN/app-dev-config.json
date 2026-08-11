@@ -12,31 +12,87 @@
     "discardConfirmCancel": "取消"
   },
   "tab": {
-    "general": { "label": "通用" },
-    "session": { "label": "会话" },
-    "models": { "label": "模型" },
-    "tools": { "label": "工具" },
-    "memory": { "label": "记忆" },
-    "observability": { "label": "可观测性" },
-    "consolidation": { "label": "整理" },
-    "plugin": { "label": "插件" }
+    "general": {
+      "label": "通用"
+    },
+    "session": {
+      "label": "会话"
+    },
+    "models": {
+      "label": "模型"
+    },
+    "tools": {
+      "label": "工具",
+      "web_search": "网络搜索",
+      "web_fetch": "网络抓取",
+      "see_image": "看图理解",
+      "bash": "命令行"
+    },
+    "memory": {
+      "label": "记忆"
+    },
+    "observability": {
+      "label": "可观测性"
+    },
+    "consolidation": {
+      "label": "整理"
+    },
+    "plugin": {
+      "label": "插件"
+    },
+    "config_sync": {
+      "label": "配置同步"
+    },
+    "team_sync": {
+      "label": "团队同步"
+    }
   },
   "group": {
-    "appearance": { "label": "外观" },
-    "providers": { "label": "供应商" },
-    "web_search": { "label": "网络搜索" },
-    "web_fetch": { "label": "网络抓取" },
-    "see_image": { "label": "看图理解" },
-    "bash": { "label": "Bash 工具" },
-    "locale": { "label": "语言" },
-    "user_memory": { "label": "长期记忆" },
-    "llm_request": { "label": "LLM 请求" },
-    "default_models": { "label": "Playground 默认模型" },
-    "observability": { "label": "可观测性" },
-    "logs": { "label": "日志" },
-    "plugin": { "label": "插件" },
-    "session": { "label": "会话注入数量" },
-    "consolidation": { "label": "整理" }
+    "appearance": {
+      "label": "外观"
+    },
+    "providers": {
+      "label": "供应商"
+    },
+    "web_search": {
+      "label": "网络搜索"
+    },
+    "web_fetch": {
+      "label": "网络抓取"
+    },
+    "see_image": {
+      "label": "看图理解"
+    },
+    "bash": {
+      "label": "Bash 工具"
+    },
+    "locale": {
+      "label": "语言"
+    },
+    "user_memory": {
+      "label": "长期记忆"
+    },
+    "llm_request": {
+      "label": "LLM 请求"
+    },
+    "default_models": {
+      "label": "Playground 默认模型"
+    },
+    "observability": {
+      "label": "可观测性"
+    },
+    "logs": {
+      "label": "日志"
+    },
+    "plugin": {
+      "label": "插件"
+    },
+    "session": {
+      "label": "会话注入数量"
+    },
+    "consolidation": {
+      "label": "整理"
+    }
   },
   "userMemory": {
     "title": "全局长期记忆",
@@ -240,6 +296,68 @@
         "label": "记录性能日志",
         "desc": "记录慢查询（耗时超 200ms 的持久层查询）到 logs/performance.log（含实体名/耗时/条数，定位性能瓶颈用）"
       }
+    }
+  },
+  "team_sync": {
+    "desc": "导出当前团队配置为 zip，或从 zip 导入创建新团队（含 AGENTS.md、成员定义、技能、记忆、模板、命令、权限配置）。",
+    "export_btn": "导出团队",
+    "import_btn": "导入团队",
+    "cancel_btn": "取消",
+    "no_squad_hint": "当前会话不属于任何团队。仍可点「导出团队」从列表选择其他团队。",
+    "export_success": "导出成功，浏览器开始下载 zip 文件",
+    "export_picker": {
+      "title": "选择要导出的团队",
+      "loading": "加载中…",
+      "load_failed": "团队列表加载失败",
+      "retry": "重试",
+      "empty": "没有可导出的团队",
+      "member_count": "{{count}} 个成员",
+      "confirm": "确定"
+    },
+    "import_invalid": "请选择有效的团队导出文件（.zip）",
+    "import_failed": "导入失败",
+    "preview_team": "团队名",
+    "preview_leader": "Leader",
+    "preview_members": "成员（{{count}} 人）",
+    "name_label": "新团队名称",
+    "dup_warning": "已存在同名团队，导入后会有两个同名团队",
+    "confirm_title": "确认导入",
+    "confirm_body": "即将创建团队「{{name}}」，包含 {{count}} 个成员。确认导入？",
+    "confirm_ok": "导入",
+    "import_success": "导入成功：团队「{{name}}」已创建（{{count}} 个成员）",
+    "imported_hint": "导入完成，请到团队列表查看新团队。"
+  },
+  "config_sync": {
+    "loading": "加载中…",
+    "back": "返回",
+    "tree": {
+      "providers": "模型配置",
+      "tools": "工具配置",
+      "empty_providers": "无可导出的模型配置",
+      "duplicate_label": "存在重名"
+    },
+    "export": {
+      "title": "导出配置",
+      "desc": "将模型和工具配置导出为加密文件",
+      "do_export": "导出",
+      "exporting": "导出中…",
+      "success": "导出成功，{{providerCount}} 个模型配置、{{toolCount}} 个工具配置",
+      "failed": "导出失败，请重试",
+      "load_failed": "加载配置失败"
+    },
+    "import": {
+      "title": "导入配置",
+      "desc": "从加密文件导入模型和工具配置",
+      "do_import": "导入",
+      "importing": "导入中…",
+      "reselect": "重新选择文件",
+      "parse_failed": "文件解析失败",
+      "success": "导入成功：{{providerCount}} 个模型配置、{{toolCount}} 个工具配置",
+      "failed": "导入失败，请重试",
+      "confirm_title": "确认导入",
+      "confirm_body": "即将导入 {{providerCount}} 个模型配置、{{toolCount}} 个工具配置，工具配置将覆盖现有设置。确认导入？",
+      "confirm_ok": "确认导入",
+      "confirm_cancel": "取消"
     }
   }
 }

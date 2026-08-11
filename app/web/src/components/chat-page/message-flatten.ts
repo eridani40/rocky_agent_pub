@@ -120,15 +120,27 @@ export function flattenMessages(messages: Message[], blockFilter: BlockFilter = 
           textIdx++;
         } else if (b.type === 'tool_call') {
           // tool_call 不过 blockFilter（非 reminder 载体）；群聊靠 messageFilter 整条 mute
-          elements.push({
-            kind: 'tool-call-item',
-            key: `${m.id}:c:${b.id}`,
-            messageId: m.id,
-            toolCallId: b.id,
-            name: b.name,
-            arguments: b.arguments,
-            result: resultMap.get(b.id),
-          });
+          // send_message 全局拦截：产出 send-message-envelope（不产 tool-call-item，不进 tool-batch）
+          if (b.name === 'send_message') {
+            elements.push({
+              kind: 'send-message-envelope',
+              key: `${m.id}:sm:${b.id}`,
+              messageId: m.id,
+              toolCallId: b.id,
+              arguments: b.arguments,
+              result: resultMap.get(b.id),
+            });
+          } else {
+            elements.push({
+              kind: 'tool-call-item',
+              key: `${m.id}:c:${b.id}`,
+              messageId: m.id,
+              toolCallId: b.id,
+              name: b.name,
+              arguments: b.arguments,
+              result: resultMap.get(b.id),
+            });
+          }
         }
         // reasoning / usage 跳过
       }

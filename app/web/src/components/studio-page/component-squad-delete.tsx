@@ -97,7 +97,8 @@ export function SquadDeleteSection({ squadName, onDelete }: SquadDeleteSectionPr
           <p className="mb-3 text-[12.5px] leading-relaxed text-fg-2">
             {t('studio:deleteSquad.warning')}
           </p>
-          <label className={FIELD_LABEL}>{t('studio:deleteSquad.confirmLabel', { name: squadName })}</label>
+          {/* v0.0.315: 去掉 uppercase——confirmLabel 含 squadName，须保持原始大小写让用户精确输入匹配 */}
+          <label className={FIELD_LABEL.replace(' uppercase', '')}>{t('studio:deleteSquad.confirmLabel', { name: squadName })}</label>
           <input
 
             className={INPUT}

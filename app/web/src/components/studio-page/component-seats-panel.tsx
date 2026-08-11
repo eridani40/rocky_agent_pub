@@ -12,15 +12,18 @@
  */
 import { useCallback, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Member, PatchSquadBody, SquadDetail } from './squad-types';
+import type { Member, PatchSquadBody, SquadDetail, SaveBarController } from './squad-types';
 import type { SessionState } from '../chat-page/types';
 import type { ChatNode } from './chat-node';
+import type { SquadAggregate } from './use-squad-meta';
 import { useSeatsData, type SeatsView } from './use-seats-data';
 import { buildMemberChatNode as buildMemberChatNodeHelper } from './squad-status-utils';
 import { ManageTab } from './component-manage-tab';
 import { AutoworkTab } from './component-autowork-tab';
 import { SeatsBody } from './component-seats-body';
 import { StudioContextMenu } from './component-studio-context-menu';
+import { SaveBar } from '../common/component-save-bar';
+import { ConfirmModal } from '../common/component-confirm-modal';
 
 /** 首页三 tab 内联标识 */
 export type SeatsPanelTab = 'seats' | 'panel' | 'autowork';
@@ -46,6 +49,8 @@ export interface SeatsPanelProps {
   onAtLeader: () => void;
   /** 可选初始 tab（默认 'seats'） */
   initialTab?: SeatsPanelTab;
+  /** [v0.0.305] squad 聚合数据（统一数据源，统计条消费；optional 旧消费方兼容） */
+  getAgg?: (squadId: string) => SquadAggregate | undefined;
 }
 
 const TABS: { id: SeatsPanelTab; labelKey: string; testid: string; actionKey: string }[] = [
@@ -70,10 +75,36 @@ export function SeatsPanel({
   onDelete,
   onAtLeader,
   initialTab = 'seats',
+  getAgg,
 }: SeatsPanelProps): ReactNode {
   const { t } = useTranslation(['studio', 'common']);
   const [activeTab, setActiveTab] = useState<SeatsPanelTab>(initialTab);
   const { seats, stats } = useSeatsData(squadId, detail, stateMap);
+
+  // [v0.0.317] 面板级 SaveBar：当前 tab 的 SaveBarController（ManageTab/AutoworkTab 上推）
+  const [saveBarCtrl, setSaveBarCtrl] = useState<SaveBarController | null>(null);
+  // [v0.0.317] tab 切换 dirty 保护：pendingTab 非 null = 有待确认的切 tab 请求
+  const [pendingTab, setPendingTab] = useState<SeatsPanelTab | null>(null);
+
+  /**
+   * [v0.0.317] tab 切换 handler：dirty 时弹确认 modal，不 dirty 直接切。
+   * 切出 seats tab（无 SaveBarController）总是直接切。
+   */
+  const handleTabSwitch = (tab: SeatsPanelTab) => {
+    if (saveBarCtrl?.dirty) {
+      setPendingTab(tab);
+    } else {
+      setActiveTab(tab);
+    }
+  };
+
+  /** [v0.0.317] 确认丢弃改动 → cancel + 切 tab */
+  const confirmDiscardAndSwitch = () => {
+    if (pendingTab === null) return;
+    saveBarCtrl?.cancel();
+    setActiveTab(pendingTab);
+    setPendingTab(null);
+  };
 
   // [v0.0.168] 右键浮层菜单 state（复制 Session ID）；触发点=坐席卡 + 首页群聊入口卡
   const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -94,7 +125,9 @@ export function SeatsPanel({
     squadId: detail.id,
   });
 
-  const onlineCount = stats.onlineCount;
+  // [v0.0.305] 统计条消费聚合数据（统一数据源）：SSE 值优先，useSeatsData 兜底
+  const agg = getAgg?.(squadId);
+  const onlineCount = agg?.onlineCount ?? stats.onlineCount;
   // [v0.0.288] 视图 state 仍归 panel（唯一源）；过滤移到 SeatsBody 的 derivePanelRows + showBenched=view==='all'
   const [seatsView, setSeatsView] = useState<SeatsView>('active');
 
@@ -130,7 +163,7 @@ export function SeatsPanel({
                 type="button"
                 data-action-key={tb.actionKey}
                 data-active={activeTab === tb.id ? 'true' : 'false'}
-                onClick={() => setActiveTab(tb.id)}
+                onClick={() => handleTabSwitch(tb.id)}
                 className={
                   '-mb-px border-b-2 px-3 py-1.5 text-[12.5px] transition-colors ' +
                   (activeTab === tb.id
@@ -165,18 +198,41 @@ export function SeatsPanel({
         </>
       )}
       {activeTab === 'panel' && (
-        <div className="max-w-[920px] px-8 pb-10 pt-5">
+        <div className="max-w-[880px] px-8 pb-10 pt-6">
           <ManageTab
             detail={detail}
             onSaveMeta={onSaveMeta}
             onDelete={onDelete}
+            onSaveBarChange={setSaveBarCtrl}
           />
         </div>
       )}
       {activeTab === 'autowork' && (
-        <div className="max-w-[920px] px-8 pb-10 pt-5">
-          <AutoworkTab detail={detail} onSaveMeta={onSaveMeta} />
+        <div className="max-w-[880px] px-8 pb-10 pt-6">
+          <AutoworkTab detail={detail} onSaveMeta={onSaveMeta} onSaveBarChange={setSaveBarCtrl} />
         </div>
+      )}
+
+      {/* [v0.0.317] 面板级统一 SaveBar：panel/autowork tab 时底部渲染（seats tab 不渲染） */}
+      {saveBarCtrl && (activeTab === 'panel' || activeTab === 'autowork') && (
+        <SaveBar
+          dirty={saveBarCtrl.dirty}
+          saving={saveBarCtrl.saving}
+          onSave={() => void saveBarCtrl.save()}
+          onCancel={saveBarCtrl.cancel}
+        />
+      )}
+
+      {/* [v0.0.317] tab 切换 dirty 保护：确认丢弃 modal */}
+      {pendingTab !== null && (
+        <ConfirmModal
+          title={t('studio:saveBar.discardTitle')}
+          body={t('studio:saveBar.discardBody')}
+          okLabel={t('studio:saveBar.discardConfirm')}
+          cancelLabel={t('common:action.cancel')}
+          onOk={confirmDiscardAndSwitch}
+          onCancel={() => setPendingTab(null)}
+        />
       )}
 
       {/* [v0.0.168] 右键浮层菜单（复制 Session ID） */}

@@ -1,52 +1,31 @@
 /**
  * component-group-chat-toggle —— squad 群聊可见性开关（enableGroupChat）
  * 参考: specs/tech/version_logs/v0.0.270/change_plan.md（ui-autowork GroupChatToggle）
- *       仿 component-squad-autonomy-toggle.tsx（data-action-key + role=switch + pending + error banner）
+ *       specs/tech/version_logs/v0.0.316/change_plan.md P0（受控化——攒入 ManageTab dirty/save）
  *
  * 职责：开/关 squad.enableGroupChat。开（默认）→ agents 注入 SquadChat + UI 群聊入口可见；
  *   关 → reachable_agents squadChatRef 不构造（system prompt + system_reminder 两头无 SquadChat）
  *   + SeatCard 群聊按钮隐藏 + send_message('squadchat') 报错。squad 实体恒存在，仅控可见性。
- * 边界：只控 enableGroupChat 一个布尔；无本地态切换（PATCH 成功后父级 refresh 回灌新值）；
- *   防 in-flight 双击竞态。
+ * v0.0.316: 改为受控组件——去掉 squadId/onPatch/pending/error，由 ManageTab 管理状态 + 统一 save。
  */
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FIELD_LABEL, FIELD_HINT } from './studio-styles';
 
 interface GroupChatToggleProps {
-  squadId: string;
-  /** 反映 squad.enableGroupChat 当前值（PATCH 成功后父级 refresh → 新值回灌） */
+  /** 当前开关状态（由 ManageTab draft state 控制） */
   enableGroupChat: boolean;
-  /** 上抛 → PATCH /squad/:id { enableGroupChat } */
-  onPatch: (patch: { enableGroupChat: boolean }) => Promise<void>;
+  /** 切换回调（ManageTab 更新 draft state → 攒入 dirty → 统一 save） */
+  onChange: (enableGroupChat: boolean) => void;
 }
 
-/** 群聊可见性开关 */
-export function GroupChatToggle({ squadId, enableGroupChat, onPatch }: GroupChatToggleProps) {
+/** 群聊可见性开关（受控） */
+export function GroupChatToggle({ enableGroupChat, onChange }: GroupChatToggleProps) {
   const { t } = useTranslation('studio');
-  const [pending, setPending] = useState(false);
-  // 错误态：PATCH 失败时 banner 显示；toggle 回滚到原态（父级未 refresh，enableGroupChat 仍是原值）
-  const [error, setError] = useState<string | null>(null);
-
-  const toggle = async () => {
-    if (pending) return; // 防 in-flight 双击竞态
-    setError(null);
-    setPending(true);
-    try {
-      await onPatch({ enableGroupChat: !enableGroupChat });
-      // 成功：父级 refresh → enableGroupChat 回灌新值；本组件无本地态切换
-    } catch (e) {
-      // 失败：显示 banner，toggle 视觉保持原态（enableGroupChat 未变）
-      setError(e instanceof Error ? e.message : t('groupChat.toggleFail'));
-    } finally {
-      setPending(false);
-    }
-  };
 
   const on = enableGroupChat;
 
   return (
-    <div data-squad-id={squadId} className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5">
       <label className={FIELD_LABEL}>{t('groupChat.label')}</label>
       <div className="flex items-center gap-3">
         {/* toggle 控件本体（点击目标） */}
@@ -55,10 +34,9 @@ export function GroupChatToggle({ squadId, enableGroupChat, onPatch }: GroupChat
           data-action-key="studio.squad.toggle-group-chat"
           role="switch"
           aria-checked={on}
-          disabled={pending}
-          onClick={() => void toggle()}
+          onClick={() => onChange(!on)}
           className={
-            'relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ' +
+            'relative inline-flex h-5 w-9 items-center rounded-full transition-colors ' +
             (on ? 'bg-accent' : 'bg-border-strong')
           }
         >
@@ -75,11 +53,6 @@ export function GroupChatToggle({ squadId, enableGroupChat, onPatch }: GroupChat
       </div>
       {/* hint 说明行（关闭影响：注入 + UI 入口 + send_message 门控） */}
       <span className={FIELD_HINT}>{t('groupChat.hint')}</span>
-      {error && (
-        <div className="mt-1 flex items-center gap-2 rounded-md border border-danger/40 bg-danger/5 px-2.5 py-1.5 text-[11.5px] text-danger">
-          {t('groupChat.errorPrefix')}{error}
-        </div>
-      )}
     </div>
   );
 }

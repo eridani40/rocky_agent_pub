@@ -4,6 +4,10 @@
 > 文件: app/web/src/components/chat-page/component-history-minimap.tsx
 > 本文是历史 query minimap 的**概念权威源**：数据契约（bar 派生）+ 交互（Dock 悬停 / 预览 / 跳转）+ testid + 视觉基线。
 
+## 消费方
+
+- `components/chat-page/component-chat-right-overlay.tsx`
+
 ## 1. 定位 + 设计意图（一句话）
 聊天区（chat-detail）右缘一列纵向堆叠的小横条（bar），每条对应会话中一条「渲染为**右侧 user 气泡**的历史消息」。悬停 Dock 放大 + 左侧预览气泡（query + 回答头部截断），点击滚动跳转到该 query 消息。**仅作定位辅助，不展全文**。三处 chat 页（playground / studio 单聊 / studio 群聊）统一复用同组件（由 `component-chat-right-overlay` 承载，见 §7）。
 

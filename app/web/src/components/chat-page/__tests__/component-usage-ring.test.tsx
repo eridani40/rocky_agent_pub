@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 /**
- * component-usage-ring + component-usage-panel 单测（v0.0.16 §4.2 / §4.7）
+ * component-usage-ring + component-usage-panel 单测（v0.0.16 §4.2 / §4.7 + v0.0.326 trigger 重构）
  * 参考: specs/ui/components/chat-page/component-usage-panel.md §4.2（圆环配色阈值）/ §4.7（表格行可见规则）
+ *       specs/tech/version_logs/v0.0.326/change_plan.md（D1-D4）
  *
  * 覆盖：
  *   - usageRingColor 三段配色（<0.5 var(--success) / <0.8 var(--warning) / ≥0.8 var(--danger)）
- *   - ComponentUsagePanel 渲染：收起 trigger + expand btn；展开后 3 段 + 3 图例 + cum-table
+ *   - ComponentUsageRing 默认 size=36（v0.0.326 起，原 28）
+ *   - ComponentUsagePanel trigger：整环 onClick toggle + 环内百分比叠层（text-fg-2）+ 无 fmtK 文字/tooltip/chevron
+ *   - 展开浮层 head 右侧 CompactBtn/ClearBtn（props 透传 + size='sm' + disabled 绑 summaryTask）
  *   - cum-row 行可见规则：current 始终展示；forked/sub total=0 隐藏；total 末尾必有
  */
 import { describe, it, expect, afterEach, vi, beforeAll } from 'vitest';
@@ -38,12 +41,12 @@ describe('usageRingColor 三段配色阈值（§4.2，走 success/warning/danger
 });
 
 describe('ComponentUsageRing SVG（§4.2）', () => {
-  it('渲染 SVG 圆环 + 默认 28×28 stroke4', () => {
+  it('渲染 SVG 圆环 + 默认 36×36 stroke4（v0.0.326 起，原 28×28）', () => {
     const { container } = render(<ComponentUsageRing used={10} total={100} />);
     const svg = container.querySelector('svg')!;
     expect(svg).toBeTruthy();
-    expect(svg.getAttribute('width')).toBe('28');
-    expect(svg.getAttribute('height')).toBe('28');
+    expect(svg.getAttribute('width')).toBe('36');
+    expect(svg.getAttribute('height')).toBe('36');
     // 2 个 circle（底环 + 填充环）
     expect(container.querySelectorAll('circle').length).toBe(2);
   });
@@ -107,42 +110,51 @@ function mkUsage(opts: {
   };
 }
 
-/** 点击展开按钮（收起态 aria-label = 展开用量） */
-function clickExpand() {
-  fireEvent.click(screen.getByRole('button', { name: '展开用量' }));
+/** 点击 trigger（整环可点，aria-label = 点击查看用量详情）展开/收起 */
+function clickTrigger() {
+  fireEvent.click(screen.getByRole('button', { name: '点击查看用量详情' }));
 }
 
-describe('ComponentUsagePanel 收起态（§3.1）', () => {
-  it('渲染圆环 + 数字 + 展开按钮', () => {
-    const { container } = render(<ComponentUsagePanel usage={mkUsage({ used: 23000, total: 200000 })} />);
+describe('ComponentUsagePanel 收起态 trigger（v0.0.326 重构：整环可点 + 百分比叠层）', () => {
+  it('渲染圆环 + 环内百分比整数（text-fg-2 统一色）', () => {
+    const { container } = render(<ComponentUsagePanel usage={mkUsage({ used: 46000, total: 200000 })} />);
+    const trigger = screen.getByRole('button', { name: '点击查看用量详情' });
+    expect(trigger).toBeTruthy();
+    // 环 size=36
+    const svg = trigger.querySelector('svg')!;
+    expect(svg.getAttribute('width')).toBe('36');
+    // 环内百分比 absolute span（Math.round(46000/200000*100)=23）
+    const pctSpan = trigger.querySelector('span.absolute')!;
+    expect(pctSpan.textContent).toBe('23%');
+    expect(pctSpan.className).toContain('text-fg-2');
+    expect(pctSpan.className).toContain('pointer-events-none');
     expect(container.querySelector('svg')).toBeTruthy();
-    // 数字 span（font-mono）展示 k 格式
-    const num = container.querySelector('span.font-mono')!;
-    expect(num.textContent).toContain('23k');
-    expect(num.textContent).toContain('200k');
-    expect(screen.getByRole('button', { name: '展开用量' })).toBeTruthy();
   });
 
-  it('数字显示 k 格式（23k/200k）', () => {
+  it('trigger 有 cursor-pointer + hover bg + title（可点击感官）', () => {
+    render(<ComponentUsagePanel usage={mkUsage({})} />);
+    const trigger = screen.getByRole('button', { name: '点击查看用量详情' });
+    expect(trigger.className).toContain('cursor-pointer');
+    expect(trigger.className).toContain('hover:bg-bg-warm');
+    expect(trigger.getAttribute('title')).toBe('点击查看用量详情');
+  });
+
+  it('无 fmtK 文字（23k/200k 删除）+ 无 chevron 展开按钮', () => {
     const { container } = render(<ComponentUsagePanel usage={mkUsage({ used: 23000, total: 200000 })} />);
-    const num = container.querySelector('span.font-mono')!;
-    expect(num.textContent).toContain('23k');
-    expect(num.textContent).toContain('200k');
-  });
-
-  it('数字小于 1000 显示原值（非 k）', () => {
-    const { container } = render(<ComponentUsagePanel usage={mkUsage({ used: 500, total: 200000 })} />);
-    const num = container.querySelector('span.font-mono')!;
-    expect(num.textContent).toContain('500');
+    // 无「23k/200k」fmtK 文字
+    expect(container.textContent).not.toContain('23k');
+    expect(container.textContent).not.toContain('200k');
+    // 唯一 button role = trigger（chevron btn 已删，无 chat.usage.toggle action-key）
+    expect(container.querySelector('[data-action-key="chat.usage.toggle"]')).toBeNull();
   });
 });
 
-describe('ComponentUsagePanel 展开态（§3.2 / §4.6-§4.7）', () => {
-  it('点展开 → panel 浮出，含标题 + 3 段进度 + 3 图例 + 累积消耗表格', () => {
+describe('ComponentUsagePanel 展开态（§3.2 / §4.6-§4.7 + v0.0.326 head 按钮）', () => {
+  it('点 trigger → panel 浮出，含标题 + 3 段进度 + 3 图例 + 累积消耗表格', () => {
     const { container } = render(<ComponentUsagePanel usage={mkUsage({ used: 23000, total: 200000 })} />);
     // 初始收起：panel 不存在
     expect(screen.queryByText('Token 用量')).toBeNull();
-    clickExpand();
+    clickTrigger();
     // 展开后 panel + 子组件齐全
     expect(screen.getByText('Token 用量')).toBeTruthy();
     // 3 图例
@@ -160,38 +172,50 @@ describe('ComponentUsagePanel 展开态（§3.2 / §4.6-§4.7）', () => {
 
   it('cum-row-current 始终展示（即使 input/output=0）', () => {
     render(<ComponentUsagePanel usage={mkUsage({ curIn: 0, curOut: 0, used: 0 })} />);
-    clickExpand();
+    clickTrigger();
     expect(screen.getByText('会话')).toBeTruthy();
   });
 
   it('cum-row-total 末尾必有', () => {
     render(<ComponentUsagePanel usage={mkUsage({})} />);
-    clickExpand();
+    clickTrigger();
     expect(screen.getAllByText('合计').length).toBeGreaterThan(0);
+  });
+
+  it('panel 定位：top-full + right-[96px] 左下展开、让开右侧 float-menu（v0.0.328 修复 326）', () => {
+    const { container } = render(<ComponentUsagePanel usage={mkUsage({})} />);
+    clickTrigger();
+    // 展开浮层（w-[300px] 容器）必须带 right-[96px] 偏移，避开 chat 右缘 float-menu 竖排并留视觉缓冲；
+    // 不得回退为 right-0（right-0 时 panel 右缘贴环右缘，300px 宽会盖住 float-menu 列）。
+    const panel = container.querySelector('.w-\\[300px\\]')!;
+    expect(panel).toBeTruthy();
+    expect(panel.className).toContain('top-full');
+    expect(panel.className).toContain('right-[96px]');
+    expect(panel.className).not.toContain('right-0');
   });
 
   it('forked/sub total=0 时隐藏（§4.7 行可见规则）', () => {
     render(<ComponentUsagePanel usage={mkUsage({ forkedIn: 0, forkedOut: 0, subIn: 0, subOut: 0 })} />);
-    clickExpand();
+    clickTrigger();
     expect(screen.queryByText('整理')).toBeNull();
     expect(screen.queryByText('子Agent')).toBeNull();
   });
 
   it('forked total>0 时展示整理行', () => {
     render(<ComponentUsagePanel usage={mkUsage({ forkedIn: 100, forkedOut: 50 })} />);
-    clickExpand();
+    clickTrigger();
     expect(screen.getByText('整理')).toBeTruthy();
   });
 
   it('sub total>0 时展示子Agent行', () => {
     render(<ComponentUsagePanel usage={mkUsage({ subIn: 200, subOut: 100 })} />);
-    clickExpand();
+    clickTrigger();
     expect(screen.getByText('子Agent')).toBeTruthy();
   });
 
   it('占用率文案含「已占用」和「剩余」', () => {
     render(<ComponentUsagePanel usage={mkUsage({ used: 50000, total: 200000 })} />);
-    clickExpand();
+    clickTrigger();
     const pct = screen.getByText(/已占用/);
     expect(pct.textContent).toContain('剩余');
   });
@@ -199,7 +223,7 @@ describe('ComponentUsagePanel 展开态（§3.2 / §4.6-§4.7）', () => {
   it('free = tokenLimit - totalTokens（不含 estimatedOutput 扣减）', () => {
     // used=50000, total=200000, maxOutput=20000 → free = 200000-50000 = 150000
     render(<ComponentUsagePanel usage={mkUsage({ used: 50000, total: 200000 })} />);
-    clickExpand();
+    clickTrigger();
     const pct = screen.getByText(/已占用/);
     // free 文案展示 fmtNum(150000) —— 含 "150,000"
     expect(pct.textContent).toContain('150,000');
@@ -207,13 +231,52 @@ describe('ComponentUsagePanel 展开态（§3.2 / §4.6-§4.7）', () => {
     expect(pct.textContent).not.toContain('130,000');
   });
 
-  it('再点收起 → panel 关闭（toggle）', () => {
+  it('再点 trigger → panel 关闭（toggle）', () => {
     render(<ComponentUsagePanel usage={mkUsage({})} />);
-    clickExpand();
+    clickTrigger();
     expect(screen.getByText('Token 用量')).toBeTruthy();
-    // 展开后 aria-label 变为 收起用量
-    fireEvent.click(screen.getByRole('button', { name: '收起用量' }));
+    clickTrigger();
     expect(screen.queryByText('Token 用量')).toBeNull();
+  });
+
+  it('head 右侧 CompactBtn/ClearBtn 按 props 渲染 + 回调触发 + size=sm', () => {
+    const onCompact = vi.fn();
+    const onClear = vi.fn();
+    const { container } = render(
+      <ComponentUsagePanel usage={mkUsage({})} onCompact={onCompact} onClear={onClear} summaryTask={null} sessionBusy={false} />,
+    );
+    clickTrigger();
+    // head 内按钮（action-key 不变）
+    const compactBtn = container.querySelector('[data-action-key="chat.session.compact"]')! as HTMLButtonElement;
+    const clearBtn = container.querySelector('[data-action-key="chat.session.clear"]')! as HTMLButtonElement;
+    expect(compactBtn).toBeTruthy();
+    expect(clearBtn).toBeTruthy();
+    // size='sm' → h-7 w-7
+    expect(compactBtn.className).toContain('h-7');
+    expect(compactBtn.className).toContain('w-7');
+    expect(clearBtn.className).toContain('h-7');
+    fireEvent.click(compactBtn);
+    fireEvent.click(clearBtn);
+    expect(onCompact).toHaveBeenCalledTimes(1);
+    expect(onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('onCompact/onClear 不传 → head 无按钮（props 门控）', () => {
+    const { container } = render(<ComponentUsagePanel usage={mkUsage({})} />);
+    clickTrigger();
+    expect(container.querySelector('[data-action-key="chat.session.compact"]')).toBeNull();
+    expect(container.querySelector('[data-action-key="chat.session.clear"]')).toBeNull();
+  });
+
+  it('summaryTask=running → 面板内 CompactBtn disabled + spinner', () => {
+    const st: SummaryTaskStatus = { status: 'running', runId: 'r1', startedAt: '2026-06-22T00:00:00.000Z', error: null };
+    const { container } = render(
+      <ComponentUsagePanel usage={mkUsage({})} onCompact={vi.fn()} summaryTask={st} sessionBusy={false} />,
+    );
+    clickTrigger();
+    const compactBtn = container.querySelector('[data-action-key="chat.session.compact"]')! as HTMLButtonElement;
+    expect(compactBtn.disabled).toBe(true);
+    expect(compactBtn.querySelector('.animate-spin')).toBeTruthy();
   });
 });
 

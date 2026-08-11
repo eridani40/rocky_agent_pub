@@ -138,15 +138,16 @@ export async function saveImage(
  * [v0.0.227] GET /session/:id/workspace/file —— 读工作区内文本文件内容（§2.6.7）。
  * path = 相对 workspaceDir 的路径；后端做路径穿越校验（whitelistResolve）单一权威。
  * 返 { content: string }（UTF-8 文本；用于 md editor 首次加载）。
+ * [v0.0.320] 返 version?: string（后端 file version `${mtimeMs}:${size}`；binary 分支不加；旧后端缺省 undefined）
  * 失败 throw（路径越界 400 / 不存在 404，与既有 ws API 一致）。
  */
 export async function readWorkspaceFile(
   sessionId: string,
   body: { path: string },
   base?: string,
-): Promise<{ content: string }> {
+): Promise<{ content: string; version?: string }> {
   const q = new URLSearchParams({ path: body.path }).toString();
-  return req<{ content: string }>(
+  return req<{ content: string; version?: string }>(
     `/session/${encodeURIComponent(sessionId)}/workspace/file?${q}`,
     undefined,
     base,
@@ -174,17 +175,40 @@ export async function readWorkspaceFileBinary(
 
 /**
  * [v0.0.227] POST /session/:id/workspace/file/save —— 存工作区内文本文件（§2.6.7）。
- * last-write-wins：直接覆盖，无 mtime 冲突检测（PRD §6.3）。
- * 返 { ok: true }；失败 throw（路径越界 400 / IO 失败 500）。
+ * [v0.0.320] expectedVersion/force：带 expectedVersion 且非 force → 后端校验 mtime+size 版本，
+ *   不匹配 409 {error:'conflict', currentVersion}（前端 catch err.status===409 读 body.error）。
+ *   无 expectedVersion 或 force=true → last-write-wins 直接覆盖（旧调用方零破坏）。
+ * 返 { ok: true, version?: string }（写后新 version）；失败 throw（路径越界 400 / 409 冲突 / IO 失败 500）。
  */
 export async function saveWorkspaceFile(
   sessionId: string,
-  body: { path: string; content: string },
+  body: { path: string; content: string; expectedVersion?: string; force?: boolean },
   base?: string,
-): Promise<{ ok: true }> {
-  return req<{ ok: true }>(
+): Promise<{ ok: true; version?: string }> {
+  return req<{ ok: true; version?: string }>(
     `/session/${encodeURIComponent(sessionId)}/workspace/file/save`,
     { method: 'POST', body: JSON.stringify(body) },
+    base,
+  );
+}
+
+/**
+ * [v0.0.320] GET /session/:id/workspace/search?q= —— 工作区递归全量搜索（D8/D10）。
+ * [v0.0.324] 上限 100 条（从 200 降）；q 含 `/` 时匹配完整相对路径（非 basename），不含 `/` 时 basename 匹配。
+ * q 非空：后端递归遍历 workspaceDir（ignore node_modules/.git），substring 大小写不敏感
+ *   匹配 → files[]（相对路径）；文件夹名匹配 → dirs[]；上限 100 条（合计），超限截断 + truncated: true。
+ * 空输入不应调用本函数（search box 防抖前端已挡）；q 缺失后端 400。
+ * 失败 throw（路径越界 400 / IO 失败 500，与既有 ws API 一致）。
+ */
+export async function searchWorkspaceFiles(
+  sessionId: string,
+  body: { q: string },
+  base?: string,
+): Promise<{ files: string[]; dirs: string[]; truncated?: boolean }> {
+  const q = new URLSearchParams({ q: body.q }).toString();
+  return req<{ files: string[]; dirs: string[]; truncated?: boolean }>(
+    `/session/${encodeURIComponent(sessionId)}/workspace/search?${q}`,
+    undefined,
     base,
   );
 }

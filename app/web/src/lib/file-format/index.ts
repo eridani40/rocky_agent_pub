@@ -40,6 +40,7 @@ export function formatText(format: FileFormat, text: string): FormatResult {
     case 'ini':
     case 'env':
     case 'log':
+    case 'code': // [v0.0.320 D11] code 行为 = plain（不支持格式化）
       return { ok: false, error: '该格式不支持格式化' };
     default: {
       // 闭合 union 兜底（不应命中）
@@ -71,6 +72,7 @@ export function validateText(format: FileFormat, text: string): FormatResult {
     case 'ini':
     case 'env':
     case 'log':
+    case 'code': // [v0.0.320 D11] code 行为 = plain（不支持校验）
       return { ok: false, error: '该格式不支持校验' };
     default: {
       const _exhaustive: never = format;

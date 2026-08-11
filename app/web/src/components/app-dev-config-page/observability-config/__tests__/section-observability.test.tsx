@@ -49,6 +49,53 @@ vi.mock(observabilityApiPath, () => ({
 }));
 
 import { SectionObservability } from '../section-observability';
+import * as obsApi from '../../../../lib/observability-api';
+
+describe('SectionObservability — list toggle 进 dirty（v0.0.317）', () => {
+  beforeEach(() => {
+    cleanup();
+    vi.mocked(obsApi.putObservabilityConfigs).mockClear();
+  });
+  afterEach(() => cleanup());
+
+  it('toggle 不即时调 PUT（攒入 dirty）', async () => {
+    const onDirtyChange = vi.fn();
+    render(<SectionObservability onDirtyChange={onDirtyChange} />);
+    await screen.findByText('Production Tracing');
+    // toggle 前不应有 PUT 调用
+    expect(obsApi.putObservabilityConfigs).not.toHaveBeenCalled();
+    // 找到 toggle 开关（component-obs-item 内的 switch button）
+    const toggle = screen.getByRole('switch');
+    fireEvent.click(toggle);
+    // toggle 后仍不应调 PUT（改为攒 dirty）
+    expect(obsApi.putObservabilityConfigs).not.toHaveBeenCalled();
+  });
+
+  it('toggle 后 onDirtyChange(true) 被调用', async () => {
+    const onDirtyChange = vi.fn();
+    render(<SectionObservability onDirtyChange={onDirtyChange} />);
+    await screen.findByText('Production Tracing');
+    const toggle = screen.getByRole('switch');
+    fireEvent.click(toggle);
+    // 等 useEffect 上报 dirty
+    await waitFor(() => {
+      expect(onDirtyChange).toHaveBeenCalledWith(true);
+    });
+  });
+
+  it('toggle 再 toggle 回来 → dirty 清除（onDirtyChange(false)）', async () => {
+    const onDirtyChange = vi.fn();
+    render(<SectionObservability onDirtyChange={onDirtyChange} />);
+    await screen.findByText('Production Tracing');
+    const toggle = screen.getByRole('switch');
+    // 初始 enabled=true，toggle → false（dirty），再 toggle → true（回原值，不 dirty）
+    fireEvent.click(toggle);
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true));
+    onDirtyChange.mockClear();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(false));
+  });
+});
 
 describe('SectionObservability — detail 视图态上报 onDetailViewChange（v0.0.199）', () => {
   beforeEach(() => cleanup());

@@ -47,10 +47,10 @@ const introInput = () => screen.getByPlaceholderText(INTRO_PLACEHOLDER) as HTMLI
 const skillsModeSwitch = () => screen.getByRole('switch', { name: 'custom skills' });
 /** 某 skill 行的可见性开关（ToggleSwitch label = skill name） */
 const skillToggle = (name: string) => screen.getByRole('switch', { name });
-/** 悬浮保存按钮（dirty 时渲染，文案「保存」） */
-const saveBtn = () => screen.getByRole('button', { name: '保存' });
-/** 悬浮保存缺席（含「保存中…」态一并判无） */
-const saveBtnAbsent = () => screen.queryByRole('button', { name: /保存/ });
+/** [v0.0.317] SaveBar 保存按钮（常驻；dirty 时文案「● 保存」，非 dirty「保存」） */
+const saveBtn = () => screen.getByRole('button', { name: /保存/ }) as HTMLButtonElement;
+/** [v0.0.317] dirty 态判定：SaveBar 常驻无「缺席」概念，断言 dirty 指示文案（● 前缀 = dirty） */
+const isDirty = () => screen.getByRole('button', { name: /保存/ }).textContent?.includes('●') === true;
 
 describe('MemberPanel [v0.0.113] skills 重构', () => {
   afterEach(() => {
@@ -110,7 +110,7 @@ describe('MemberPanel [v0.0.113] skills 重构', () => {
       skillConfig: { mode: 'custom', overrides: { skA: false, skB: true } },
     });
     // 保存后基线重置 → 悬浮保存消失（settle 掉 setState 避免 act 警告）
-    await waitFor(() => expect(saveBtnAbsent()).toBeNull());
+    await waitFor(() => expect(isDirty()).toBe(false));
   });
 
   it('R6：初始 custom(overrides skA:false) → 关 switch → 保存 → skillConfig={mode:inherit, overrides:{}}', async () => {
@@ -130,18 +130,18 @@ describe('MemberPanel [v0.0.113] skills 重构', () => {
     fireEvent.click(saveBtn());
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onSave).toHaveBeenCalledWith('m7', { skillConfig: { mode: 'inherit', overrides: {} } });
-    await waitFor(() => expect(saveBtnAbsent()).toBeNull());
+    await waitFor(() => expect(isDirty()).toBe(false));
   });
 
   it('悬浮保存「改了才显」：初始无 save，改 name 后出现；保存后消失', async () => {
     defaultCatalog();
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<MemberPanel member={mkMember({ id: 'm1' })} onBack={() => {}} onSave={onSave} />);
-    expect(saveBtnAbsent()).toBeNull();
+    expect(isDirty()).toBe(false);
     fireEvent.change(inputByLabel('name'), { target: { value: '张三改' } });
     fireEvent.click(saveBtn());
     await waitFor(() => expect(onSave).toHaveBeenCalledWith('m1', { name: '张三改' }));
-    await waitFor(() => expect(saveBtnAbsent()).toBeNull());
+    await waitFor(() => expect(isDirty()).toBe(false));
   });
 
   // [v0.0.114] intro 可编辑：预填初始 intro，改后仅 intro 进 patch
@@ -155,7 +155,7 @@ describe('MemberPanel [v0.0.113] skills 重构', () => {
     const input = introInput();
     expect(input.value).toBe('原始介绍');
     // 初始无 dirty → 无 save
-    expect(saveBtnAbsent()).toBeNull();
+    expect(isDirty()).toBe(false);
     // 改 intro → save 出现
     fireEvent.change(input, { target: { value: '负责后端接口' } });
     fireEvent.click(saveBtn());

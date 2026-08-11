@@ -25,3 +25,6 @@
 
 ## 视觉基线
 无设计稿，对齐渠道表单 design token 风格：
+
+## 消费方
+- `app/web/src/components/channel-page/section-channel-form.tsx`

@@ -6,15 +6,15 @@
  *   specs/prd/version_logs/v0.0.241.md §2.1（11 格式 + md 分类表）
  *
  * 设计背景：v0.0.227 仅识别 `.md`，本版本扩到 11 种格式 + md（共 12 FileFormat 形态）。
+ * [v0.0.320] 并入编程语言后缀 → 'code' 分类（纯文本无高亮，行为 = plain）。
  * 分类（FileFormatCategory）决定 modal 行为：
  *   - md         → PrimitiveMarkdownView 渲染（v0.0.227 既有链路）
  *   - structured → <pre> 渲染 + edit 模式显示「格式化」「校验」按钮（json/jsonl/yaml/xml/toml/csv/tsv）
  *   - plain      → <pre> 渲染、无格式按钮（txt/ini/env/log）
- *
- * 不含编程语言后缀（.py/.js/.java 等）—— PRD §6 用户铁律：编程语言不做。
+ *   - code       → <pre> 渲染、无格式按钮（编程语言，行为 = plain，v0.0.320 D11）
  */
 
-/** 文件格式枚举（12 形态 = 11 新格式 + md 向后兼容） */
+/** 文件格式枚举（13 形态 = 12 既有 + code 编程语言，v0.0.320 D11） */
 export type FileFormat =
   | 'md'
   | 'json'
@@ -27,10 +27,11 @@ export type FileFormat =
   | 'txt'
   | 'ini'
   | 'env'
-  | 'log';
+  | 'log'
+  | 'code';
 
 /** 格式分类（决定 modal view 分流 + edit 按钮显隐） */
-export type FileFormatCategory = 'md' | 'structured' | 'plain';
+export type FileFormatCategory = 'md' | 'structured' | 'plain' | 'code';
 
 /**
  * format/validate 纯函数统一返回形。
@@ -44,6 +45,7 @@ export type FormatResult =
 /**
  * 扩展名 → FileFormat 映射表。键全部小写（含前导 `.`）。
  * 注意：`.env` 不在此表（特殊处理：basename 整体匹配，见 `getFileFormat`）。
+ * [v0.0.320 D11] 编程语言后缀并入 → 'code'（纯文本无高亮，行为 = plain）。
  */
 const EXT_TO_FORMAT: Readonly<Record<string, FileFormat>> = {
   '.json': 'json',
@@ -58,7 +60,79 @@ const EXT_TO_FORMAT: Readonly<Record<string, FileFormat>> = {
   '.ini': 'ini',
   '.log': 'log',
   '.md': 'md',
+  '.env': 'env',
+  // [v0.0.328 bugfix] `.env` 扩展名（prod.env/dev.env/test.env 等 `*.env` 后缀文件）→ env。
+  //   取最后一个 `.` 之后的部分（后缀）查表命中 → 内置编辑器，不走系统打开。
+  // ── 编程语言（v0.0.320 D11，全部 'code'）──
+  '.py': 'code',
+  '.js': 'code',
+  '.jsx': 'code',
+  '.ts': 'code',
+  '.tsx': 'code',
+  '.java': 'code',
+  '.go': 'code',
+  '.rs': 'code',
+  '.c': 'code',
+  '.cpp': 'code',
+  '.h': 'code',
+  '.hpp': 'code',
+  '.cs': 'code',
+  '.rb': 'code',
+  '.php': 'code',
+  '.swift': 'code',
+  '.kt': 'code',
+  '.sh': 'code',
+  '.vue': 'code',
+  '.svelte': 'code',
+  '.dart': 'code',
+  '.lua': 'code',
+  '.r': 'code',
+  '.pl': 'code',
+  '.scala': 'code',
+  '.groovy': 'code',
+  '.zig': 'code',
+  '.erl': 'code',
+  '.ex': 'code',
+  '.hs': 'code',
+  '.clj': 'code',
+  '.sql': 'code',
+  '.css': 'code',
+  '.scss': 'code',
+  '.less': 'code',
+  '.html': 'code',
+  '.htm': 'code',
+  // ── [v0.0.328] 纯文本附加扩展名 ──
+  '.example': 'txt',
+  '.sample': 'txt',
+  '.lock': 'txt',
+  '.diff': 'txt',
+  '.patch': 'txt',
+  // ── [v0.0.328 bugfix] 配置文本后缀（与 .env 同类漏网补齐）──
+  '.properties': 'txt', // Java/通用 properties 键值配置
+  '.conf': 'txt', // 各类服务/工具 conf 配置
+  '.cfg': 'txt', // cfg 配置
 };
+
+/**
+ * [v0.0.328] 已知纯文本 basename 精确匹配集合（大小写不敏感，值全部小写）。
+ * 覆盖项目常见无扩展名/点文件纯文本——Dockerfile/Makefile/.gitignore 等。
+ * getFileFormat 在扩展名查表前先查本集合；渐进扩充（加一行即可）。
+ */
+const KNOWN_TEXT_BASENAMES: ReadonlySet<string> = new Set([
+  'dockerfile', 'makefile',
+  'license', 'changelog', 'readme',
+  '.gitignore', '.gitattributes', '.editorconfig',
+  '.eslintrc', '.prettierrc', '.npmignore', '.dockerignore',
+]);
+
+/**
+ * [v0.0.328] 已知纯文本 basename 词干（去扩展名后的前缀部分，大小写不敏感）。
+ * Dockerfile.dev → stem='dockerfile' → 命中。
+ * 在扩展名查表未命中时 fallback（防 LICENSE.txt 被 .txt 截胡前先命中）。
+ */
+const KNOWN_TEXT_STEMS: ReadonlySet<string> = new Set([
+  'dockerfile', 'license', 'readme', 'changelog',
+]);
 
 /**
  * 取路径的 basename（最后一段）。兼容 `/` 与 `\`。
@@ -76,12 +150,14 @@ function basename(path: string): string {
  *   1. 大小写归一化（`.JSON`/`.Json` 命中 `.json`）
  *   2. 取 basename
  *   3. basename === '.env' 或以 '.env.' 开头（`.env.local`/`.env.production`）→ 'env'
- *   4. 否则取最后一个 `.` 起的子串（含 `.`）作为扩展名查表
+ *   3.5 [v0.0.328] basename ∈ KNOWN_TEXT_BASENAMES → 'txt'（Dockerfile/Makefile/.gitignore 等）
+ *   4. 取最后一个 `.` 起的子串（含 `.`）作为扩展名查表（含 .example/.sample/.lock/.diff/.patch）
  *      —— 用 lastIndexOf 防多扩展名误判（`.user.config.json` → `.json`）
- *   5. 未命中返 null（unsupported，走系统打开）
+ *   5. [v0.0.328] 扩展名未命中时，词干（去扩展名）∈ KNOWN_TEXT_STEMS → 'txt'（Dockerfile.dev）
+ *   6. 未命中返 null（unsupported，走系统打开）
  *
  * @param path 相对 workspaceDir 的文件路径
- * @returns FileFormat 或 null（编程语言后缀 .py/.js/.java 等不在表里 → null）
+ * @returns FileFormat 或 null（无扩展名 / 未命中 → null，走系统打开）
  */
 export function getFileFormat(path: string): FileFormat | null {
   const lower = path.toLowerCase();
@@ -92,15 +168,32 @@ export function getFileFormat(path: string): FileFormat | null {
     return 'env';
   }
 
+  // [v0.0.328] 已知纯文本 basename 精确匹配（Dockerfile / Makefile / .gitignore / ...）
+  if (KNOWN_TEXT_BASENAMES.has(name)) {
+    return 'txt';
+  }
+
+  // 扩展名查表（既有逻辑，EXT_TO_FORMAT 追加了 .example 等）
   const dot = name.lastIndexOf('.');
-  if (dot < 0) return null; // 无扩展名（如 Makefile）→ unsupported
-  const ext = name.slice(dot);
-  return EXT_TO_FORMAT[ext] ?? null;
+  if (dot >= 0) {
+    const ext = name.slice(dot);
+    const fmt = EXT_TO_FORMAT[ext];
+    if (fmt) return fmt;
+  }
+
+  // [v0.0.328] 已知纯文本词干前缀匹配（Dockerfile.dev → stem='dockerfile' → 命中）
+  //   仅在扩展名查表未命中时 fallback——LICENSE.txt 等已被 .txt 命中不走这里
+  if (dot >= 0) {
+    const stem = name.slice(0, dot);
+    if (KNOWN_TEXT_STEMS.has(stem)) return 'txt';
+  }
+
+  return null; // 无扩展名且未命中白名单 / 扩展名未命中 → unsupported
 }
 
 /**
  * 格式 → 分类映射（决定 modal 行为）。
- * switch 闭合覆盖全部 12 FileFormat case，default 兜底 'plain'（防御性，理论上不会命中）。
+ * switch 闭合覆盖全部 13 FileFormat case，default 兜底 'plain'（防御性，理论上不会命中）。
  */
 export function getCategory(format: FileFormat): FileFormatCategory {
   switch (format) {
@@ -118,6 +211,7 @@ export function getCategory(format: FileFormat): FileFormatCategory {
     case 'ini':
     case 'env':
     case 'log':
+    case 'code': // [v0.0.320 D11] code 行为 = plain（pre 渲染 + 无格式/校验按钮）
       return 'plain';
     default:
       // 防御性兜底：FileFormat 闭合 union 不会走到这里

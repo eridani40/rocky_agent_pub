@@ -4,10 +4,11 @@
 > 文件: app/web/src/components/studio-page/component-seats-panel.tsx
 > v0.0.244：新增 seats 视图筛选——`useState<SeatsView>('active')` 持视图 state（唯一源）；mateRows 派生 = `seats.filter(!isLeader)` → `deriveViewRows(rows, view)` 单点过滤（active → 只留 `state==='deployed'`）；SeatsBody 加 `view`/`onViewChange` 透传 roster 头 `SeatsViewSwitch`。
 > v0.0.276：seats 激活即刷新——每次进入/返回 seats（初始 mount + selectSquad + fallbackToSeats 回落 + handleChatBack chat 返回）父层 page-studio 都 reloadDetail 重拉 detail（见「数据刷新语义」节）。
+> v0.0.305：页头 onlineBadge 消费 squad 聚合数据（`getAgg`，SSE 值优先 / useSeatsData 兜底）——统计数字与 sidebar 同源（统一数据源，不各自算各自）。
 
 ## 职责
 Studio 主区「团队首页」单页中枢容器：常驻头部（squad 名 + 在线 badge + 坐席/管理/自动工作 3 tab）+ 按 activeTab 切换主体：
-- `seats`：**双列指挥台**（`SeatsBody` → `seats-console`）——左列 296px+ 右列 roster 白卡
+- `seats`：**双列指挥台**（`SeatsBody` → seats-console）——左列 296px+ 右列 roster 白卡
 - `panel`：`ManageTab`（元信息 form + charter 编辑器 + 危险操作区）
 - `autowork`：`AutoworkTab`（toggle + heartbeat + budget + history 四块）
 **tab 切换 = 本组件内 state 切主体，头部常驻不跳页**。
@@ -27,12 +28,17 @@ Studio 主区「团队首页」单页中枢容器：常驻头部（squad 名 + �
 - onDelete: () => Promise<boolean>
 - onAtLeader: () => void;                         // 全景「更多」tab 引导 @leader（透传内嵌 PanoramaRoute）
 - initialTab?: SeatsPanelTab;                     // 可选初始 tab（默认 'seats'）
+- getAgg?: (squadId: string) => SquadAggregate | undefined;  // [v0.0.305] squad 聚合数据（统一数据源；optional 旧消费方兼容）
 
 ## 状态 / 交互
-- header tab 点击 → `setActiveTab(id)`；其他状态零副作用
-- **seats 视图筛选（v0.0.244）**：`seatsView: SeatsView = 'active' | 'all'`（默认 'active' 在岗），**view state 归本组件（唯一源）**；过滤单点 = `mateRows = deriveViewRows(seats.filter(r => !r.isLeader), seatsView)`（active → `member.state === 'deployed'`；all → 全量）；`view`/`onViewChange` 透传 SeatsBody（SeatsBody/SeatsViewSwitch 均不持状态不过滤）。leaderRow 不受过滤影响（leader 恒 deployed）；页头 onlineBadge / TokenWidget / SeatStats 口径零改（不属 roster 头计数）
+- **面板级 SaveBar + dirty 上推（v0.0.317）**：ManageTab / AutoworkTab 通过 `onSaveBarChange` 回调上推 `SaveBarController`（`{dirty, saving, save(), cancel()}`）；SeatsPanel 持 `saveBarCtrl` state，在 panel/autowork tab 底部统一渲染 `SaveBar`（common 组件，variant 缺省 tab）。seats tab 无 SaveBarController，不渲染 SaveBar。
+- **tab 切换 dirty 保护（v0.0.317）**：`handleTabSwitch(tab)` 检查 `saveBarCtrl?.dirty`——dirty 时弹 ConfirmModal（确认丢弃改动 → `cancel()` + 切 tab；取消 → 关 modal 留当前 tab）；不 dirty 直接切。切出 seats tab 总是直接切（无 dirty）。
+- header tab 点击 → `handleTabSwitch(id)`（非直接 setActiveTab）
+- **seats 视图筛选（v0.0.244）**：`seatsView: SeatsView = 'active' | 'all'`（默认 'active' 在岗），**view state 归本组件（唯一源）**；过滤单点 = `mateRows = deriveViewRows(seats.filter(r => !r.isLeader), seatsView)`（active → `member.state === 'deployed'`；all → 全量）；`view`/`onViewChange` 透传 SeatsBody（SeatsBody/SeatsViewSwitch 均不持状态不过滤）。leaderRow 不受过滤影响（leader 恒 deployed）；页头 onlineBadge 口径零改（不属 roster 头计数）
 - **buildMemberChatNode 公共 helper（v0.0.268 DRY）**：本组件内部 `buildMemberChatNode` 实现改为委托 `squad-status-utils.ts` 公共 helper（成员查找 + ChatNode 组装，tag 规则 leader→`squadTree.tagLeader` / mate→`squadTree.tagSingle` + squadId）——**坐席卡「进入对话」与成员状态弹层（v0.0.269 起 `component-squad-status-modal`，268 为 SquadStatusEntry 面板）「进入对话」同源组装**（PRD §5 概念对齐）。签名保留（`(memberId) => ChatNode | null`，caller 零改动）。
 - 空成员态（`detail.members.length === 0`）：只显 leader 行（后端保证有 leader）与「+」卡；mates 段落隐藏
+- **页头 onlineBadge 消费聚合数据（v0.0.305）**：`const agg = getAgg?.(squadId); const onlineCount = agg?.onlineCount ?? stats.onlineCount;`——SSE 值（`squad_meta` 实时推送）优先，`useSeatsData` 派生兜底（GET detail 静态）。与 sidebar 第二行同源（统一数据源，PRD §4.3）。**member 粒度坐席卡仍走 useSeatsData + stateMap**（粒度不同不冲突，PRD §2.2）；`useSeatsData` 的 `stats.onlineCount/inProgressCount` 保留（坐席卡/其他消费仍用）。
+- **SeatStats 2×2 统计条已不在渲染树（v0.0.288 布局重构）**：`component-seat-stats.tsx` 组件文件保留（UT 仍测）但 SeatsBody 已改为 TokenWidget + 成员列表卡 + 全景（`component-seats-body.md`）——v0.0.305 的「统计条消费聚合数据」落到页头 onlineBadge（唯一数字统计位）。
 
 ## 数据刷新语义（seats 激活即刷新）
 

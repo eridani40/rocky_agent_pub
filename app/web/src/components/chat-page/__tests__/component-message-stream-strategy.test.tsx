@@ -175,13 +175,25 @@ describe('resolveActor 注入（squad MemberAvatar 替换默认）', () => {
     expect(within(avatarWrap as HTMLElement).getByText('C')).toBeTruthy();
     // a2a 信封 senderName 可见（信封承载名字；invisible 头像内 MemberAvatar 也有 name label，用信封按钮 scope 精确定位）
     const envelopeToggle = within(getRow('a1')).getByTestId('a2a-envelope-toggle');
-    expect(within(envelopeToggle).getByText('captain')).toBeTruthy();
+    expect(within(envelopeToggle).getByText(/captain/)).toBeTruthy();
     // [v0.0.165] human user 头像保留：you 首字母 Y 色块（零回归）
     const av = within(getRow('u1')).getByText('Y');
     expect((av as HTMLElement).style.background).toBe('var(--fg-2)');
     // assistant answer 被 mute
     expect(queryRow('as1')).toBeNull();
     expect(screen.queryByText('loop')).toBeNull();
+  });
+});
+
+describe('[v0.0.312] Playground（无 resolveActor）a2a inbox 信封 senderName', () => {
+  it('不传 resolveActor → in 方向信封仍显示 sender.agent.ref.name（从 message 数据直接取，不依赖 actor 解析）', () => {
+    const msgs: Message[] = [a2aInboxMsg('a1', 'captain', 'leader')];
+    render(<ComponentMessageStream messages={msgs} />);
+    // a2a 行渲染
+    expect(getRow('a1')).toBeTruthy();
+    // 信封 toggle 内含 sender name（从 message.sender.agent.ref.name 取，非 actor）
+    const envelopeToggle = within(getRow('a1')).getByTestId('a2a-envelope-toggle');
+    expect(within(envelopeToggle).getByText(/captain/)).toBeTruthy();
   });
 });
 

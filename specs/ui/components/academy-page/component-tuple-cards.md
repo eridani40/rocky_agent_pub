@@ -57,3 +57,7 @@ interface Props {
 - 字体：卡标题 13px/600；sub 11px muted；body 文本 12–12.5px；代码/chip mono。
 - 边框：卡 `CARD`（border + rounded）+ head 底 border；head 底色 `bg-bg-warm`。
 - 配色：skill chip `border-border` + `bg-surface`；模型 avatar indigo。
+
+## 消费方
+
+- `app/web/src/components/academy-page/section-student-detail.tsx`

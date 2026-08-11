@@ -23,6 +23,7 @@ import { ComponentMemberSkillFilter, type SkillFilterEntry } from './component-m
 import { ToggleSwitch } from '../framework/primitives/toggle-switch';
 import { Icon, type StudioIconName } from './studio-icons';
 import { INPUT, FIELD_LABEL, TEXTAREA } from './studio-styles';
+import { SaveBar } from '../common/component-save-bar';
 
 interface MemberPanelProps {
   member: Member;
@@ -79,6 +80,16 @@ export function MemberPanel({ member, onBack, onSave }: MemberPanelProps) {
 
   const handleCatalog = useCallback((entries: SkillFilterEntry[]) => setCatalog(entries), []);
   const handleToggle = useCallback((n: string, next: boolean) => setOverrides((prev) => ({ ...prev, [n]: next })), []);
+
+  /** [v0.0.317] 取消：draft 全部回 base 值（name/intro/workStyle/skillMode/overrides） */
+  const reset = useCallback(() => {
+    setName(base.name);
+    setIntro(base.intro ?? '');
+    setWorkStyle(base.workStyle ?? '');
+    const bsc = normSkillConfig(base);
+    setSkillMode(bsc.mode);
+    setOverrides({ ...bsc.overrides });
+  }, [base]);
 
   const save = async () => {
     if (!dirty || saving) return;
@@ -186,17 +197,8 @@ export function MemberPanel({ member, onBack, onSave }: MemberPanelProps) {
         </div>
       </div>
 
-      {/* 右下悬浮保存：仅 dirty 时显示（fixed 脱离文档流） */}
-      {dirty && (
-        <button
-          type="button"
-          data-action-key="studio.member.save"
-          onClick={() => void save()}
-          className="fixed bottom-6 right-8 z-50 flex items-center gap-1.5 rounded-lg bg-accent px-[18px] py-2.5 text-[13px] font-semibold text-white shadow-xl hover:bg-accent-hover"
-        >
-          <Icon name="check" size={14} /> {saving ? t('common:status.saving') : t('common:action.save')}
-        </button>
-      )}
+      {/* [v0.0.317] 底部统一保存条（sticky bottom-0，替代原右下 fixed 悬浮按钮） */}
+      <SaveBar dirty={dirty} saving={saving} onSave={() => void save()} onCancel={reset} />
     </main>
   );
 }

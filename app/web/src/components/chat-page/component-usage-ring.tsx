@@ -4,7 +4,7 @@
  *       reqs/v0.0.16/mqnbr367-easy-opc-chat-v9a.html §550-561（UsageRing SVG）
  *
  * 纯 SVG 圆环，配色随占用率：pct<0.5 success / <0.8 warning / ≥0.8 danger 语义色。
- * 收起态 28×28 stroke4 / 展开态大号 52×52 stroke6；dasharray 0.3s 动画。
+ * 收起态 36×36 stroke4（v0.0.326 起，原 28×28）/ 展开态大号 52×52 stroke6；dasharray 0.3s 动画。
  *
  * testid `usage-ring` 收起 + 展开共用（component-usage-panel.md §5）。
  */
@@ -13,7 +13,7 @@ interface UsageRingProps {
   used: number;
   /** 总额度（tokenLimit） */
   total: number;
-  /** 直径 px（收起 28 / 展开 52） */
+  /** 直径 px（收起 36 / 展开 52） */
   size?: number;
   /** 描边宽度（收起 4 / 展开 6） */
   stroke?: number;
@@ -35,7 +35,7 @@ export function usageRingColor(pct: number): string {
 export function ComponentUsageRing({
   used,
   total,
-  size = 28,
+  size = 36,
   stroke = 4,
 }: UsageRingProps) {
   const pct = Math.min(1, total > 0 ? used / total : 0);

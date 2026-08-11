@@ -31,3 +31,6 @@ Skill 内容预览 modal。左文件树（250px，整树一次性返回）+ 右�
 - **color**：modal 底 `var(--surface)`；树底 `var(--surface-2)`；`<pre>` 底 `var(--surface)`。twisty chevron 关闭 → 0deg，展开 `.open` → rotate 90deg。dir 图标 `folder`/`folderOpen`（`var(--gold)`），file 图标（`var(--muted)`）。树的具体尺寸/缩进/配色基线以 `common/component-file-tree.md` 为准（**行为与视觉平移前后一致**）。
 - **双主题**：全 token；overlay 半透明 + blur 在双主题一致。dir gold / file muted token 双主题都有。
 - **决策**：树一次性整树（API 返回 `SkillFileNode` 整树），文件内容按 path 懒取；默认所有 dir 展开（设计稿 `collectDirs` 预填）。树视图与纯函数提升到 `common/` 后，本组件从 322 行（曾违反 ≤300 硬约束）降至约 200 行——超限债随复用一并清掉。
+
+## 消费方
+- `app/web/src/components/skill-page/page-skill.tsx`

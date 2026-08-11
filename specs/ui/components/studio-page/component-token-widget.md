@@ -78,3 +78,7 @@ useSquadTokenStats(squadId, { granularity:'day', scope:'team', from: -60d, to: t
 - MUST 今日总量 = `totalOf(today.breakdown)`（input+output+cache 之和）；60 天总量 = `cumulative`（Σ series，与详情合计同口径）。
 - MUST 复用 `use-squad-token-stats`（与详情 panel 一套 fetch，口径对齐——禁自己查一套/budget）。
 - MUST NOT 调 mutation API（只读，经 useSquadTokenStats 复用详情 fetch）。
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-seats-body.tsx`

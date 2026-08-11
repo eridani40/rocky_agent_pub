@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { SecretInput } from '../framework/primitives/secret-input';
 import { ComponentChannelTypeDropdown } from './component-channel-type-dropdown';
 import { ComponentFeishuSetupDoc } from './component-feishu-setup-doc';
+import { SaveBar } from '../common/component-save-bar';
 import type { ChannelFormInput, ChannelConfig } from '../../lib/channel-api';
 
 /** 类型选项（后端 scope 激活集合派生，page-channel 经 GET /config/channels/impl-types 供给） */
@@ -54,14 +55,28 @@ export function SectionChannelForm({ editing, types, onSubmit, onCancel }: Props
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  /**
+   * [v0.0.317] dirty 判定：implId/name/appId/appSecret 各 !== editing baseline。
+   * editing=null（新建）时任一字段非空即 dirty。
+   */
+  const dirty = isEdit
+    ? (implId !== (editing?.implId ?? '') ||
+       name !== (editing?.name ?? '') ||
+       appId !== (editing?.config?.appId ?? '') ||
+       appSecret !== (editing?.config?.appSecret ?? ''))
+    : (implId !== (types[0]?.implId ?? '') || name !== '' || appId !== '' || appSecret !== '');
+
   // 类型下拉 options：types 空 → 空数组（无任何前端兜底项，不伪造类型）
   const typeOptions = useMemo(
     () => types.map((tp) => ({ value: tp.implId, label: tp.label })),
     [types],
   );
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  /**
+   * [v0.0.317] handleSubmit 改为 SaveBar onSave 回调（提交逻辑不变：组装 + onSubmit + err setErr）。
+   * 从 inline form submit 改为函数调用——SaveBar 的 onSave 触发。
+   */
+  const handleSubmit = async () => {
     if (!name.trim() || !appId.trim() || (!isEdit && !appSecret.trim())) {
       setErr(t('form.errRequired'));
       return;
@@ -73,7 +88,6 @@ export function SectionChannelForm({ editing, types, onSubmit, onCancel }: Props
         implId,
         name: name.trim(),
         appId: appId.trim(),
-        // 编辑态：未改提交原明文（后端存原值）；用户点✎重输则提交新值。新建直接传明文
         appSecret: isEdit ? appSecret : appSecret.trim(),
       };
       await onSubmit(input);
@@ -85,9 +99,8 @@ export function SectionChannelForm({ editing, types, onSubmit, onCancel }: Props
   };
 
   return (
-    <form
+    <div
 
-      onSubmit={handleSubmit}
       className="flex flex-col gap-3 px-4 py-3 rounded-[10px] bg-surface-2 border border-border"
     >
       {/* 类型选择：自定义下拉（禁原生 select，conventions §10；编辑时锁定不可改；types 空态 disabled） */}
@@ -162,26 +175,15 @@ export function SectionChannelForm({ editing, types, onSubmit, onCancel }: Props
       {/* 飞书接入说明文档：implId==='feishu' 时展开（固定高度独立滚动，避免与 modal 整体滚动嵌套） */}
       {implId === 'feishu' && <ComponentFeishuSetupDoc />}
 
-      <div className="flex items-center gap-2">
-        <button
-          type="submit"
-          data-action-key="channel.instance.save"
-          disabled={submitting || typesEmpty}
-          className="px-3 py-[6px] rounded-md text-[12px] font-semibold bg-accent text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {submitting ? t('form.submitting') : t('form.submit')}
-        </button>
-        <button
-          type="button"
-          data-action-key="channel.instance.cancel"
-          onClick={onCancel}
-          disabled={submitting}
-          className="px-3 py-[6px] rounded-md text-[12px] font-semibold border border-border-2 text-fg hover:border-accent disabled:opacity-50"
-        >
-          {t('form.cancel')}
-        </button>
-      </div>
-    </form>
+      {/* [v0.0.317] SaveBar 替换原底部提交/取消按钮 */}
+      <SaveBar
+        variant="detail"
+        dirty={dirty}
+        saving={submitting}
+        onSave={handleSubmit}
+        onCancel={onCancel}
+      />
+    </div>
   );
 }
 

@@ -5,8 +5,9 @@
  *
  * 职责：breadcrumb + 头部（logo + 名称 + type + 启停）+ 基础信息 section（name + type + baseUrl，
  *   name/type **竖排各占一整行**，用户决策②对设计稿差异）+ 认证密钥 section（publicKey + secretKey）
- *   + save-bar（dirty 指示 + 重置 + 保存）。
- * dirty 判定：enabled 不计（toggle 即时）。secretKey 用 primitive-secret-input 四态机
+ *   + dirty 提示条（[v0.0.316] save/reset 移到 tab 级，detail 只保留 dirty 指示）。
+ * dirty 判定：[v0.0.317 D9] enabled 计入 dirty（detail toggle 攒 draft，tab 级统一保存；list 级 toggle 仍即时）。
+ *   secretKey 用 primitive-secret-input 四态机
  *   （value=已保存值，mask 展示；onCommit 提交新值→updateField→标 dirty；编辑态自动清空 draft 等重输）。
  *   后端 GET 返回明文，SecretInput display 态自动 mask（头4+*+尾4 长度对齐）；编辑态清空重输。
  */
@@ -17,7 +18,6 @@ import { SecretInput } from '../../framework/primitives/secret-input';
 import { PrimitiveTooltip } from '../../common/primitive-tooltip';
 import {
   isObservabilityDirty,
-  isObservabilityValid,
   type ObservabilityConfig,
 } from './types';
 
@@ -28,10 +28,8 @@ interface SectionObservabilityDetailProps {
   isNew: boolean;
   /** 返回 list */
   onBack: () => void;
-  /** 保存 → 父级落库 */
-  onSave: (data: ObservabilityConfig) => void;
-  /** 头部 toggle 即时（仅编辑态；新增态无 id 不触发） */
-  onToggle: (id: string, enabled: boolean) => void;
+  /** [v0.0.316] draft 变化回调（替代原 onSave 即时 PUT；父级攒 draft 供 tab 级 save） */
+  onDraftChange: (data: ObservabilityConfig) => void;
 }
 
 /** 详情/编辑视图 */
@@ -39,30 +37,29 @@ export function SectionObservabilityDetail({
   initialData,
   isNew,
   onBack,
-  onSave,
-  onToggle,
+  onDraftChange,
 }: SectionObservabilityDetailProps) {
   // draft：受控编辑副本；saved：已保存基线（dirty 判定对比）
   const [draft, setDraft] = useState<ObservabilityConfig>(initialData);
   const [saved] = useState<ObservabilityConfig>(initialData);
-  // [v0.0.62 i18n] observability 详情文案走 app-dev-config ns；通用保存/重置走 common ns
+  // [v0.0.62 i18n] observability 详情文案走 app-dev-config ns
   const { t } = useTranslation('app-dev-config');
-  const { t: tc } = useTranslation('common');
 
   const dirty = isObservabilityDirty(draft, saved);
-  const valid = isObservabilityValid(draft);
-  const canSave = dirty && valid;
 
-  /** 通用字段更新（enabled 走 toggle 不走这里） */
+  /** 通用字段更新（enabled 走 toggle 不走这里）+ [v0.0.316] draft 变化通知父级攒 draft */
   const updateField = <K extends keyof ObservabilityConfig>(k: K, v: ObservabilityConfig[K]) => {
-    setDraft((prev) => ({ ...prev, [k]: v }));
+    setDraft((prev) => {
+      const next = { ...prev, [k]: v };
+      onDraftChange(next);
+      return next;
+    });
   };
 
-  /** 头部 toggle：编辑态即时生效 + 本地同步 draft.enabled；新增态禁用 */
+  /** 头部 toggle：[v0.0.317 D9] 不再即时调 API——仅更新 draft.enabled（计入 dirty，tab 级统一保存）；新增态禁用 */
   const handleHeaderToggle = (next: boolean) => {
     if (isNew) return; // 新增无 id，先保存
     updateField('enabled', next);
-    onToggle(initialData.id, next);
   };
 
   return (
@@ -249,7 +246,7 @@ export function SectionObservabilityDetail({
         </div>
       </section>
 
-      {/* save-bar */}
+      {/* [v0.0.316] dirty 提示条（save/reset 移到 tab 级 aggregator，detail 只保留 dirty 指示） */}
       <div className="flex items-center gap-3 mt-5 pt-5 border-t border-border">
         <span
 
@@ -257,30 +254,6 @@ export function SectionObservabilityDetail({
         >
           {dirty ? t('observability.dirtyHint') : t('observability.savedHint')}
         </span>
-        <button
-          type="button"
-          data-action-key="settings.observability.reset"
-          disabled={!dirty}
-          onClick={() => setDraft({ ...saved })}
-          className={
-            'px-4 py-1.5 rounded-md border border-border text-fg-2 text-sm transition-colors hover:bg-bg-warm ' +
-            (!dirty ? 'opacity-40 cursor-not-allowed' : '')
-          }
-        >
-          {t('observability.resetBtn')}
-        </button>
-        <button
-          type="button"
-          data-action-key="settings.observability.save"
-          disabled={!canSave}
-          onClick={() => onSave(draft)}
-          className={
-            'px-4 py-1.5 rounded-md text-sm font-medium text-white transition-colors ' +
-            (canSave ? 'bg-accent hover:opacity-90' : 'bg-accent opacity-40 cursor-not-allowed')
-          }
-        >
-          {tc('action.save')}
-        </button>
       </div>
 
       {/* 重启/下 session 生效提示（spec §3.4.1 决策） */}

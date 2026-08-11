@@ -127,6 +127,8 @@ export async function handleHire(req: Request, squadId: string, deps: SquadHandl
   };
   try {
     const created = await createMemberService(memberDeps, input);
+    // [v0.0.305] 落盘成功后 broadcast squad 聚合（在线数变化；PRD §4.4.2）
+    deps.squadMetaBroadcaster?.broadcast(squadId);
     return json(201, { member: created.member, sessionId: created.sessionId });
   } catch (e) {
     if (e instanceof MemberNameConflictError) return json(409, { error: 'member_name_conflict' });

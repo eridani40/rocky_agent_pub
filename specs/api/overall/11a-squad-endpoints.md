@@ -1,6 +1,6 @@
 # Squad / Member / Charter 端点契约（v0.0.33.1 — 11-squad.md 姊妹文件）
 
-> version: 1.11 · 引入版本 v0.0.33.1 · **[v0.0.89 modified]** 加 `summaryModelDefault` · **[v0.0.113 modified]** Member.skills→skillConfig overlay · **[v0.0.116 modified]** squad 级心跳（PATCH /squad 加 heartbeatConfig，废弃 PATCH /member/:mid/heartbeat）+ Member.currentWork presence · **[v0.0.142 modified]** Member + PatchMemberBody 加 `workStyle`（可空/空串=清空/无 400；hire 不含；仅用户可编辑）· **[v0.0.158 modified]** 删「独立 summary 模型」层——`summaryModelDefault` + `summaryModelDefaultProviderId` 两字段整删（Schema + POST/PATCH body + GET 响应 + 校验规则）· **[v0.0.169 modified]** hire（§2.1）扩 `workStyle?`（fresh 直传 trim 回写/空串=空串/无 400；derive 默认复制父 + `overrides.workStyle` 覆盖，空串=清空——对齐 §2.2 v0.0.142 语义）· **[v0.0.192.delete_cleanup modified]** §1.5 `DELETE /squad/:id` 行为修订——step② `listSessionsBySquad` 按 squadId 平铺快照全量 squad session（含 spawn children）；step④ 改 `deleteSquadAdministrativeSubpaths`（只删管理性子路径），**保留 workspaces/outputs/reports 工作产出** · **[v0.0.210 modified]** §2.1 hire body 加 `mode: 'derive_academy'`（从教室学生版本派生；academySource 三字段；tech `specs/tech/academy/[P1]squad_derive.md`）· **[v0.0.233 modified]** §2.1 derive_academy 分支加 `resolution?`（同名裁决：默认全 skip 同名 + 用户逐项改 overwrite + 不同名 merge）+ §2.5 新增 `POST /squad/:id/member/derive-academy/preview`（派生前预检，纯只读返 PreviewResult）—— tech 权威 `specs/tech/academy/[P1]derive_preview_conflict.md` · **[v0.0.237 removed]** §3 Charter 整组端点（GET/PUT/GET history `/squad/:id/charter*`）+ `/squad/:id/board/*` 全套 board endpoint（后者曾在 11b-squad-workitems.md，已随 board 全链路删）+ squad.charter schema 字段 + charter_history entity 整体退役——AT 不可 curl，§3 细节保留作历史契约 · **[v0.0.250 modified]** §1.3 Member + §2.1 HireMemberBody derive 分支 + step 删 `inheritMemory`（dead：声明「派生复制父记忆」从未落地；memory 已 v0.0.232 团队盘 `.rocky/memory/` 全队共享，无复制语义）+ §2.1 step 列表加 7.5（derive 复制父成员个人 AGENTS.md，父无/失败 → 静默 no-op 不回滚）· **[v0.0.270 modified]** §1.3 SquadDetail + §1.4 PatchSquadBody 加 `enableGroupChat`（群聊可见性：回显 ?? true / PATCH !== undefined 才改）· **[v0.0.279 modified]** §1.3 SquadDetail + §1.4 PatchSquadBody 加 `effortDefault`（团队默认推理强度：回显 ?? 'default' / PATCH !== undefined 才改，显式 'default' 也落盘不清空 / 非法值 400 先于 404）
+> version: 1.12 · 引入版本 v0.0.33.1 · **[v0.0.89 modified]** 加 `summaryModelDefault` · **[v0.0.113 modified]** Member.skills→skillConfig overlay · **[v0.0.116 modified]** squad 级心跳（PATCH /squad 加 heartbeatConfig，废弃 PATCH /member/:mid/heartbeat）+ Member.currentWork presence · **[v0.0.142 modified]** Member + PatchMemberBody 加 `workStyle`（可空/空串=清空/无 400；hire 不含；仅用户可编辑）· **[v0.0.158 modified]** 删「独立 summary 模型」层——`summaryModelDefault` + `summaryModelDefaultProviderId` 两字段整删（Schema + POST/PATCH body + GET 响应 + 校验规则）· **[v0.0.169 modified]** hire（§2.1）扩 `workStyle?`（fresh 直传 trim 回写/空串=空串/无 400；derive 默认复制父 + `overrides.workStyle` 覆盖，空串=清空——对齐 §2.2 v0.0.142 语义）· **[v0.0.192.delete_cleanup modified]** §1.5 `DELETE /squad/:id` 行为修订——step② `listSessionsBySquad` 按 squadId 平铺快照全量 squad session（含 spawn children）；step④ 改 `deleteSquadAdministrativeSubpaths`（只删管理性子路径），**保留 workspaces/outputs/reports 工作产出** · **[v0.0.210 modified]** §2.1 hire body 加 `mode: 'derive_academy'`（从教室学生版本派生；academySource 三字段；tech `specs/tech/academy/[P1]squad_derive.md`）· **[v0.0.233 modified]** §2.1 derive_academy 分支加 `resolution?`（同名裁决：默认全 skip 同名 + 用户逐项改 overwrite + 不同名 merge）+ §2.5 新增 `POST /squad/:id/member/derive-academy/preview`（派生前预检，纯只读返 PreviewResult）—— tech 权威 `specs/tech/academy/[P1]derive_preview_conflict.md` · **[v0.0.237 removed]** §3 Charter 整组端点（GET/PUT/GET history `/squad/:id/charter*`）+ `/squad/:id/board/*` 全套 board endpoint（后者曾在 11b-squad-workitems.md，已随 board 全链路删）+ squad.charter schema 字段 + charter_history entity 整体退役——AT 不可 curl，§3 细节保留作历史契约 · **[v0.0.250 modified]** §1.3 Member + §2.1 HireMemberBody derive 分支 + step 删 `inheritMemory`（dead：声明「派生复制父记忆」从未落地；memory 已 v0.0.232 团队盘 `.rocky/memory/` 全队共享，无复制语义）+ §2.1 step 列表加 7.5（derive 复制父成员个人 AGENTS.md，父无/失败 → 静默 no-op 不回滚）· **[v0.0.270 modified]** §1.3 SquadDetail + §1.4 PatchSquadBody 加 `enableGroupChat`（群聊可见性：回显 ?? true / PATCH !== undefined 才改）· **[v0.0.279 modified]** §1.3 SquadDetail + §1.4 PatchSquadBody 加 `effortDefault`（团队默认推理强度：回显 ?? 'default' / PATCH !== undefined 才改，显式 'default' 也落盘不清空 / 非法值 400 先于 404）· **[v0.0.305 modified]** §1.2 SquadSummary +3 optional 聚合字段（onlineCount/inProgressCount/lastActiveAt，GET /squad 列表批量聚合）+ §4.5 新增 `squad_meta` SSE topic 契约（SquadMetaBroadcaster 触发 + 前端 useSquadMeta 消费）· **[v0.0.319 modified]** 新增 §5 团队同步端点（`GET /squad/:id/export` 导出 zip + `POST /squad/import?step=preview|execute` 两阶段导入建队）—— tech 权威 `specs/tech/version_logs/v0.0.319/change_plan.md`
 > 管什么：v0.0.33.1 squad/member 两组管理端点的**完整端点契约**（payload / 响应 / 行为 / 错误码）——§1 Squad CRUD + §2 Member 管理（§3 Charter 组已于 v0.0.237 移除，详见该章节头）。
 > 不管什么：session schema 增量字段 + bizType 隔离 + 占位 chat 403 + SSE 策略 + AT 映射 + 文件清单（→ `11-squad.md`）；agent loop / chat 真实跑（→ v0.0.33.2）。
 > **本文件是 AT（API Test）squad/member/charter 端点的唯一依据**：api-verifier 黑盒 curl，不读代码。
@@ -68,8 +68,18 @@ interface SquadSummary {
   enableHeartBeat: boolean;       // [v0.0.33.4] 实跑（scheduler killswitch，每 tick 轮询生效）
   createdAt: string;
   updatedAt: string;
+  // [v0.0.305] 聚合视图 3 字段（全部 optional，向后兼容旧前端）：
+  onlineCount?: number;           // 在线成员数 = member.state==='deployed' 数（与 seats onlineCount 同口径）
+  inProgressCount?: number;       // 工作中数 = squadChat + members 直连 session state∈{running,interrupting,suspended} 数（与 seats inProgressCount 同口径）
+  lastActiveAt?: string;          // 成员最后会话时间 = max(直连 session.updatedAt)；集合空 → squad.updatedAt（恒有值可排序）
 }
 ```
+
+> **`[v0.0.305]` 聚合字段口径**（与 seats 面板完全一致，统一数据源不各自算各自）：
+> - `onlineCount` = `members.filter(m => m.state === 'deployed').length`
+> - `inProgressCount` = 遍历 `[squadChatSessionId, ...members[].sessionId]` 直连 session 集合，数 `state ∈ {running, interrupting, suspended}`（**不含 subagent 派生会话**——spawn children 也带 squadId 但不在直连集合，避免多算）
+> - `lastActiveAt` = 上述直连 session 集合 `updatedAt` 最大值；集合空 → `squad.updatedAt`
+> - 计算收敛为后端单一聚合服务 `squad-aggregate-service`（GET 列表 + SSE 推送共用，技术权威 `specs/tech/squad/[P1]squad_aggregate.md`）
 
 > **分页**：本版不分页（design.md §6.5 待定，squad 数量预期小）。后续可加 `cursor/limit` query。
 
@@ -513,7 +523,52 @@ interface SchedulerHistoryEntry {
 
 **错误**：`404` squad 不存在；`400` limit>200。
 
-## 5. 版本
+### 4.5 `squad_meta` SSE topic — squad 聚合状态实时推送（`[v0.0.305]` 新增）
+
+> 对齐 `session_meta` 广播模式（`04-agent-session.md §4.2` + `specs/tech/app/frontend/[P0]sse_channel.md §10`）：全量 payload、`_all` 共享广播 group、replayable=false。
+
+| 项 | 值 |
+|----|-----|
+| **topic** | `squad_meta`（已加入 `handlers/sse.ts ALLOWED_TOPICS` 白名单 + bus-phase 注册 + 白名单双向断言） |
+| **group** | `_all`（共享广播） |
+| **replayable** | `false`（快照态；初始态走 GET /squad 拉全量，订阅后只收增量——同 session_meta §10.3 理由） |
+| **事件类型** | `squad_meta_update`（唯一） |
+| **data** | 全量聚合 payload（非 diff，前端 reducer 按 `data.squadId` 整条替换） |
+
+```typescript
+interface SquadMetaUpdateEvent {
+  id: string;                    // 事件自身 ULID
+  type: 'squad_meta_update';
+  squadId: string;               // 变更的 squad（与 data.squadId 一致）
+  createdAt: string;             // ISO 8601 UTC
+  data: {
+    squadId: string;
+    onlineCount: number;         // member.state==='deployed' 数
+    inProgressCount: number;     // busy session 数（running/interrupting/suspended）
+    lastActiveAt: string;        // max(直连 session.updatedAt) ?? squad.updatedAt
+  };
+}
+```
+
+**触发方**：`SquadMetaBroadcaster`（squad 层组件，仿 SessionMetaBroadcaster 自治订阅 statusBus）：
+- **session 事件触发**（statusBus wrap fan-out，事件→squad 路由：`sessionStore.getSession(sessionId)` → `s.squadId`；null=playground 跳过）：`session_status_update` / `summary_task_update` / `session_usage_update` / `session_read_update` / `messages_cleared`；高频 `session_workspace_file_changed` **不触发**。
+- **写路径显式触发**（handler 落盘后 `squadMetaBroadcaster.broadcast(squadId)`）：member hire（`POST /squad/:id/member`）/ deploy / bench 成功后 + squad create（`POST /squad`）成功后。**不触发**：member PATCH（聚合不依赖 name/intro）、squad DELETE（前端 mutation 后 reloadSquads 兜底）。
+- **触发纪律**：状态机 + agent-loop 不感知 squad_meta；写路径 await 落盘后再 broadcast（v0.0.163 race 教训）。
+
+**前端消费**：`useSquadMeta` hook（page-studio 级单例）`onInit` subscribe('squad_meta','_all') → `onEvent` applyKeyed set 整条替换 → `aggregateMap`；SSE 断连重连（非 replayable）→ `onResumed` 触发 `reloadSquads()` 全量兜底。技术权威 `specs/tech/squad/[P1]squad_aggregate.md`。
+
+## 5. 团队同步端点（§E，`[v0.0.319 modified]` 新增）
+
+> 团队同步（导入导出团队配置）完整端点契约见**姊妹文件 `11d-squad-team-sync.md`**（本文件行数预算内只留指针）：
+> - `GET /squad/:id/export` — 导出团队 zip 下载流（application/zip + Content-Disposition，中文名走 RFC 5987 filename*）
+> - `POST /squad/import?step=preview` — FormData(file) 解包校验 → `{ importKey, manifest }`（importKey 5min TTL）
+> - `POST /squad/import?step=execute` — FormData(importKey, name) 建队 → `{ squadId, created, failed }`
+> - 错误：InvalidZipError（path traversal / manifest 缺失 / 结构不合法）→ 400；404 squad not found（导出）
+> - **路由顺序（MANDATORY）**：export/import 分发在 `/squad/:id` CRUD 之前匹配（`squad-routes.ts` `dispatchSquadRoutes`）
+
+## 6. 版本
+
+version: 1.13 `[v0.0.319 modified]`：**新增 §5 团队同步端点**——`GET /squad/:id/export`（导出 zip 下载流，application/zip + Content-Disposition，中文名走 RFC 5987 filename*）+ `POST /squad/import?step=preview|execute`（两阶段导入：preview 解包校验返 `{importKey, manifest}`（importKey 5min TTL）/ execute 按 importKey 建队返 `{squadId, created, failed}`）。路径安全（zip entry 拒 `..`/绝对路径/盘符 → 400 InvalidZipError）；导出侧 symlink skip。modelDefault 继承当前 session squad → 系统 fallback。**路由顺序 MANDATORY**：export/import 分发在 `/squad/:id` CRUD 之前匹配。权威 `specs/tech/version_logs/v0.0.319/change_plan.md` D1-D3。
 
 version: 1.7 `[v0.0.169 modified]`：**hire 扩 `workStyle?`**。§2.1 `HireMemberBody` fresh 加 `workStyle?: string`（直传，`trim()` 后回写；可空——提供空串=回写空串无 400；不传=缺省无 workStyle）、derive `overrides` 加 `workStyle?: string`（默认**复制父 member workStyle**，override 覆盖 trim 回写，空串=清空回写空串）——语义对齐 §2.2 PATCH 的 v0.0.142 口径。仅用户面可写（HTTP hire + PATCH 编辑面板）；agent `team` 工具不暴露（`team.hire` 服务端剔除 `overrides.workStyle`，同 `team.edit` 剔除模式）。前端入口 = 成员创建页（`section-member-create`，弹层改版，06-studio §7）。概念权威 `specs/tech/squad/[P1]data_model.md §1.2c/§5`。
 

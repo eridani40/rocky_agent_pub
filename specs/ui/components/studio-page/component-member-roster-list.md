@@ -9,7 +9,10 @@ since: v0.0.288
 
 > 文件: app/web/src/components/studio-page/component-member-roster-list.tsx
 > since: v0.0.288（从 component-squad-status-modal.tsx 抽出 PanelRowView + 分区渲染 → 独立文件）
-> 消费方：chat 弹层 `component-squad-status-modal.tsx`（showBenched=false）+ 首页 `component-seats-body.tsx` 成员卡（showBenched=view==='all'）
+> 消费方：
+> - **Studio 首页成员列表**（`component-seats-body.tsx`）= MemberRosterList（showBenched=view==='all'）
+> - **聊天区右侧弹层**（`component-squad-status-modal.tsx`）= MemberRosterList（showBenched=false）
+> - **注意**：`component-seat-row.tsx` 与 `component-seat-card.tsx` 已废弃（v0.0.288 重构后零 import——首页成员卡/坐席卡全部由 MemberRosterList 三分区取代），对应 spec 已标 deprecated
 
 ## 职责
 
@@ -80,7 +83,7 @@ interface PanelRowViewProps {
 
 - **从 `component-squad-status-modal.tsx` 迁出** PanelRowView（旧 isIdle 二元 → variant 三元）；modal 改为 import MemberRosterList + showBenched=false 委托渲染。
 - **消费 `PanelRows` + `PanelRow`** 类型（`squad-status-utils.ts` derivePanelRows 返回值——三分区含 benched）。
-- **复用 `MemberAvatar`**（common/member-avatar sm 无名）+ `SpinnerRing`（common/spinner-ring sm）+ `Icon`（studio-icons chat）。
+- **手写色块头像**（v0.0.305 从 MemberAvatar sm 改手写 19px——与 sidebar 彩色字母头像同源视觉语言，直接用 hue-hash 不套 MemberAvatar）+ `SpinnerRing`（common/spinner-ring sm）+ `Icon`（studio-icons chat）。
 
 ## 可观测节点
 
@@ -94,3 +97,4 @@ interface PanelRowViewProps {
 - badge：`shrink-0 rounded-xs px-1 py-px font-mono text-[10px] text-muted`（running bg-bg-warm / idle+benched bg-bg-warm/50）。
 - presence 文字：`block truncate text-[11px] text-muted`。
 - hover chat icon：`shrink-0 text-fg-2 opacity-0 group-hover:opacity-100 transition-opacity`（Icon name="chat" size=14）。
+- **avatar（手写色块，v0.0.305 从 MemberAvatar sm 改手写 19px）**：`flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded font-bold font-sans text-[10px] text-white`；底色 `var(--hue-${hashHueName(row.member.id ?? row.member.name)})`；内容 = `row.member.name.trim().charAt(0).toUpperCase() || 'A'`。灰度策略：idle 外层 span `opacity-70` / benched 外层 span `grayscale opacity-50`（叠乘于行根 opacity）；leader 行保持原色（反色底上不降透明度）。

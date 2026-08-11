@@ -17,7 +17,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-  mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, symlinkSync,
+  mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, symlinkSync, statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,6 +95,63 @@ describe('GET /session/:id/workspace/file', () => {
     );
     expect(res.status).toBe(200);
     expect((await body(res)).content).toBe(md);
+  });
+
+  it('[v0.0.320] 读文件返回 version（${mtimeMs}:${size} 格式，与 statSync 一致）', async () => {
+    const md = '# version 测试';
+    writeFileSync(join(ws, 'notes.md'), md);
+    const sid = await newSessionWithWorkspace(ws);
+
+    const res = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=notes.md`),
+      'GET', sid, makeDeps(),
+    );
+    expect(res.status).toBe(200);
+    const parsed = await body(res);
+    expect(parsed.content).toBe(md);
+    // version = statSync 的 mtimeMs:size（确定性契约）
+    const st = statSync(join(ws, 'notes.md'));
+    expect(parsed.version).toBe(`${st.mtimeMs}:${st.size}`);
+    expect(parsed.version).toMatch(/^\d+(\.\d+)?:\d+$/);
+  });
+
+  it('[v0.0.320] 文件内容变化（size 变化）→ version 变化', async () => {
+    writeFileSync(join(ws, 'v.md'), 'aaaa');
+    const sid = await newSessionWithWorkspace(ws);
+    const r1 = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=v.md`),
+      'GET', sid, makeDeps(),
+    );
+    const v1 = (await body(r1)).version;
+
+    // 外部改文件（size 变大 → version 必变）
+    writeFileSync(join(ws, 'v.md'), 'aaaa-bbbb-cccc');
+    const r2 = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=v.md`),
+      'GET', sid, makeDeps(),
+    );
+    const v2 = (await body(r2)).version;
+    expect(v1).toMatch(/^\d+(\.\d+)?:\d+$/);
+    expect(v2).toMatch(/^\d+(\.\d+)?:\d+$/);
+    expect(v2).not.toBe(v1);
+  });
+
+  it('[v0.0.320] binary=1 分支不加 version（image 无冲突语义，向后兼容 {content}）', async () => {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    writeFileSync(join(ws, 'img.png'), png);
+    const sid = await newSessionWithWorkspace(ws);
+
+    const res = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=img.png&binary=1`),
+      'GET', sid, makeDeps(),
+    );
+    expect(res.status).toBe(200);
+    const parsed = await body(res);
+    expect(typeof parsed.content).toBe('string');
+    expect(parsed.version).toBeUndefined();
   });
 
   it('路径穿越 ../etc/passwd → 400（字符串前缀层挡）', async () => {
@@ -243,9 +300,116 @@ describe('POST /session/:id/workspace/file/save', () => {
       'POST', sid, makeDeps(),
     );
     expect(res.status).toBe(200);
-    expect((await body(res)).ok).toBe(true);
+    const parsed = await body(res);
+    expect(parsed.ok).toBe(true);
+    // [v0.0.320] 成功响应返回写后新 version（写后 stat）
+    expect(parsed.version).toMatch(/^\d+(\.\d+)?:\d+$/);
+    const st = statSync(join(ws, 'notes.md'));
+    expect(parsed.version).toBe(`${st.mtimeMs}:${st.size}`);
     // 真实落盘验证（no-mock fs）
     expect(readFileSync(join(ws, 'notes.md'), 'utf8')).toBe(newContent);
+  });
+
+  it('[v0.0.320] save 无 expectedVersion → 200 last-write-wins（向后兼容旧调用方）', async () => {
+    writeFileSync(join(ws, 'legacy.md'), '旧');
+    const sid = await newSessionWithWorkspace(ws);
+    const res = await handleWorkspaceFileSave(
+      new Request(`http://x/session/${sid}/workspace/file/save`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: 'legacy.md', content: '新' }),
+      }),
+      'POST', sid, makeDeps(),
+    );
+    expect(res.status).toBe(200);
+    expect((await body(res)).ok).toBe(true);
+    expect(readFileSync(join(ws, 'legacy.md'), 'utf8')).toBe('新');
+  });
+
+  it('[v0.0.320] expectedVersion 匹配当前 version → 200 返回新 version', async () => {
+    writeFileSync(join(ws, 'ok.md'), '初始');
+    const sid = await newSessionWithWorkspace(ws);
+    // 先读拿当前 version
+    const readRes = await handleWorkspaceFileRead(
+      new Request(`http://x/session/${sid}/workspace/file?path=ok.md`),
+      'GET', sid, makeDeps(),
+    );
+    const expected = (await body(readRes)).version;
+
+    const res = await handleWorkspaceFileSave(
+      new Request(`http://x/session/${sid}/workspace/file/save`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: 'ok.md', content: '更新', expectedVersion: expected }),
+      }),
+      'POST', sid, makeDeps(),
+    );
+    expect(res.status).toBe(200);
+    const parsed = await body(res);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.version).toMatch(/^\d+(\.\d+)?:\d+$/);
+    expect(readFileSync(join(ws, 'ok.md'), 'utf8')).toBe('更新');
+  });
+
+  it('[v0.0.320] expectedVersion 不匹配 → 409 {error:conflict,currentVersion} 且不写盘', async () => {
+    writeFileSync(join(ws, 'conflict.md'), '外部内容-B');
+    const sid = await newSessionWithWorkspace(ws);
+
+    const res = await handleWorkspaceFileSave(
+      new Request(`http://x/session/${sid}/workspace/file/save`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          path: 'conflict.md',
+          content: 'overwrite-attempt',
+          expectedVersion: '1:1', // 必然不匹配
+        }),
+      }),
+      'POST', sid, makeDeps(),
+    );
+    expect(res.status).toBe(409);
+    const parsed = await body(res);
+    expect(parsed.error).toBe('conflict');
+    expect(parsed.currentVersion).toMatch(/^\d+(\.\d+)?:\d+$/);
+    // 不写盘：文件保留外部最新内容
+    expect(readFileSync(join(ws, 'conflict.md'), 'utf8')).toBe('外部内容-B');
+  });
+
+  it('[v0.0.320] force:true → 跳过校验覆盖成功（即使 expectedVersion 不匹配）', async () => {
+    writeFileSync(join(ws, 'force.md'), '外部内容');
+    const sid = await newSessionWithWorkspace(ws);
+    const res = await handleWorkspaceFileSave(
+      new Request(`http://x/session/${sid}/workspace/file/save`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          path: 'force.md',
+          content: 'force-overwrite',
+          expectedVersion: 'wrong-version',
+          force: true,
+        }),
+      }),
+      'POST', sid, makeDeps(),
+    );
+    expect(res.status).toBe(200);
+    expect((await body(res)).ok).toBe(true);
+    expect(readFileSync(join(ws, 'force.md'), 'utf8')).toBe('force-overwrite');
+  });
+
+  it('[v0.0.320] expectedVersion/force 非 string/boolean → 宽松忽略（不 400，对齐契约宽松扩展）', async () => {
+    writeFileSync(join(ws, 'loose.md'), '旧');
+    const sid = await newSessionWithWorkspace(ws);
+    const res = await handleWorkspaceFileSave(
+      new Request(`http://x/session/${sid}/workspace/file/save`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: 'loose.md', content: '新', expectedVersion: 123, force: 'yes' }),
+      }),
+      'POST', sid, makeDeps(),
+    );
+    expect(res.status).toBe(200);
+    expect((await body(res)).ok).toBe(true);
+    expect(readFileSync(join(ws, 'loose.md'), 'utf8')).toBe('新');
   });
 
   it('round-trip：save 后 read 取回等值', async () => {

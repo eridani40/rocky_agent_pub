@@ -7,6 +7,10 @@
 > `chat/ModelPicker`（清除交互在外层包，见 `app-dev-config-page/section-default-models-and-request.md`）；
 > 本组件现仅 consolidation（整理配置 modelId 行）使用。
 
+## 消费方
+
+- `components/app-dev-config-page/section-consolidation-config.tsx`
+
 ## 职责
 配置页 key 卡片形式的 model 选择器 primitive。trigger button + dropdown 菜单（按 provider 分组）+ x 清除按钮。选了模型后右侧显示 x，点 x 清空字段（`onChange(undefined)`）。
 

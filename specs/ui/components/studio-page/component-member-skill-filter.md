@@ -27,3 +27,9 @@
 - **启用 label + toggle（新增 label）**：右侧  内 —— 文字标签「启用」（，i18n 复用 skill ns `t('item.enableLabel')`）+ ToggleSwitch。对齐 skill-item 的 label+toggle 模式。
 - **搜索框**：保留，复用 `studio-styles.INPUT`。
 - **简化掉的 skill 资产管理元素**（相对 skill-item 删除）：preview 按钮、delete 按钮、evolvable（自进化）toggle、状态 badge——成员可见性筛选器不需要。
+
+## 消费方
+
+- `app/web/src/components/studio-page/member-create-hire-body.ts`
+- `app/web/src/components/studio-page/section-member-create.tsx`
+- `app/web/src/components/studio-page/section-member-panel.tsx`

@@ -121,3 +121,36 @@ describe('SquadDeleteSection', () => {
     await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(2));
   });
 });
+
+// v0.0.315: confirmLabel 去掉 uppercase，含 squadName 须保持原始大小写
+describe('SquadDeleteSection — 大小写保持（v0.0.315）', () => {
+  afterEach(() => cleanup());
+
+  it('confirmLabel 含大小写队名时不被 uppercase 改变', () => {
+    const name = 'MyTeam';
+    render(<SquadDeleteSection squadName={name} onDelete={async () => true} />);
+    fireEvent.click(screen.getByRole('button', { name: '解散团队' }));
+
+    // label 不含 uppercase class（className 里没有 'uppercase'）
+    const labels = document.querySelectorAll('label');
+    const confirmLabels = Array.from(labels).filter((l) => l.textContent?.includes('MyTeam'));
+    expect(confirmLabels.length).toBeGreaterThanOrEqual(1);
+    const cls = confirmLabels[0]!.className;
+    expect(cls).not.toContain('uppercase');
+
+    // 文本中 squadName 保持原始大小写 'MyTeam'（不被 CSS 大写化——UT 检 DOM textContent）
+    expect(confirmLabels[0]!.textContent).toContain('MyTeam');
+  });
+
+  it('modal title 含大小写队名时保持原始大小写（ModalShell title 无 uppercase）', () => {
+    const name = 'MyTeam';
+    render(<SquadDeleteSection squadName={name} onDelete={async () => true} />);
+    fireEvent.click(screen.getByRole('button', { name: '解散团队' }));
+
+    // title 区域不含 uppercase
+    const dialog = screen.getByRole('dialog');
+    const titleEl = dialog.querySelector('.text-\\[15px\\]');
+    expect(titleEl).toBeTruthy();
+    expect(titleEl!.className).not.toContain('uppercase');
+  });
+});

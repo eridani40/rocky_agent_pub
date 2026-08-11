@@ -7,6 +7,8 @@
  *
  * 职责：渲染单条节点（文件夹可展开 / 文件 hover 打开）。
  *   - twisty：仅文件夹 + hasChildren=true 显示；点击触发 onToggleExpand
+ *   - [v0.0.320 D7] 文件夹 item 本体点击 → toggle 展开/收起（与 twisty 同语义防双发：
+ *     item onClick 与 twisty onClick 各自 stopPropagation，互不触发）
  *   - icon：文件夹 gold（展开变 folderOpen）；文件 muted
  *   - name：12.5px ellipsis
  *   - hover「打开」按钮 .ws-act：默认 opacity 0，item hover opacity 1（绝对空间预留不位移）
@@ -62,8 +64,17 @@ export function ComponentWsTreeItem({
 
   return (
     <div
-
-      className="ws-item group flex items-center gap-1 h-[26px] pr-2 rounded-md relative hover:bg-bg-warm"
+      // [v0.0.320 D7] 文件夹 item 本体点击 → toggle 展开/收起（与 twisty 同语义）；
+      //   文件 item 本体点击 → onOpen（五路分流，消费端已改预览区）。
+      //   防双发：twisty / hover 打开按钮 onClick 均 stopPropagation，互不触发 item onClick。
+      role="button"
+      aria-label={openLabel}
+      title={openLabel}
+      onClick={() => {
+        if (isDir) onToggleExpand(node.path);
+        else onOpen(node);
+      }}
+      className="ws-item group flex items-center gap-1 h-[26px] pr-2 rounded-md relative hover:bg-bg-warm cursor-pointer"
       style={{ paddingLeft: 6 + depth * 14 }}
     >
       {/* twisty（仅文件夹 + hasChildren 显示；其余 placeholder 对齐，§6.5 .ws-twisty.placeholder） */}

@@ -7,6 +7,11 @@ updated: 2026-07-23
 
 > 数据源: 挂载拉 providers (`useProviders`) + `GET /config/app?group=default_models&key=chat`（拉 defaultA，playground 场景）；选中值经父级 PUT /session/:id 持久化；无 SSE。
 
+## 消费方
+
+- `components/academy-page/component-tuple-cards.tsx`
+- `components/chat-page/component-chat-session-input.tsx`
+
 ## 1. 职责
 - **21px 纯图标 trigger**（BrainIcon，无内联文字），位于按钮行最左
 - **hover → 单行预览菜单**：只展示「当前选的模型」这一项（菜单样式），或「未配置」——[r2] 取代原 primitive-tooltip 文本

@@ -3,6 +3,17 @@
 > 层级: primitive
 > 文件: app/web/src/components/common/component-icon-box.tsx
 
+## 消费方
+
+- `components/chat-page/component-skills-modal.tsx`
+- `components/common/component-model-picker-panel.tsx`
+- `components/common/component-model-picker-trigger.tsx`
+- `components/skill-page/component-market-detail-modal.tsx`
+- `components/skill-page/component-market-item.tsx`
+- `components/skill-page/component-skill-item.tsx`
+- `components/studio-page/component-member-skill-filter.tsx`
+- `components/studio-page/component-panorama-idle.tsx`
+
 ## 职责
 彩色浅底图标盒 primitive：**32px（可 22/24/34 缩放）圆角 md** 方块，浅底 `--hue-*-bg` + 主色 `--hue-*` 线性图标。用于 skill / plugin / model / provider / 团队入口 / 坐席卡统计等**同一实体恒同色**的图标场景。
 边界：纯展示、无交互；不依赖任何业务 store；颜色走 token 不硬编码。

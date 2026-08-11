@@ -5,6 +5,10 @@
 > （收纳原 ws-panel「长期记忆」「定时任务」tab → 悬浮菜单 + 弹层；[v0.0.205.t2_cons] 加第 3 菜单项「skills」；[v0.0.223] 加第 4 菜单项「待办 todo」；[v0.0.269] 加第 4 菜单项「团队状态」——skills 与 todo 之间，todo 保持最后 → 共 5 项）
 > 视觉参考: 无设计稿（用户裁决视觉由 orchestrator 定，跳过 compare）——走现有 token。
 
+## 消费方
+
+- `components/chat-page/section-chat-session.tsx`
+
 ## 1. 定位 + 设计意图（一句话）
 聊天区右上方（贴 chat-detail 与 ws-panel 分界处、topbar 下方）一个竖向圆角白色悬浮工具条，纵排「长期记忆」「定时任务」「skills」「团队状态」「待办」五个小图标菜单项（memory/cron/squad-status/todo 带 badge 计数；skills 无 badge——无计数需求）。顺序自上而下 = memory/cron/skills/squad-status/todo（v0.0.269：squad-status 在 skills 下方、todo **上方**——todo 保持最后）。点菜单项弹出对应弹层——memory/cron 弹层内「列表 ↔ 新建/编辑」走**二级视图导航（顶部返回按钮）**，不再弹层套弹层；skills 弹层为 3 tab 只读列表（见 `component-skills-modal.md`）；todo 弹层为双层树只读视图（见 `component-todo-modal.md`）；squad-status 弹层为成员状态分区只读视图（见 `component-squad-status-modal.md`）。三处 chat 页统一复用（由 `component-chat-right-overlay` 承载，见 §8）。
 

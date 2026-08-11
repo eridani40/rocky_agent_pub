@@ -4,6 +4,10 @@
 > 文件: app/web/src/components/chat-page/component-a2a-envelope.tsx
 > since: v0.0.295（新组件）
 
+## 消费方
+
+- `components/chat-page/component-message-stream.tsx`
+
 ## 职责
 
 群聊 + member 单聊中 a2a inbox 消息的收起/展开展示（message-stream 共享内核 `isA2aInbox(msg)` 分支统一装配，两视图同走本组件）。收起态渲染为信封闭合 icon + senderName（不显示正文），点击切换到展开态——信封打开 icon + senderName + 灰色气泡正文（`PrimitiveBubble variant='a2a'`）。

@@ -5,6 +5,12 @@ updated: 2026-07-15
 
 # component-input-effort-picker
 
+## 消费方
+
+- `components/chat-page/component-chat-session-input.tsx`
+- `components/chat-page/use-chat-chrome.ts`
+- `components/studio-page/component-manage-tab.tsx`
+
 ## 0. 职责
 session 级 effort 推理强度选择器（4 档 enum），位于 input-bar 按钮行**次左位**（审批模式 picker 右侧、模型选择左侧）。
 - 21px 纯图标 trigger（ZapIcon，语义=能量/算力强度）

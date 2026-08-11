@@ -29,8 +29,10 @@ export async function req<T>(path: string, init?: RequestInit, base?: string): P
       typeof body === 'object' && body && 'error' in body
         ? String((body as { error: unknown }).error)
         : `HTTP ${res.status}`;
-    const err = new Error(msg) as Error & { status: number };
+    // [v0.0.320] 附加响应体：409 冲突时 body 含 currentVersion（change_plan D14：前端 catch err.status 读 body）
+    const err = new Error(msg) as Error & { status: number; body?: unknown };
     err.status = res.status;
+    err.body = body;
     throw err;
   }
   return body as T;

@@ -9,6 +9,10 @@ updated: 2026-07-10
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
 
+## 2026-08-10 · v0.0.317
+
+- 新增 §4.8 **dev 模式 Electron `APP_NAME` 进程隔离**：dev 模式（`shouldStartBackend=false`）在 `app.whenReady()` 前显式调 `app.setName(APP_NAME)`，让 macOS 认为 dev 与 packaged 是不同 app（如 `rocky_agent_dev` vs `rocky_agent`），避免 dev 启动影响 prod 窗口（白屏）。复用共通键 `APP_NAME`，无新增 env 键。→ `environments.md §4.8`。
+
 ## 2026-07-10 · v0.0.108
 
 - `prod.env` schema 三分类重组 + 删 `APP_VERSION`（版本号改由根 `package.json` version 派生，见 `../package/`）：① 进包白名单（`API_PORT`/`DATA_DIR`/`APP_NAME`/`APP_ENV`/`LOG_LEVEL`/`HEALTH_ENDPOINT`）② 仅 build 期（`WEB_PORT`/`BUILD_OUT_DIR`）③ 密钥留空（`APPLE_*`/`CSC_*`）。→ `environments.md §3.4/§3.5`。

@@ -15,11 +15,11 @@
  *   第 4 项「团队状态」→ ComponentSquadStatusModal），topbarLeft 恢复 268 前形态（单聊/群聊两态）。
  */
 import { useTranslation } from 'react-i18next';
+import { hashHueName } from '../../lib/hue-hash';
 import type { SessionChromeView } from '../../lib/chat-api';
 import type { MentionAttrs } from '../chat-page/chat-composer-extension';
 import { SectionChatSession } from '../chat-page/section-chat-session';
 import { ChatSessionTopbarLeft } from '../chat-page/component-chat-session-topbar-left';
-import { MemberAvatar, type MemberAvatarRole } from '../common/member-avatar';
 
 interface SectionStudioChatProps {
   /** studio chat session id（单聊 member session / 群聊 squadChat session） */
@@ -46,13 +46,12 @@ export function SectionStudioChat({ sessionId, chrome, prefill, onBack }: Sectio
     member ? (
       <>
         <div className="flex items-center gap-2 px-2 py-1">
-          <MemberAvatar
-            name={member.name}
-            role={member.role as MemberAvatarRole}
-            id={member.id}
-            size="sm"
-            showName={false}
-          />
+          <span
+            className="flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded font-bold font-sans text-[10px] text-white"
+            style={{ background: `var(--hue-${hashHueName(member.id ?? member.name)})` }}
+          >
+            {member.name.trim().charAt(0).toUpperCase() || 'A'}
+          </span>
           <span className="text-[13px] font-semibold text-fg">{member.name}</span>
         </div>
         {chrome.tag && (

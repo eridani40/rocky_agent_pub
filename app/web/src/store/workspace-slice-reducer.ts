@@ -168,6 +168,19 @@ export function toggleExpanded(
   return { ...state, expanded: { ...state.expanded, [path]: next } };
 }
 
+/**
+ * 合并展开路径入 state.expanded（只加 true，不删 key）。
+ * [v0.0.327] 搜索结果到达时初始展开建议用：filterResult.expandedPaths → mergeExpanded。
+ * 注意：已有 false 的 key 会被设为 true（语义=「确保这些路径展开」，非保留收起态）。
+ */
+export function mergeExpanded(s: WorkspaceState, paths: string[]): WorkspaceState {
+  const expanded = { ...s.expanded };
+  for (const p of paths) {
+    expanded[p] = true;
+  }
+  return { ...s, expanded };
+}
+
 /** 手动刷新（§3.3）：重置 tree + 清 cache/stale，loading=true，组件重新 GET 顶层。
  *  保留 expanded（由组件层按展开层逐层补回 childrenCache，见 expandedPathsByDepth）。
  */

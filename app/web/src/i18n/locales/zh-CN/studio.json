@@ -3,7 +3,10 @@
     "title": "小队",
     "newSquadAria": "新建 squad",
     "empty": "暂无 squad，点右上「+」新建。",
-    "copySessionId": "复制 Session ID"
+    "copySessionId": "复制 Session ID",
+    "status": "{{online}} 在线 · {{working}} 工作中",
+    "pin": "置顶",
+    "unpin": "取消置顶"
   },
   "squadPanel": {
     "subtitle": "squad · 管理面板"
@@ -137,6 +140,11 @@
       "max": "超高"
     },
     "save": "保存元信息"
+  },
+  "saveBar": {
+    "discardTitle": "放弃改动？",
+    "discardBody": "当前 tab 有未保存的改动，切换 tab 将放弃这些改动。",
+    "discardConfirm": "放弃改动"
   },
   "deleteSquad": {
     "sectionLabel": "危险操作",

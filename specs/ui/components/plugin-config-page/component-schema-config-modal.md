@@ -25,3 +25,6 @@ impl 的 schema 配置弹层。按 `configSchema`（JSON Schema）`properties.<k
 - `readOnly=true`：fieldset `disabled` 隔绝所有内部控件 + 隐藏保存按钮（仅展示「关闭」）；`onSave` 不会被调用。
 - `configSchema` 缺省 /  为空 → 渲染空字段表（兜底 undefined / 非对象 → 空对象）。
 - 「保存」→ `onSave(draft)` → `onClose`；「取消」/遮罩/× → 直接 `onClose`（丢弃 draft）
+
+## 消费方
+- `app/web/src/components/plugin-config-page/section-ext-point-area.tsx`

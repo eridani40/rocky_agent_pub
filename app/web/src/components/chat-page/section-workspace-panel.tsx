@@ -12,27 +12,19 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { WsTreeNode, WorkspaceTreeResponse } from './workspace-types';
 import { initWorkspaceState, wsReducer } from './workspace-reducer';
-import {
-  WS_RAIL_WIDTH,
-  readWsCollapsed,
-  readWsWidth,
-  writeWsCollapsed,
-  writeWsWidth,
-} from './workspace-storage';
+import { WS_RAIL_WIDTH, readWsCollapsed, readWsWidth, writeWsCollapsed, writeWsWidth } from './workspace-storage';
 import { ComponentWsTabBar } from './component-ws-tab-bar';
 import { ComponentWsPathBar } from './component-ws-path-bar';
 import { ComponentWsFileTree } from './component-ws-file-tree';
+import { ComponentWsSearchBox, type SearchResult } from './component-ws-search-box';
+import { buildFilterTree, type FilterTreeResult } from './ws-filter-tree';
 import { ComponentWsResizeHandle } from './component-ws-resize-handle';
-import { ComponentWsFileEditor, type WsFileTarget } from './component-ws-file-editor';
+import { ComponentWsFileEditorFallback, type WsFileTarget } from './component-ws-file-editor-fallback';
 import { ComponentWsImageViewer, type WsImageTarget } from './component-ws-image-viewer';
+import { usePreviewArea } from './preview-area-context';
 import { openLocalPath } from '../../lib/open-local-path';
 import { ChevronLeftIcon } from './icons';
-import {
-  getWorkspaceTree,
-  openWorkspaceItem,
-  pickWorkspaceDirectory,
-  updateSession,
-} from '../../lib/chat-api';
+import { getWorkspaceTree, openWorkspaceItem, pickWorkspaceDirectory, updateSession } from '../../lib/chat-api';
 import { expandedPathsByDepth } from '../../store/workspace-slice-reducer';
 import { computeWatchSet } from './workspace-watch-set';
 import { useLifecycle } from '../../lib/use-lifecycle';
@@ -150,6 +142,41 @@ export function SectionWorkspacePanel({
   const [fileEditorTarget, setFileEditorTarget] = useState<WsFileTarget | null>(null);
   const [wsImageTarget, setWsImageTarget] = useState<WsImageTarget | null>(null);
 
+  // [v0.0.324 D4] 搜索态：FileTree 常驻（数据源切换），搜索时切换为裁剪树
+  const [searching, setSearching] = useState(false);
+  const [filterResult, setFilterResult] = useState<FilterTreeResult | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+
+  // 搜索结果回调 → 构建裁剪树
+  const handleSearchResult = useCallback(
+    (result: SearchResult | null) => {
+      if (!result) {
+        setFilterResult(null);
+        setSearchTruncated(false);
+        return;
+      }
+      const filtered = buildFilterTree(result.hits, {
+        limit: 100,
+        existingChildrenCache: state.childrenCache,
+      });
+      setFilterResult(filtered);
+      setSearchTruncated(result.truncated);
+    },
+    [state.childrenCache],
+  );
+
+  // [v0.0.327] 搜索结果到达 → filterResult.expandedPaths 作为初始展开建议合并入 state.expanded
+  //   （MERGE 不覆盖：用户已有的手动展开/收起保留；后续 toggle-expand 也走 state.expanded 自然生效）
+  useEffect(() => {
+    if (filterResult) {
+      dispatch({ type: 'merge-expanded', payload: { paths: filterResult.expandedPaths } });
+    }
+  }, [filterResult]);
+
+  // [Task 3 偏离] usePreviewArea 有 Provider → onEditor 改调 preview.openTab（预览区打开）；
+  // 无 Provider（academy section-version-chat）→ 降级 setFileEditorTarget（fallback 弹层，D7 MUST）
+  const preview = usePreviewArea();
+
   // [v0.0.280] 改调共享分发 lib（≡ 聊天链）：folder/.url/image/12 格式/系统打开五路语义原样保留
   const handleOpen = useCallback(
     (node: WsTreeNode) => {
@@ -158,11 +185,13 @@ export function SectionWorkspacePanel({
         source: 'workspace',
         // WsTreeNode.type 用 'dir'；openLocalPath/openWorkspaceItem 语义用 'folder'（原 handleOpen node.type!=='file' 判定等价）
         kind: node.type === 'dir' ? 'folder' : 'file',
-        onEditor: (t) => setFileEditorTarget({ path: t.path, fileName: t.fileName, subtitle: t.subtitle, format: t.format ?? 'txt' }),
+        onEditor: preview
+          ? (t) => preview.openTab(t) // 有 Provider → 预览区 tab（Task 3 D7）
+          : (t) => setFileEditorTarget({ path: t.path, fileName: t.fileName, subtitle: t.subtitle, format: t.format ?? 'txt' }),
         onImageViewer: (t) => setWsImageTarget({ path: t.path, fileName: t.fileName, subtitle: t.subtitle }),
       });
     },
-    [sessionId],
+    [sessionId, preview],
   );
 
   // 手动刷新（§3.3）：重置 tree + GET 顶层 + 按 expanded 逐层补回 childrenCache（保留 expanded）
@@ -261,20 +290,41 @@ export function SectionWorkspacePanel({
         onCollapse={() => setCollapsed(true)}
         refreshing={state.loading}
       />
-      <ComponentWsPathBar
-        workspaceDir={state.workspaceDir}
+      {/* [v0.0.324 D4] 搜索框：TabBar 与 PathBar 之间；onResult 上报 → 构建裁剪树 */}
+      <ComponentWsSearchBox
         sessionId={sessionId}
-        onOpenRoot={() => openWorkspaceItem(sessionId, { path: '.', kind: 'folder' }).catch((e) => console.warn('openWorkspaceItem root failed:', e))}
+        tree={state.tree}
+        childrenCache={state.childrenCache}
+        onResult={handleSearchResult}
+        onSearchingChange={setSearching}
       />
+      {/* PathBar：搜索态隐藏（不变） */}
+      {!searching && (
+        <ComponentWsPathBar
+          workspaceDir={state.workspaceDir}
+          sessionId={sessionId}
+          onOpenRoot={() => openWorkspaceItem(sessionId, { path: '.', kind: 'folder' }).catch((e) => console.warn('openWorkspaceItem root failed:', e))}
+        />
+      )}
+      {/* [v0.0.324 D4] FileTree 常驻（去掉 !searching 条件）：搜索态切换数据源为裁剪树 */}
       <ComponentWsFileTree
-        state={state}
+        state={searching && filterResult
+          ? {
+              ...state,
+              tree: filterResult.tree,
+              childrenCache: { ...state.childrenCache, ...filterResult.childrenCache },
+              // [v0.0.327] expanded 不覆盖——state.expanded 权威（merge-expanded effect 初始合并 + toggle-expand 用户操作）
+            }
+          : state}
         onExpand={(p) => void handleExpand(p)}
         onCollapse={handleCollapse}
         onOpen={handleOpen}
         onStaleRefetch={(p) => void handleStaleRefetch(p)}
+        tooMany={searching && searchTruncated}
       />
-      {/* 挂载层：12 格式 → file editor（v0.0.241）；6 格式图片 → image viewer（v0.0.269） */}
-      <ComponentWsFileEditor sessionId={sessionId} target={fileEditorTarget} onClose={() => setFileEditorTarget(null)} />
+      {/* 挂载层：12 格式 → preview.openTab（有 Provider）/ fallback 弹层（无 Provider 降级）；
+          6 格式图片 → image viewer（v0.0.269 保留弹层，不进预览区） */}
+      {!preview && <ComponentWsFileEditorFallback sessionId={sessionId} target={fileEditorTarget} onClose={() => setFileEditorTarget(null)} />}
       <ComponentWsImageViewer sessionId={sessionId} target={wsImageTarget} onClose={() => setWsImageTarget(null)} />
     </aside>
   );

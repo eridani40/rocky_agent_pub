@@ -32,6 +32,9 @@ import { InboxStore } from './agent/inbox';
 import { ToolExecutionEngine } from './tools/engine';
 import { defaultToolDefinitions } from './tools/registry';
 import { approvalManager } from './tools/approval-manager';
+// [v0.0.307] worker pool 单例（白名单纯 IO 工具执行挪线程）
+import { createToolWorkerPool, _resetToolWorkerPoolSingleton } from './tools/worker-pool';
+import type { ToolWorkerPool } from './tools/worker-pool';
 import { makeLoadTemplate, upsertExplorerTemplate } from './agent/tools/template-store';
 import { SquadStore, MemberStore } from './stores/squad-store';
 import {
@@ -89,7 +92,18 @@ export async function bootstrapAgentPhase(deps: {
 
   // 工具：engine + defaultToolDefinitions（workdir）；definitions 供 assemble → snapshot.tools 用。
   // SessionConfig.tools（defaultTools(workdir)）由 session-messages handler 在 POST messages 时构造。
-  const toolEngine = new ToolExecutionEngine();
+  // [v0.0.307] worker pool 单例注入：白名单纯 IO 工具（read/write/edit/glob/grep/skill）执行挪线程。
+  //   try-catch 降级：createToolWorkerPool 抛错 → 不传 workerPool，工具仍主线程跑（向后兼容）。
+  //   MUST 只装配一次（进程级单池，createToolWorkerPool 内部缓存）。
+  let workerPool: ToolWorkerPool | undefined;
+  try {
+    _resetToolWorkerPoolSingleton(); // 确保每次 bootstrap 从干净状态开始（防热重载残留旧池）
+    workerPool = createToolWorkerPool();
+  } catch {
+    // 降级：worker 创建失败 → engine 不传 workerPool，全部走主线程原路径
+    workerPool = undefined;
+  }
+  const toolEngine = new ToolExecutionEngine(undefined, workerPool);
   const toolDefinitions = defaultToolDefinitions(workdir);
 
   // SessionTypePolicy 装配（profile yaml 单源驱动工具解析）

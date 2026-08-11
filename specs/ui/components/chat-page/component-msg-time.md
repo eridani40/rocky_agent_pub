@@ -3,6 +3,10 @@
 > 层级: primitive（chat-page 内部 primitive，不放 framework/ 因绑定 message 上下文）
 > 文件: app/web/src/components/chat-page/component-msg-time.tsx
 
+## 消费方
+
+- `components/chat-page/component-message-stream.tsx`
+
 ## 职责
 在每条消息 bubble（user / agent）后方渲染一行**极小 mono 时间戳**（当日 `HH:mm`，跨日 `MM-dd HH:mm`）。
 - **只做展示**：接受 ISO 字符串 + side，不做数据订阅、不感知消息内容。

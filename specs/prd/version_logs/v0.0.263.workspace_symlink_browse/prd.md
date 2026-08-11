@@ -10,7 +10,7 @@
 
 ### 1.1 背景（现状）
 
-用户在 squad workspace 根目录创建了指向项目目录的 symlink（如 `rocky_agent -> <project-root>`），但 workspace file tab 无法正常浏览该 symlink 指向的内容。
+用户在 squad workspace 根目录创建了指向项目目录的 symlink（如 `rocky_agent -> `），但 workspace file tab 无法正常浏览该 symlink 指向的内容。
 
 **根因（app.asar 逆向分析确认，`states/v0.0.263/context.md`）**：
 
@@ -165,7 +165,7 @@
 
 | ID | 用户操作链路 | 预期结果 |
 |----|-------------|---------|
-| UC-1 | workspace 根目录有 symlink `rocky_agent -> <project-root>` → 打开 file tab | 文件树显示 `rocky_agent` 节点，带 symlink 图标 + `→ <project-root>` 标注（tooltip 至少） |
+| UC-1 | workspace 根目录有 symlink `rocky_agent -> ` → 打开 file tab | 文件树显示 `rocky_agent` 节点，带 symlink 图标 + `→ ` 标注（tooltip 至少） |
 | UC-2 | 点 `rocky_agent` 的 twisty 展开 | 展开显示项目目录内容（如 `src/`、`package.json`）；不再 400 |
 | UC-3 | 在 symlink 目录内继续展开子目录（如 `rocky_agent/src`） | 逐层浏览正常，path 语义连续（`rocky_agent/src/auth`） |
 | UC-4 | 点 symlink 文件（如 `rocky_agent/README.md`）hover 打开 | 进内置 editor 打开 README.md（本地文件一律进 editor，不限扩展名） |

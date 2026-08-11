@@ -19,8 +19,12 @@
 
 ## 视觉基线
 - **危险操作区**：管理 tab 底部  分隔 + 小标题（mono uppercase muted，「危险操作 / Danger Zone」）+ 一句 danger 说明（不可逆）+ 删除按钮 `btn-danger`。
-- **弹层**：`component-modal-shell` widthPx=420；body 警示文案 + 队名回显 + 输入框（提示「输入队名 <name> 确认」）。
+- **弹层**：`component-modal-shell` widthPx=420；body 警示文案 + 队名回显 + 输入框（提示「输入队名 <name> 确认」）。confirmLabel 用 `FIELD_LABEL.replace(' uppercase', '')`（v0.0.315 修复：FIELD_LABEL 含 uppercase 导致 squadName 被强制大写，用户无法精确输入匹配原队名）。
 - **布局稳定性**：确认按钮的启用/禁用只切 `disabled` + opacity（不改尺寸/不条件渲染按钮），避免布局位移（memory component-size-must-not-change-on-state）。
 
 ## 复用关系
 - 数据链路: `page-studio` 提供 `onDelete` → `squad-api.deleteSquad(id)` → 成功后移除 squads
+
+## 消费方
+
+- `app/web/src/components/studio-page/component-manage-tab.tsx`

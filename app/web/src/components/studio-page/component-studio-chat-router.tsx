@@ -29,6 +29,9 @@ import type { ChatNode } from './chat-node';
 import type { MentionAttrs } from '../chat-page/chat-composer-extension';
 import { SectionStudioChat } from './section-studio-chat';
 import { SectionRightTabs } from './section-right-tabs';
+import { SectionPreviewArea } from '../chat-page/section-preview-area';
+import { PreviewAreaProvider } from '../chat-page/preview-area-provider';
+import { usePreviewArea } from '../chat-page/preview-area-context';
 import { useChatChrome } from '../chat-page/use-chat-chrome';
 // 三栏响应式布局 hook（chat-page 共用）
 import { useThreeColLayout } from '../chat-page/use-three-col-layout';
@@ -60,33 +63,14 @@ interface StudioChatRouterProps {
  */
 function StudioChatRouterImpl({ node, prefill, onBack }: StudioChatRouterProps) {
   const { chrome, loading } = useChatChrome(node.sessionId);
-  // 三栏响应式布局 hook（中+右两槽场景，hasLeft=false）
-  //   hasLeft=false → 引擎 left=null；rightPresent=true 恒为真（studio 右栏无条件挂载）
-  //   **必须在 early return 前调用**（React hooks 规则：hook 调用顺序不可依赖条件分支）
-  const threeCol = useThreeColLayout({ hasLeft: false, rightPresent: true });
 
   // chrome 未到位（loading/error）→ 渲占位（error 时 chrome 恒 null，同走此分支兜底）
   if (loading || !chrome) {
     return (
-      // 外层 scroll 容器（overflow-x-auto 横滚兜底，min-w-0 让侧栏可缩）；挂 containerRef；内行 minWidth=引擎算的 minRowWidth
-      <div ref={threeCol.containerRef} className="flex-1 min-w-0 min-h-0 overflow-x-auto">
-        <div
-          className="flex h-full w-full"
-          style={{ minWidth: threeCol.rowMinWidth }}
-        >
-          <div className="flex flex-1 items-center justify-center text-[12px] text-muted">
-            …
-          </div>
-          <SectionRightTabs
-            sessionId={node.sessionId}
-            workspaceSemantic="team"
-            renderWidth={threeCol.rightRenderWidth}
-            dragMaxWidth={threeCol.rightDragMaxWidth}
-            onLayoutChange={threeCol.reportRightPanel}
-            onDragModeChange={(d) => threeCol.setDragging(d ? 'right' : null)}
-          />
-        </div>
-      </div>
+      // [Task 3 偏离] PreviewAreaProvider 顶层包整行（兄弟节点消费 context；透明容器不改布局）
+      <PreviewAreaProvider sessionId={node.sessionId}>
+        <StudioChatRow sessionId={node.sessionId} loading />
+      </PreviewAreaProvider>
     );
   }
 
@@ -97,22 +81,76 @@ function StudioChatRouterImpl({ node, prefill, onBack }: StudioChatRouterProps) 
     chrome.capabilities.groupRender || peer?.role === 'leader' ? 'team' : 'personal';
 
   return (
-    // 外层 scroll 容器（overflow-x-auto 横滚兜底，min-w-0 让侧栏可缩）；挂 containerRef；内行 minWidth=引擎算的 minRowWidth
+    // [Task 3 偏离] PreviewAreaProvider 顶层包整行（兄弟节点消费 context；透明容器不改布局）
+    <PreviewAreaProvider sessionId={node.sessionId}>
+      <StudioChatRow
+        sessionId={node.sessionId}
+        workspaceSemantic={workspaceSemantic}
+        chrome={chrome}
+        prefill={prefill}
+        onBack={onBack}
+      />
+    </PreviewAreaProvider>
+  );
+}
+
+/**
+ * Studio chat 四槽布局行（Provider 内消费 PreviewAreaContext）。
+ * [v0.0.329 门模型] 读 context door：chatCollapsed=door==='left' 传引擎；
+ *   door==='left' 时 SectionStudioChat 不渲染（chat 宽 0、preview 占满门框）。
+ */
+function StudioChatRow({ sessionId, loading = false, workspaceSemantic = 'team', chrome, prefill, onBack }: {
+  sessionId: string;
+  /** loading 占位分支（chrome 未到位） */
+  loading?: boolean;
+  workspaceSemantic?: 'team' | 'personal';
+  chrome?: ReturnType<typeof useChatChrome>['chrome'];
+  prefill?: MentionAttrs[] | string;
+  onBack?: () => void;
+}) {
+  // [v0.0.329 门模型] 读 context door（无 Provider/tabs 时缺省 center → 不影响布局）
+  const preview = usePreviewArea();
+  const door = preview?.door ?? 'center';
+  const chatCollapsed = door === 'left';
+
+  // 三栏响应式布局 hook（中+右两槽场景，hasLeft=false；[v0.0.320] previewPresent=true → 4 槽引擎）
+  //   hasLeft=false → 引擎 left=null；rightPresent=true 恒为真（studio 右栏无条件挂载）
+  //   [v0.0.329] chatCollapsed 透传（door=left → chat 宽 0、preview 吞并门框）
+  const threeCol = useThreeColLayout({ hasLeft: false, rightPresent: true, previewPresent: true, chatCollapsed });
+
+  return (
     <div ref={threeCol.containerRef} className="flex-1 min-w-0 min-h-0 overflow-x-auto">
       <div
         className="flex h-full w-full"
         style={{ minWidth: threeCol.rowMinWidth }}
       >
-        {/* [view 稳定性] key={node.sessionId}：任何 chat 节点切换 = remount = fresh state */}
-        <SectionStudioChat
-          key={node.sessionId}
-          sessionId={node.sessionId}
-          chrome={chrome}
-          prefill={prefill}
-          onBack={onBack}
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center text-[12px] text-muted">
+            …
+          </div>
+        ) : (
+          // [view 稳定性] key={sessionId}：任何 chat 节点切换 = remount = fresh state
+          // [v0.0.329] door==='left' → chat 槽隐藏（条件不渲染；middleWidth=0 preview 占满门框）
+          !chatCollapsed && (
+            <SectionStudioChat
+              key={sessionId}
+              sessionId={sessionId}
+              chrome={chrome!}
+              prefill={prefill}
+              onBack={onBack}
+            />
+          )
+        )}
+        {/* [v0.0.320] 预览区（中|preview|right 三槽；SectionStudioChat 后插） */}
+        <SectionPreviewArea
+          sessionId={sessionId}
+          renderWidth={threeCol.previewRenderWidth}
+          dragMaxWidth={threeCol.previewDragMaxWidth}
+          onLayoutChange={threeCol.reportPreviewPanel}
+          onDragModeChange={threeCol.setPreviewDragging}
         />
         <SectionRightTabs
-          sessionId={node.sessionId}
+          sessionId={sessionId}
           workspaceSemantic={workspaceSemantic}
           renderWidth={threeCol.rightRenderWidth}
           dragMaxWidth={threeCol.rightDragMaxWidth}

@@ -1,0 +1,36 @@
+# team_sync_import_traversal_tc4 — 恶意 zip（../ 路径遍历）→ preview 400
+#
+# 覆盖契约：
+#   - specs/tech/version_logs/v0.0.319/change_plan.md D2 路径安全（MANDATORY）：
+#     validateZipEntries 拒绝 `..` / 绝对路径 / Windows 盘符 → InvalidZipError →
+#     handler preview 400（zip entry 校验生效）
+#   - test-plan team_sync_import_traversal_tc4：构造含 `../` entry 的恶意 zip →
+#     preview 400 + path traversal 错误
+#
+# 设计说明：
+#   - 恶意 zip fixture：entryName = '../evil.txt'（zipfile 允许写入相对 ../ 名）
+#   - validateZipEntries 在解包前遍历 entries 拦截（name.includes('..')）→
+#     InvalidZipError('invalid zip entry: path traversal detected (../evil.txt)') → 400
+#   - 断言 400 + error 含 traversal 线索（`..` 在 error 文案中必然出现；具体措辞
+#     由 handler 透传 InvalidZipError.message，断言 ~= ".." 即可覆盖）
+#
+# 不调 LLM：纯 HTTP 安全路径，全确定性。
+case: team_sync_import_traversal_tc4
+module: squad
+timeout: 60
+
+steps:
+  - name: preview 上传含 ../ entry 的恶意 zip → 400 + path traversal 错误
+    requests:
+      - method: POST
+        path: /squad/import?step=preview
+        status: [400]
+        multipart:
+          file:
+            filename: evil.zip
+            content: "UEsDBBQAAAAIANyJCl1SMfuNBgAAAAQAAAALAAAALi4vZXZpbC50eHRLLcvMAQBQSwECFAMUAAAACADciQpdUjH7jQYAAAAEAAAACwAAAAAAAAAAAAAAgAEAAAAALi4vZXZpbC50eHRQSwUGAAAAAAEAAQA5AAAALwAAAAAA"
+            content_type: application/zip
+            encoding: base64
+    check:
+      - .error exists
+      - .error ~= ".."

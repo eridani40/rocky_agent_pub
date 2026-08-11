@@ -16,10 +16,20 @@
  *
  * 拆独立文件对齐 session-workspace-save-image.ts 先例（session-workspace.ts 已 298 行）。
  */
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import type { SessionHandlerDeps } from './session';
 import { json } from './session-workspace';
 import { whitelistResolve } from './session-workspace-path';
+
+/**
+ * 计算文件版本标记（v0.0.320，PRD §3.3）：`${mtimeMs}:${size}`。
+ * mtime 或 size 任一变化 → version 变化（冲突检测依据，VSCode 式乐观锁）。
+ * statSync 失败抛错（caller 决定 409/500）。
+ */
+export function computeFileVersion(absPath: string): string {
+  const st = statSync(absPath);
+  return `${st.mtimeMs}:${st.size}`;
+}
 
 /**
  * 解析 rel 并做白名单校验（read/save 共用安全前置）：
@@ -87,18 +97,24 @@ export async function handleWorkspaceFileRead(
       return json(200, { content: buf.toString('base64') });
     }
     // 读 UTF-8 文本（.md 文本文件；race 极端删→catch 500）
+    // [v0.0.320] 响应加 version（mtimeMs:size 冲突检测标记；binary 分支不加——image 无冲突语义）
     const content = readFileSync(resolved.absPath, 'utf8');
-    return json(200, { content });
+    const version = computeFileVersion(resolved.absPath);
+    return json(200, { content, version });
   } catch {
     return json(500, { error: 'read failed' });
   }
 }
 
 /**
- * POST /session/:id/workspace/file/save —— 覆盖写 workspace 文本文件（last-write-wins）。
- * 流程：method 校验 → getSession → body {path,content} 校验 → realRoot → whitelistResolve → writeFileSync 覆盖。
- * PRD §6.3 last-write-wins：无 mtime 校验、无冲突提示，直接覆盖既有文件（不新建）。
- * 错误：405 非 POST / 404 session+文件不存在 / 400 body 非法或越界 / 500 workspace+realpath+写失败。
+ * POST /session/:id/workspace/file/save —— 覆盖写 workspace 文本文件（v0.0.320 起带乐观锁冲突检测）。
+ * 流程：method 校验 → getSession → body {path,content,expectedVersion?,force?} 校验 → realRoot →
+ *   whitelistResolve → 版本校验（可选）→ writeFileSync 覆盖。
+ * [v0.0.320] PRD §3.3 + API change_log §1.2：
+ *   - expectedVersion 缺失 或 force=true → 跳过校验直接覆盖（last-write-wins，向后兼容旧调用方）
+ *   - expectedVersion 存在且非 force → 比对当前磁盘 version：匹配 → 覆盖写 200；不匹配 → 409 不写盘
+ *   - 成功响应新增 version（写后重新 stat 的新版本标记）
+ * 错误：405 非 POST / 404 session+文件不存在 / 400 body 非法或越界 / 409 版本冲突 / 500 workspace+realpath+写失败。
  */
 export async function handleWorkspaceFileSave(
   req: Request,
@@ -112,13 +128,20 @@ export async function handleWorkspaceFileSave(
   const got = await deps.store.getSession(id);
   if (!got) return json(404, { error: 'session not found' });
 
-  // body 解析 { path, content }：非 string / 缺失 → 400（spec §2.6.7）
+  // body 解析 { path, content, expectedVersion?, force? }：path/content 非 string / 缺失 → 400（spec §2.6.7）；
+  // expectedVersion/force 宽松解析（非 string/boolean → 忽略，对齐 API change_log §1.2「宽松扩展不 400」）
   let bodyPath: string | undefined;
   let bodyContent: string | undefined;
+  let expectedVersion: string | undefined;
+  let force = false;
   try {
-    const parsed = (await req.json()) as { path?: unknown; content?: unknown };
+    const parsed = (await req.json()) as {
+      path?: unknown; content?: unknown; expectedVersion?: unknown; force?: unknown;
+    };
     if (typeof parsed.path === 'string') bodyPath = parsed.path;
     if (typeof parsed.content === 'string') bodyContent = parsed.content;
+    if (typeof parsed.expectedVersion === 'string') expectedVersion = parsed.expectedVersion;
+    if (typeof parsed.force === 'boolean') force = parsed.force;
   } catch {
     return json(400, { error: 'invalid json body' });
   }
@@ -134,10 +157,27 @@ export async function handleWorkspaceFileSave(
   const resolved = resolveWsFilePath(got.workspaceDir, bodyPath);
   if (!resolved.ok) return resolved.response;
 
-  // writeFileSync 直接覆盖（last-write-wins，PRD §6.3；无 mtime 校验/无冲突提示）
+  // [v0.0.320] 乐观锁冲突检测：expectedVersion 存在且非 force → 与当前磁盘 version 比对
+  //   不匹配 → 409 { error:'conflict', currentVersion }，不写盘（文件保留外部改动后的最新状态）
+  if (expectedVersion !== undefined && !force) {
+    let currentVersion: string;
+    try {
+      currentVersion = computeFileVersion(resolved.absPath);
+    } catch {
+      // 文件不存在（竞态删）→ 沿用旧语义 404（不新建）
+      return json(404, { error: 'path not found' });
+    }
+    if (currentVersion !== expectedVersion) {
+      return json(409, { error: 'conflict', currentVersion });
+    }
+  }
+
+  // writeFileSync 直接覆盖（无 expectedVersion / force=true → last-write-wins，PRD §6.3）
   try {
     writeFileSync(resolved.absPath, bodyContent, 'utf8');
-    return json(200, { ok: true });
+    // [v0.0.320] 写后重新 stat 返回新 version（前端保存后更新 tab 版本标记）
+    const newVersion = computeFileVersion(resolved.absPath);
+    return json(200, { ok: true, version: newVersion });
   } catch {
     return json(500, { error: 'save failed' });
   }

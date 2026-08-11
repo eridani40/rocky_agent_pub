@@ -5,6 +5,12 @@
 > HTTP 契约: `specs/api/overall/15-memory-ui.md` §4（POST）/§5（PATCH）
 > 本文是 memory 新建/编辑弹层的**概念权威源**：表单字段 + testid + 校验规则 + 全字段可编辑约束。
 
+## 消费方
+
+- `components/app-dev-config-page/section-user-memory.tsx`
+- `components/chat-page/component-memory-editor-fields.tsx`
+- `components/chat-page/use-memory-crud.ts`
+
 ## 复用关系
 - `section-memory-panel`（chat/studio 右侧，prefix=`memory-session`）
 - `section-user-memory`（应用设置全局长期记忆，prefix=`memory-user`）

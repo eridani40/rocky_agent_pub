@@ -120,6 +120,18 @@ export type ViewElement =
         content: ToolResultContentBlock[];
         isError: boolean;
       };
+    }
+  | {
+      /** send_message 信封视图元素（独立信封渲染，不进 tool-batch）。result 绑定同 tool-call-item。 */
+      kind: 'send-message-envelope';
+      key: string;
+      messageId: string;
+      toolCallId: string;
+      arguments: Record<string, unknown>;
+      result?: {
+        content: ToolResultContentBlock[];
+        isError: boolean;
+      };
     };
 
 /** loading 阶段（§4.10，从 SSE 事件派生） */

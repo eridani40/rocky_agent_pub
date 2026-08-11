@@ -46,7 +46,7 @@ Studio 是 squad 团队管理入口（nav-rail 顶部业务区第 2 项「Studio
 ```
 
 - **左 nav-rail**（改造见 `specs/ui/components/framework/nav-rail.md`）：brand「R」置顶 + 顶部业务区（Playground 对话图标 + Studio 团队图标）+ 底部设置组折叠（齿轮收纳）。
-- **中 studio-sidebar**（~224px）：squad 单行列表 + 顶部「新建 squad」按钮；点 squad 行 = 落首页 seats（无手风琴展开态、无子节点树、无右键菜单）。
+- **中 studio-sidebar**（~224px）：squad 两行卡片列表（v0.0.305 起：32×32 彩色字母头像 + 团队名 + 「X 在线 · Y 工作中」状态行）+ 顶部「新建 squad」按钮；点 squad 行 = 落首页 seats（无手风琴展开态、无子节点树、无右键菜单）。列表按最后活跃倒序（置顶组最前），hover 行出现 pin 按钮置顶（localStorage 持久化，刷新保持）。
 - **右主区**（多态互斥）：
   - **seats**（默认 landing）：`component-seats-panel` 单页中枢，头部 3 tab 内联切换（首页/管理/自动工作）；**全景内嵌第二栏**（v0.0.240——原独立 panorama 路由态废，删 `MainView {kind:'panorama'}`），详见 §3/§4
   - **token-stats**：token 统计独立路由态（入口 = 首页左列 TokenWidget 整卡点击），详见 §5

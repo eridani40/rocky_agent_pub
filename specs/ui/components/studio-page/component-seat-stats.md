@@ -22,3 +22,7 @@
 - 数字：Inter 18px/700 fg leading-none；「—」降级
 - label：Inter 11px muted，margin-top 4px（mt-1）
 - 无 hex 硬编码；无图标/无 hue
+
+## 消费方
+
+无（零引用，疑似死代码）。

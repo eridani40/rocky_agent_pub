@@ -104,9 +104,9 @@ describe('StudioSidebar — v0.0.168 简化（无展开树）', () => {
         onNewSquad={() => {}}
       />,
     );
-    // 侧栏全部 button = 新建按钮 + 1 个 squad 行；团队看板/群聊/leader/mate/subagent 子节点全废
+    // 侧栏全部 button = 新建按钮 + 1 个 squad 行 + 1 个 pin 按钮（v0.0.305 新增）；团队看板/群聊/leader/mate/subagent 子节点全废
     const buttons = within(sidebarOf(container)).getAllByRole('button');
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(3);
     // 无展开态派生节点（未读红点 / spinner / suspended 文案均无）
     expect(screen.queryByText(/未读/)).toBeNull();
     expect(container.querySelector('[role="status"]')).toBeNull();

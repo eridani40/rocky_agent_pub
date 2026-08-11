@@ -1,14 +1,14 @@
 /**
  * @vitest-environment jsdom
- * section-heartbeat-config 单测（[v0.0.116] squad 级重写：interval chip + activeWindows + scope）
+ * section-heartbeat-config 单测（v0.0.316 P1 受控化：子控件改 draft 汇总 onChange 上报）
  * 参考: specs/ui/components/studio-page/heartbeat-config.md（状态/交互）
- *       specs/api/overall/11a-squad-endpoints.md §1.4（PATCH /squad heartbeatConfig）
+ *       specs/tech/version_logs/v0.0.316/change_plan.md P1（受控模式：去掉 squadId/onSave/save/reset 按钮）
  *
- * 纯本地态校验 + onSave 上抛（组件不调 fetch，只上抛 patch body 给父级）。
- * 定位策略：产品代码 data-testid 已移除，改语义定位（role/text + data-squad-id 容器）。
+ * [v0.0.316] 受控模式：值从 props.heartbeatConfig 派生；子控件改动汇总 onChange 上报；
+ *   不再自管 PATCH/save/reset 按钮/pending/error。
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { initI18n } from '../../../i18n';
 import { HeartbeatConfigSection } from '../section-heartbeat-config';
 import type { SquadHeartbeatConfig, Member } from '../squad-types';
@@ -23,32 +23,20 @@ afterEach(cleanup);
 /** 默认 Props 工厂 */
 function mkProps(over: Record<string, unknown> = {}) {
   return {
-    squadId: 'SQ-1',
     enableHeartBeat: true,
     heartbeatConfig: null as SquadHeartbeatConfig | null,
     members: [] as Member[],
     timezone: 'Asia/Shanghai',
-    onSave: vi.fn().mockResolvedValue(undefined),
+    onChange: vi.fn(),
     ...over,
   };
 }
 
 // —— 语义定位辅助 —— //
-/** section 根容器（按 data-squad-id 定位） */
-const rootOf = (container: HTMLElement) => container.querySelector('[data-squad-id="SQ-1"]');
 /** interval chip（accessible name = `${n} min`，数字与 min 间有空格） */
 const intervalChip = (n: number) => screen.getByRole('button', { name: `${n} min` });
-/** 保存按钮 */
-const saveBtn = () => screen.getByRole('button', { name: '保存心跳配置' }) as HTMLButtonElement;
-/** 重置按钮 */
-const resetBtn = () => screen.getByRole('button', { name: '重置默认' });
 
-describe('HeartbeatConfigSection — 根节点契约', () => {
-  it('渲染 section 根节点（data-squad-id）', () => {
-    const { container } = render(<HeartbeatConfigSection {...mkProps()} />);
-    expect(rootOf(container)).toBeTruthy();
-  });
-
+describe('HeartbeatConfigSection — 根节点契约（v0.0.316 受控）', () => {
   it('interval chip 4 个（5/15/30/60）', () => {
     render(<HeartbeatConfigSection {...mkProps()} />);
     expect(intervalChip(5)).toBeTruthy();
@@ -57,10 +45,10 @@ describe('HeartbeatConfigSection — 根节点契约', () => {
     expect(intervalChip(60)).toBeTruthy();
   });
 
-  it('保存按钮和重置按钮均渲染', () => {
+  it('受控模式无 save/reset 按钮（v0.0.316 去掉，统一由 tab 级保存）', () => {
     render(<HeartbeatConfigSection {...mkProps()} />);
-    expect(saveBtn()).toBeTruthy();
-    expect(resetBtn()).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '保存心跳配置' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '重置默认' })).toBeNull();
   });
 });
 
@@ -76,74 +64,60 @@ describe('HeartbeatConfigSection — killswitch 提示', () => {
   });
 });
 
-describe('HeartbeatConfigSection — interval chip 选中', () => {
-  it('heartbeatConfig=null → 默认选中 15（DEFAULT_CONFIG）', () => {
+describe('HeartbeatConfigSection — 受控 onChange 上报', () => {
+  it('heartbeatConfig=null → 默认选中 15（DEFAULT_CONFIG 基线展示）', () => {
     render(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: null })} />);
-    const btn15 = intervalChip(15);
-    // 选中态：class 含 accent（实现细节，只断言该 button 存在且非 disabled）
-    expect(btn15).toBeTruthy();
+    // 选中态：15 chip 存在（accent 样式，只断言 button 存在）
+    expect(intervalChip(15)).toBeTruthy();
   });
 
-  it('heartbeatConfig.interval=30 → 点 5 后 save 可用（dirty）', () => {
-    const cfg: SquadHeartbeatConfig = { interval: 30, activeWindows: [], scope: { mode: 'all', memberIds: [] } };
-    render(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: cfg })} />);
-    // 点 5 → 变为 5 选中
+  it('点 interval chip 5 → onChange 汇总上报完整 heartbeatConfig（interval=5 + 原 windows/scope）', () => {
+    const onChange = vi.fn();
+    const cfg: SquadHeartbeatConfig = {
+      interval: 30,
+      activeWindows: [],
+      scope: { mode: 'all', memberIds: [] },
+    };
+    render(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: cfg, onChange })} />);
     fireEvent.click(intervalChip(5));
-    // save 此时可用（dirty）
-    expect(saveBtn().disabled).toBe(false);
-  });
-});
-
-describe('HeartbeatConfigSection — save/reset 行为', () => {
-  it('无改动时 save disabled（not dirty）', () => {
-    render(<HeartbeatConfigSection {...mkProps()} />);
-    expect(saveBtn().disabled).toBe(true);
-  });
-
-  it('改 interval → dirty → save 可点击 → onSave 被调（携带 heartbeatConfig）', async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<HeartbeatConfigSection {...mkProps({ onSave })} />);
-    // 点 5 → dirty
-    fireEvent.click(intervalChip(5));
-    const btn = saveBtn();
-    expect(btn.disabled).toBe(false);
-    fireEvent.click(btn);
-    await waitFor(() => expect(onSave).toHaveBeenCalled());
-    const callArg = onSave.mock.calls[0]![0] as Record<string, unknown>;
-    expect(callArg).toHaveProperty('heartbeatConfig');
-    expect((callArg.heartbeatConfig as SquadHeartbeatConfig).interval).toBe(5);
-  });
-
-  it('点 reset → onSave({ heartbeatConfig: null })', async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<HeartbeatConfigSection {...mkProps({ onSave })} />);
-    fireEvent.click(resetBtn());
-    await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(onSave).toHaveBeenCalledWith({ heartbeatConfig: null });
-  });
-
-  it('onSave 抛错 → 显示错误 banner', async () => {
-    const onSave = vi.fn().mockRejectedValue(new Error('服务器错误'));
-    render(<HeartbeatConfigSection {...mkProps({ onSave })} />);
-    fireEvent.click(intervalChip(5));
-    fireEvent.click(saveBtn());
-    await waitFor(() => expect(screen.getByText('服务器错误')).toBeTruthy());
-  });
-});
-
-describe('HeartbeatConfigSection — 外部 heartbeatConfig 变化时重置', () => {
-  it('父级 refresh 后 heartbeatConfig 更新 → 组件状态同步（save 重置为 not dirty）', async () => {
-    const cfg1: SquadHeartbeatConfig = { interval: 15, activeWindows: [], scope: { mode: 'all', memberIds: [] } };
-    const { rerender } = render(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: cfg1 })} />);
-    // 改 interval → dirty
-    fireEvent.click(intervalChip(60));
-    expect(saveBtn().disabled).toBe(false);
-    // 父级回灌新配置（如 save 成功后）
-    const cfg2: SquadHeartbeatConfig = { interval: 60, activeWindows: [], scope: { mode: 'all', memberIds: [] } };
-    rerender(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: cfg2 })} />);
-    // 回灌后 base 变 60，当前也是 60 → not dirty
-    await waitFor(() => {
-      expect(saveBtn().disabled).toBe(true);
+    // 受控：同步上报 onChange（汇总 interval + activeWindows + scope）
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({
+      interval: 5,
+      activeWindows: [],
+      scope: { mode: 'all', memberIds: [] },
     });
+  });
+
+  it('点 interval chip 60 → onChange 上报 interval=60（保留其他字段）', () => {
+    const onChange = vi.fn();
+    const cfg: SquadHeartbeatConfig = {
+      interval: 15,
+      activeWindows: [{ start: '09:00', end: '18:00' }],
+      scope: { mode: 'whitelist', memberIds: ['m1'] },
+    };
+    render(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: cfg, onChange })} />);
+    fireEvent.click(intervalChip(60));
+    expect(onChange).toHaveBeenCalledWith({
+      interval: 60,
+      activeWindows: [{ start: '09:00', end: '18:00' }],
+      scope: { mode: 'whitelist', memberIds: ['m1'] },
+    });
+  });
+});
+
+describe('HeartbeatConfigSection — 受控 props 驱动', () => {
+  it('父级 rerender 新 heartbeatConfig → 组件展示新值（受控派生，无本地 useState 残留）', () => {
+    const cfg1: SquadHeartbeatConfig = { interval: 15, activeWindows: [], scope: { mode: 'all', memberIds: [] } };
+    const onChange = vi.fn();
+    const { rerender } = render(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: cfg1, onChange })} />);
+    // 点 60 → 上报
+    fireEvent.click(intervalChip(60));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ interval: 60 }));
+    // 父级回灌新配置（如 save 成功后 detail 变化）
+    const cfg2: SquadHeartbeatConfig = { interval: 60, activeWindows: [], scope: { mode: 'all', memberIds: [] } };
+    rerender(<HeartbeatConfigSection {...mkProps({ heartbeatConfig: cfg2, onChange })} />);
+    // 受控派生：组件直接展示新 props 值（60 chip 选中）
+    expect(intervalChip(60)).toBeTruthy();
   });
 });

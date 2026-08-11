@@ -1,0 +1,92 @@
+# workspace_search_tc3 — GET /session/:id/workspace/search（v0.0.320）
+#
+# 覆盖契约：
+#   - specs/api/version_logs/v0.0.320/change_log.md §1.3：GET /session/:id/workspace/search?q=
+#     200 {files:string[], dirs:string[], truncated?}：
+#       - 忽略 node_modules/ 与 .git/（不遍历、不返回）
+#       - basename 大小写不敏感子串匹配（文件 → files，目录 → dirs）
+#       - 返回相对 workspaceDir 的 POSIX 全路径
+#       - 200 条上限 + truncated（本 case 不断 truncated，UT 覆盖）
+#       - 空 q（或缺失）→ 400 {error:'q required'}
+#       - 无匹配 → 200 {files:[], dirs:[]}
+#
+# 设计说明：
+#   - setup 建 session + files 植入结构：
+#       src/helper.ts（命中文件）
+#       src/utils/helper-utils.ts（命中文件）
+#       src/helper-dir/readme.md（命中目录 src/helper-dir；readme.md 不命中）
+#       node_modules/pkg/helper.js（**若不忽略会命中** —— 验证 ignore）
+#       .git/helper-config（**若不忽略会命中** —— 验证 ignore）
+#   - q=helper 断言命中文件/目录的全路径 + all !~= node_modules/.git
+#   - q 空 → 400 .error exists
+#   - q=zzz-no-match → 200 files/dirs 为空数组（非 404）
+#
+# 注意：
+#   - check 数组谓词：.files[] any . == "..."（等值）/.files[] all !~= "node_modules"（负子串）
+#   - 空数组 all 谓词恒 true（无匹配 case 只断 exists）
+#   - 不调 LLM：纯 HTTP + files 原语，全确定性。
+case: workspace_search_tc3
+module: workspace
+timeout: 60
+
+setup:
+  - name: 建 session（workspaceDir 自动建 <DATA_DIR>/workspaces/{sid}）
+    requests:
+      - method: POST
+        path: /session
+        body:
+          title: "ws-search-tc3"
+    save:
+      sid: .id
+    check:
+      - .id exists
+
+  - name: 植入搜索 fixture（命中文件/目录 + node_modules/.git 陷阱）
+    files:
+      - path: "workspaces/{sid}/src/helper.ts"
+        content: { marker: "helper-ts" }
+      - path: "workspaces/{sid}/src/utils/helper-utils.ts"
+        content: { marker: "helper-utils" }
+      - path: "workspaces/{sid}/src/helper-dir/readme.md"
+        content: { marker: "readme" }
+      - path: "workspaces/{sid}/node_modules/pkg/helper.js"
+        content: { marker: "should-be-ignored" }
+      - path: "workspaces/{sid}/.git/helper-config"
+        content: { marker: "should-be-ignored" }
+
+steps:
+  - name: search?q=helper → 200 命中全路径 + 不含 node_modules/.git
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/search?q=helper
+    check:
+      - .files exists
+      - .dirs exists
+      - .files[] any . == "src/helper.ts"
+      - .files[] any . == "src/utils/helper-utils.ts"
+      - .dirs[] any . == "src/helper-dir"
+      - .files[] all !~= "node_modules"
+      - .files[] all !~= ".git"
+
+  - name: q 空 → 400 且带 error 字段
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/search?q=
+        status: [400]
+    check:
+      - .error exists
+
+  - name: q 无匹配 → 200 空结果（非 404）
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/search?q=zzz-no-match
+    check:
+      - .files exists
+      - .dirs exists
+
+teardown:
+  - name: 清理 session
+    requests:
+      - method: DELETE
+        path: /session/{sid}
+        status: [204, 404]

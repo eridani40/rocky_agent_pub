@@ -8,12 +8,13 @@
 左侧 56px 图标导航 + **220px 会话列表栏** + 右侧会话交互区；消息按顺序流式呈现，user 右深底气泡 / agent 左 accent-surface 气泡（支持 markdown）；**消息流中连续的工具调用合并成一个弱化胶囊（视图层合并，与消息边界无关）**，点开包裹各调用、再点开看参数/结果（KV 表格态，禁止 JSON/代码块）；推理文本（thinking）**不展示**；run 进行中消息流尾部贴一个随阶段切换文案的 on-message spinner（替代原输入框左上方浮动胶囊），随流式增长，run 结束即消失。
 对话区**只渲染服务端 SSE 消息**（`message_start` 的 messageId = 服务端 ULID，唯一来源）——**移除客户端乐观插入**（消除 id 双轨制，根治 BUG-006）。发送 → enqueue →（idle 立即 activate / running 排队）→ 服务端 `message_start` 渲染 user 气泡。**running 且 pending 队列非空时**输入框上方显示 **enqueue-view 排队区**（`message_enqueued` 建 / `enqueued_message_processed` 移）。`chat-send` **一直存在**（删 `runActive` disabled），running 时其**左侧显示红色中断按钮**（调 `POST /session/:id/abort`）。running 状态来源：GET /session/:id（`state`/`running`/`currentRunId`）+ SSE `session_status_update`。
 
-## 1. 布局（四栏：nav-rail + conv-panel + chat-detail + ws-panel）
-> 新增右侧第 3 栏 ws-panel（workspace 面板，可收起/可调宽）。原两栏（conv-panel + chat-detail）不变；nav-rail 是 framework 既有不算业务栏。详见 `component-workspace-panel.md`。
+## 1. 布局（五栏：nav-rail + conv-panel + chat-detail + **preview-area** + ws-panel）
+> v0.0.320 起三栏布局 chat | 预览 | 工作区（preview 为新增中间栏）。原四栏（conv-panel + chat-detail + ws-panel）不变；nav-rail 是 framework 既有不算业务栏。详见 `section-preview-area.md` + `component-workspace-panel.md`。
 - **nav-rail（56px）**：既有 `framework/nav-rail`。会话图标 `nav-playground` 激活（由 `nav-chat` 改名而来。
 - **conv-panel（220px）**：新增 `section-conversation-list`。
 - **chat-detail（flex-1）**：`section-chat-session`（统一装配层，含空态分支；契约见 `section-chat-session.md`）。
-- **ws-panel（新增，232-560 默认 272 / 收起 36px）**：`section-workspace-panel`（见 `component-workspace-panel.md`）。在 `<SectionChatSession>` 之后追加 `<SectionWorkspacePanel>`；宽度 + 收起态 localStorage per session 持久化；拖宽手柄 `.ws-resize` 在面板左 -2px。ws-panel tab bar 收敛为仅「工作区」（memory/cron tab 迁悬浮菜单）。
+- **preview-area（v0.0.320 新增，240-1600 默认 360 / 收起竖条手柄）**：`section-preview-area`（见 `section-preview-area.md`）。在 `<SectionChatSession>` 之后、`<SectionWorkspacePanel>` 之前插入；宽度 + 收起态 localStorage per session 持久化；**单分隔条 `.pv-resize-left`**（[老板第三批] 删 `pv-resize-right` 修复拖拽 bug）+ 收起竖条手柄（`component-preview-collapse-toggle`）+ 悬浮操作按钮（`component-preview-floating-actions`）。文件预览/编辑 + dirty 守卫 + 409 冲突检测 + Tab 键循环切换。
+- **ws-panel（232-1600 默认 272 / 收起 36px）**：`section-workspace-panel`（见 `component-workspace-panel.md`）。在 `<SectionPreviewArea>` 之后追加；宽度 + 收起态 localStorage per session 持久化；拖宽手柄 `.ws-resize` 在面板左 -2px。ws-panel tab bar 收敛为仅「工作区」（memory/cron tab 迁悬浮菜单）。v0.0.320 起文件点击进预览区 tab（非弹层）。
 - **右缘 overlay 层**（`component-chat-right-overlay`）：chat-detail 右缘贴边悬浮的绝对定位层，纵向承载悬浮菜单（`component-chat-float-menu`，上）+ 历史 query minimap（`component-history-minimap`，下），脱离正文流、不推动消息流/输入区。三处 chat root（playground / studio 单聊 / studio 群聊）各挂一处。 overlay 由 （堆顶）改 （纵向铺满消息区 wrapper）→ minimap 在菜单下方剩余空间纵向居中；定位基准从 section 根改为**消息区 wrapper**（，input-bar 在 wrapper 外）；消息区 `ComponentMessageStream` 根  → （右侧 80px reserve 让位悬浮 overlay）。 层次属性（z-index / pointer-events gate / portal 规矩）收敛到 `_layering.md` 单一权威——overlay 属 L1 floating-chrome，详见 `component-chat-right-overlay.md §3/§4` + `_layering.md`。
 
 ## 2. 数据视图模型（对齐真实 Message）
@@ -28,14 +29,15 @@ UI **不发明新模型**，消费真实 `Message`（`specs/tech/agent/message`�
 6. **part 以 `messageId + toolCallId/text-index` 为 key**（非数组 index）——SSE 乱序/增量更新不抖动（沿用 [[chat-message-part-key]] 原则）。
 7. **run finish（MANDATORY，req2）**：UI 订阅事件流，按 runId 记录每个 run 的结束态——`run_end` 事件的 `stopReason`+ 若该 run 期间收到 `error` 事件则记其 error payload。**仅最近一次 run（last run）**在其末条消息下方渲染 finish reason（冷读 seed 恢复见 `_data-flow.md §3.6`）；历史 run 不重复渲染（req2：「针对最后一个 run」）。
 7a. **last run finish 显示前提（MANDATORY）**：仅当 **`sessionRunning === false`**时才渲染 last run finish（规则7）；**running 中不渲染 finish**（此时由 on-message spinner 表达进行态，§0，finish 隐藏避免与「生成中」叠加）。即 finish 渲染条件 = `lastRunFinish != null && sessionRunning === false`。切会话/重开恢复时 GET /session 若已 running，则 finish 不渲染直到 session 转 idle/interrupted/error。
-8. **answer 气泡链接可点击 + 按 target 分发（MANDATORY）**：answer 气泡 markdown 的 `[文本](target)` 渲染为可点击 `<a>`（`cursor-pointer` + 常驻下划线），点击按 target 类型分发——web scheme（http/https/mailto 等）→ 系统默认浏览器（Electron `shell.openExternal`，不在 app 内导航）；本地路径属 12 内置格式（`isBuiltinEditable`）→ app 内弹**只读** viewer（`ComponentChatLinkViewer` 挂 `ComponentModalMdEditor` readOnly=true；workspace 相对路径走 HTTP `readWorkspaceFile`，绝对路径/`~`/`file://` 走 Electron `shell:readFileText` IPC）；其它本地路径（图片/pdf/代码/未知）→ 系统默认应用（`shell.openPath`）；危险协议（javascript:/vbscript:/data:）由 `isDangerousScheme` 拦截降级纯文本不可点。分发单一权威 = `lib/link-target.ts`（classifyLinkTarget + openLinkTarget）；onLocalViewer 回调经 `ChatLinkHandlerContext` 透传（无 Provider 的消费方——md-editor viewer / skill 预览 / feishu doc——12 格式本地链接降级系统打开，不弹内置 viewer）。组件契约见 `component-chat-link-viewer.md`；IPC 契约见 `specs/tech/app/package/[P0]package_structure.md §4.4`。user 气泡（MentionRender）不动。
+8. **answer 气泡链接可点击 + 按 target 分发（MANDATORY）**：answer 气泡 markdown 的 `[文本](target)` 渲染为可点击 `<a>`（`cursor-pointer` + 常驻下划线），点击按 target 类型分发——web scheme（http/https/mailto 等）→ 系统默认浏览器（Electron `shell.openExternal`，不在 app 内导航）；本地路径属 12 内置格式（`isBuiltinEditable`）→ **app 内打开**（**[v0.0.320] 弹层退役：12 格式进预览区 tab**——`openLocalPath` onEditor → 有 PreviewArea Provider → `preview.openTab`（workspace 相对路径走 HTTP `readWorkspaceFile` 带 version，绝对路径/`~`/`file://` 走 Electron `shell:readFileText` IPC；含编辑/保存/409 冲突检测）；无 Provider → 系统打开降级）；**image 6 格式 → 只读图片查看弹层**（`component-ws-image-viewer` 保留，不进预览区）；其它本地路径（图片/pdf/代码/未知）→ 系统默认应用（`shell.openPath`）；危险协议（javascript:/vbscript:/data:）由 `isDangerousScheme` 拦截降级纯文本不可点。分发单一权威 = `lib/link-target.ts`（classifyLinkTarget + openLinkTarget）→ `openLocalPath` 共享分发（v0.0.280）；onLocalViewer 回调经 `ChatLinkHandlerContext` 透传（Provider 在 `chat-link-handler-context.ts` 纯 TS，v0.0.320 自 component-chat-link-viewer 迁移；无 Provider 的消费方——md-editor viewer / skill 预览 / feishu doc——12 格式本地链接降级系统打开，不弹内置 viewer）。组件契约见 `section-preview-area.md`；IPC 契约见 `specs/tech/app/package/[P0]package_structure.md §4.4`。user 气泡（MentionRender）不动。
 
 ## 3. 组件清单（分层）
 | 层 | 组件 | 职责 |
 |---|---|---|
 | section | `section-conversation-list` | 220px 会话列表栏：header + 滚动列表 |
 | section | `section-chat-session` | 会话交互区根（统一装配层，capabilities 门控）：topbar + messages + loading + input；空态分支；见 `section-chat-session.md` |
-| section | `section-workspace-panel` | 右侧第 3 栏 workspace 面板：收起/调宽 + tab + 文件树 + 切换目录 + 刷新（见 `component-workspace-panel.md`） |
+| section | `section-workspace-panel` | 右侧第 3 栏 workspace 面板：收起/调宽 + tab + 文件树 + 切换目录 + 刷新 + **搜索框**（见 `component-workspace-panel.md`）；v0.0.320 起文件点击进预览区 tab |
+| section | `section-preview-area` | **v0.0.320 新增**：文件预览区中间栏（chat | 预览 | 工作区）：多 tab 横滑 + 内嵌 view/editor + dirty 守卫 + 409 冲突检测（见 `section-preview-area.md`） |
 | component | `component-chat-topbar` | 标题 +  model-tag 仅 readOnly 渲染 / **非 readOnly 分支不再挂模型选择器** |
 | component | `component-conversation-item` | 单条会话：title + time，active/hover；**有 subagent 时挂 subagent-tree + twisty** |
 | component | **`component-subagent-tree`** | parent 派生的 swarm 展开树（三段：running / 分割线「非运行中 (N)」 / terminated 灰显）；独立 spec `component-subagent-tree.md` |
@@ -43,7 +45,7 @@ UI **不发明新模型**，消费真实 `Message`（`specs/tech/agent/message`�
 | component | `component-message-row` | **三区对称**：左头像列(w-9) + 内容列 + 右头像列(w-9)，双边对称（推翻单侧头像） |
 | component | `component-bubble-user` | user 深底气泡 |
 | component | `component-bubble-answer` | agent accent-surface 气泡（markdown） |
-| component | **`component-chat-link-viewer`** | chat 链接只读 viewer 挂载层（12 格式本地链接 → `ComponentModalMdEditor` readOnly 强制；含 `ChatLinkHandlerProvider` 注入 onLocalViewer；Context 在 `chat-link-handler-context.ts` 纯 TS 独立文件）；独立 spec `component-chat-link-viewer.md` |
+| component | **`chat-link-handler-context`** | chat 链接点击回调 Context（纯 TS 独立文件，v0.0.320 自 component-chat-link-viewer 迁移；`ChatLinkHandlerProvider` + `useChatLinkHandler`；无 Provider 返 null → 链接系统打开降级）。原 `component-chat-link-viewer` 弹层已退役（v0.0.320，见 `component-chat-link-viewer.md` 退役说明 + `section-preview-area.md`） |
 | component | **`component-scroll-guide-bubble`** | 滚动引导气泡（v0.0.262）：用户不在消息流底部时浮动显示（生成中「新消息」/ 空闲「回到底部」），点击平滑滚底；absolute 不占文档流；独立 spec `component-scroll-guide-bubble.md` |
 
 ## 4. 各组件契约
@@ -51,21 +53,23 @@ UI **不发明新模型**，消费真实 `Message`（`specs/tech/agent/message`�
 - ** 宽度持久化**：全局 localStorage key `conv-panel-width`（非 per-session，区别于右栏 ws-*；裁决 P2）。读 `clamp[180,400]` 缺省 220 坏值兜底；写 try/catch 吞异常。模式对齐 `workspace-storage`。
 - **header**：；左 `conv-header-title`（11px/600 mono uppercase muted-2「会话列表」）；右 `conv-new-btn`。
 - ** 右键浮层菜单（复制 Session ID）**：顶层会话项（conv-item）右键 →  + 浮层定位 `(clientX, clientY)`；点 copy-id → `navigator.clipboard.writeText(sessionId)` + 关闭。浮层打开时挂 window `click`/`contextmenu`/`keydown(Escape)` 关闭监听器，且**延迟一拍注册（`setTimeout(0)`）**——否则打开菜单的**同一次 contextmenu 事件**冒泡到 window 时会立刻触发 close，菜单一开就关；cleanup 里 `clearTimeout` + `removeEventListener`。与 studio sidebar 模式平行（studio ，见 `studio-sidebar.md`）——两者为并行实现，未来可抽共用组件。i18n `chat:convPanel.copySessionId`。
-- **[v0.0.231] 右键菜单加「置顶 / 取消置顶」项**：置顶项在「复制 Session ID」**之上**；已置顶会话该项文案为「取消置顶」（按 contextMenu sessionId 查 sessions[] 的 pinned 派生）。点击 → `PUT /session/:id {pinned: !current}`（fire-and-forget，同改名路径）→ 后端写 + metaBroadcaster.broadcast → `session_meta` 广播 → 列表 reducer 统一比较器归位（多端一致，**不做乐观本地更新**）。i18n `chat:convPanel.pin` / `chat:convPanel.unpin`。**仅 playground 顶层会话**：subagent 树内子项、academy/studio 列表无此项。
-- **[v0.0.231] 列表统一排序契约（MANDATORY，补落 doc 缺口）**：列表顺序 = **置顶组在前、非置顶组在后，同组内按 `updatedAt` 倒序**（最新在上）。排序是列表的**常驻属性**，由前端会话列表 store（chat-slice）**单一比较器**统一计算（`compareSessionsForList`：先 pinned 降序、同组内 `updatedAt desc`，Array.sort 稳定排序），**所有写路径收敛到同一排序**：`setSessions`（GET /session 全量 / 新建 / 删除后重拉）+ `applySessionMetaEvent`（session_meta 广播 upsert）都在写入前重排。**即时归位**：新建会话（updatedAt 最新 → 非置顶组顶部）/ 会话收到新消息（run 推进 updatedAt → 组内浮顶）/ 置顶切换（**pinned-only 更新不刷 updatedAt**——置顶是纯标记，只改分组归属：置顶 → 进置顶组按原 updatedAt 落位；取消置顶 → 回非置顶组按**原对话时间**归位，可能不在顶部。用户裁决 2026-08-01）/ 刷新重拉——都立即自动归位，无需手动刷新。**重排不动状态**：active 选中 / unread 红点 / running spinner / suspended「?」/ subagent 展开树行为不变（React key=s.id 位置移动不重挂载）；subagent 顶层过滤（page-chat topSessions）不受影响。后端 `GET /session` 返回顺序契约不变（仍 updatedAt desc）——置顶分组纯前端展示层归位。
+- **右键菜单「置顶 / 取消置顶」项 + conv-item hover pin 按钮（双入口，同一 onTogglePin 透传）**：`SectionConvPanel` props 接收 `onTogglePin?: (id, pinned) => void`，透传到每个 `<ComponentConversationItem onTogglePin={...}>` + 右键菜单点击。conv-item hover pin 按钮（§4.2）和右键菜单项**两个入口调同一回调**。置顶项在「复制 Session ID」**之上**；已置顶会话该项文案为「取消置顶」（按 contextMenu sessionId 查 sessions[] 的 pinned 派生）。点击 → `PUT /session/:id {pinned: !current}`（fire-and-forget）→ 后端写 + metaBroadcaster.broadcast → `session_meta` 广播 → 列表 reducer 统一比较器归位（多端一致，**不做乐观本地更新**）。i18n `chat:convPanel.pin` / `chat:convPanel.unpin`。**仅 playground 顶层会话**：subagent 树内子项、academy/studio 列表无此项。
+- **列表统一排序契约（MANDATORY）**：列表顺序 = **置顶组在前、非置顶组在后，同组内按 `updatedAt` 倒序**（最新在上）。排序是列表的**常驻属性**，由前端会话列表 store（chat-slice）**单一比较器**统一计算（`compareSessionsForList`：先 pinned 降序、同组内 `updatedAt desc`，Array.sort 稳定排序），**所有写路径收敛到同一排序**：`setSessions`（GET /session 全量 / 新建 / 删除后重拉）+ `applySessionMetaEvent`（session_meta 广播 upsert）都在写入前重排。**即时归位**：新建会话（updatedAt 最新 → 非置顶组顶部）/ 会话收到新消息（run 推进 updatedAt → 组内浮顶）/ 置顶切换（**pinned-only 更新不刷 updatedAt**——置顶是纯标记，只改分组归属：置顶 → 进置顶组按原 updatedAt 落位；取消置顶 → 回非置顶组按**原对话时间**归位，可能不在顶部。用户裁决 2026-08-01）/ 刷新重拉——都立即自动归位，无需手动刷新。**重排不动状态**：active 选中 / unread 红点 / running spinner / suspended「?」/ subagent 展开树行为不变（React key=s.id 位置移动不重挂载）；subagent 顶层过滤（page-chat topSessions）不受影响。后端 `GET /session` 返回顺序契约不变（仍 updatedAt desc）——置顶分组纯前端展示层归位。
 ### 4.2 component-conversation-item
   - （新增）：派生自 Session.unread。true → 渲染未读红点；false → 不渲染。
   - （**新增**）：派生自 Session.titled。仅作 conv-item 内部判定（编辑态 save 时 PUT body 携带 `titled:true` 同步置 true）；渲染层不读此字段（标题文本永远来自 `title` prop）。
   - `activeSubId?: string`（新增）：当前选中 subagent sessionId（subagent-tree 高亮用）。
-  - **[v0.0.231] pinned（派生，非 prop）**：派生自 `Session.pinned`（`s.pinned === true`）。true → 渲染 pin 图标 + 置顶背景；false → 无。
+  - **pinned（派生，非 prop）**：派生自 `Session.pinned`（`s.pinned === true`）。true → pin 按钮 accent 常驻 + 置顶背景；false → pin 按钮 hover 显隐。
+  - **`onTogglePin?: (id: string, pinned: boolean) => void`（可选 prop）**：置顶/取消置顶回调。父组件 fire-and-forget `PUT {pinned}`，归位靠 session_meta 广播重排（无乐观更新）。**未注入时 hover pin 按钮不渲染**（旧消费方零破坏）。
 - **视觉**：；hover ；active  + title 。title 13px/500 ellipsis；time 11px mono muted。
-  - **[v0.0.231] pinned 视觉基线**：
-    - **pin 图标**：置顶 item **最右侧常驻**（非 hover 才显），非置顶无。`PinIcon`（chat-page/icons.tsx，12px，`text-muted` token），**absolute 定位**于 title 行区（`top-2 right-2`）——脱离布局流，**出现/消失零 reflow**（布局稳定铁律：不推动 title/time/相邻 item）；title 行在 pinned 时加 `pr-5` 让位（仅该元素自身 padding，title 略早 truncate，不推其他元素）。与 unread 红点（`top-2 right-[18px]`，v0.0.231 由 right-2 统一起见左移）、running spinner / suspended「?」（title 左侧槽位）**错位共存、互不遮挡**。
+  - **pinned 视觉基线**：
+    - **pin 按钮（可交互，替换原 v0.0.231 只读 PinIcon）**：`<button>` 包裹 `PinIcon`（chat-page/icons.tsx，12px），**absolute 定位**于 title 行区（`top-2 right-2`）——脱离布局流，**出现/消失零 reflow**（布局稳定铁律：不推动 title/time/相邻 item）。**恒占位**（`visibility:visible` 始终，脱离布局流零 reflow）；**hover 显隐**（`opacity-0 group-hover:opacity-100`）+ **pinned 常驻**（`opacity-100 text-accent`）；未 pin `text-muted hover:text-fg`。点击 `stopPropagation`（不触发行 onSelect/expandOnce）→ 调 `onTogglePin(s.id, !isPinned)` fire-and-forget。`aria-label`/`title` 走 i18n（`chat:convPanel.pin` / `chat:convPanel.unpin`）。与 unread 红点（`top-2 right-[18px]`）、running spinner / suspended「?」（title 左侧槽位）**错位共存、互不遮挡**。
     - **背景加重（token，INV-2 禁字面 hex）**：pinned 非 active → 常态 `bg-bg-warm`（比非置顶常态白底深一档，一眼区分两组）；**active 态仍是最强视觉**——active（任意分组）→ `bg-[var(--surface-3)]`（比 bg-warm 更深一档，统一替换原 bg-accent-surface，保证 pinned+active 叠加时不丢失选中指示）；hover 非 active 仍 `hover:bg-bg-warm`（pinned 项 hover 无额外变化，可接受）。
     - **无组头/分隔线**：两组之间不引入组标题或分隔线 UI，分组边界靠 pin 图标 + 背景区分。
   - **running spinner + suspended「?」指示器（与未读红点错位共存）**：
     - 数据：派生自 `session.state`。**suspended 排除 running**（INV-2：loop 已退出等用户回填，亮「?」非 spinner）。
     - `conv-item-{id}-suspended-mark` = 「?」标记（12px accent 色），`state==='suspended'` 渲染（表「等用户回答」）。
+  - **消费方**：`section-conv-panel.tsx`（唯一消费方，渲染会话列表 + 透传 onTogglePin/onRenameTitle/onRefreshChildren 等 props）。
 
 ### 4.5 滚动（useMessageScrollPagination + 引导气泡）— 滚动 hook 权威章节
 

@@ -33,3 +33,7 @@
 ## 复用关系
 - 被组合：`page-plugin-config`（扩展点 tab 顶层，section-ext-point-area 之上）
 - 组合：无（自含 dropdown）
+
+## 消费方
+- `app/web/src/components/plugin-config-page/page-plugin-config.tsx`
+- `app/web/src/components/plugin-config-page/use-plugin-scope.ts`
