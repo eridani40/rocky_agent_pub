@@ -32,6 +32,8 @@ function mockSession(over: Partial<Session> = {}): Session {
     subAgentTemplateType: over.subAgentTemplateType,
     origin: over.origin,
     subAgentConfig: over.subAgentConfig,
+    squadId: over.squadId,
+    memberId: over.memberId,
     workspaceDir: over.workspaceDir ?? '/tmp/ws',
     state: over.state ?? 'idle',
     currentRunId: over.currentRunId ?? null,
@@ -41,10 +43,16 @@ function mockSession(over: Partial<Session> = {}): Session {
   } as Session;
 }
 
-/** 构造 enrich lookup（mock store.getSession 行为） */
-function makeLookup(sessionById: Record<string, Session | null>): EnrichSessionLookup {
+/** 构造 enrich lookup（mock store.getSession 行为 + [v0.0.340] 可选 memberStore） */
+function makeLookup(
+  sessionById: Record<string, Session | null>,
+  memberStore?: { getMember: (squadId: string, memberId: string) => Promise<{ name: string } | undefined> },
+): EnrichSessionLookup {
   return {
     getSession: async (sid: string) => sessionById[sid] ?? null,
+    ...(memberStore
+      ? { memberStore: memberStore as unknown as NonNullable<EnrichSessionLookup['memberStore']> }
+      : {}),
   };
 }
 
@@ -115,31 +123,65 @@ describe('mapSessionTypeToAgentRefType', () => {
 });
 
 // ============================================================
-// 2. deriveAgentRefName
+// 2. deriveAgentRefName（[v0.0.340] 改 async + memberStore 反查）
 // ============================================================
 describe('deriveAgentRefName', () => {
-  it('subagent → subAgentTemplateType', () => {
-    expect(deriveAgentRefName(mockSession({ derivation: 'subagent', role: 'rocky', subAgentTemplateType: 'explorer' }))).toBe('explorer');
+  it('subagent → subAgentTemplateType', async () => {
+    expect(await deriveAgentRefName(mockSession({ derivation: 'subagent', role: 'rocky', subAgentTemplateType: 'explorer' }))).toBe('explorer');
   });
-  it('subagent 无 templateType → "subagent"', () => {
-    expect(deriveAgentRefName(mockSession({ derivation: 'subagent', role: 'rocky', subAgentTemplateType: undefined }))).toBe('subagent');
-    expect(deriveAgentRefName(mockSession({ derivation: 'subagent', role: 'rocky', subAgentTemplateType: '' }))).toBe('subagent');
+  it('subagent 无 templateType → "subagent"', async () => {
+    expect(await deriveAgentRefName(mockSession({ derivation: 'subagent', role: 'rocky', subAgentTemplateType: undefined }))).toBe('subagent');
+    expect(await deriveAgentRefName(mockSession({ derivation: 'subagent', role: 'rocky', subAgentTemplateType: '' }))).toBe('subagent');
   });
-  it('顶层 parent 有 title → title', () => {
-    expect(deriveAgentRefName(mockSession({  title: '探查代码任务' }))).toBe('探查代码任务');
+  it('顶层 parent 有 title → title', async () => {
+    expect(await deriveAgentRefName(mockSession({  title: '探查代码任务' }))).toBe('探查代码任务');
   });
-  it('顶层 parent 无 title → "parent"', () => {
-    expect(deriveAgentRefName(mockSession({  title: '' }))).toBe('parent');
-    expect(deriveAgentRefName(mockSession({  title: undefined }))).toBe('parent');
+  it('顶层 parent 无 title → "parent"', async () => {
+    expect(await deriveAgentRefName(mockSession({  title: '' }))).toBe('parent');
+    expect(await deriveAgentRefName(mockSession({  title: undefined }))).toBe('parent');
   });
-  it('leader/member/squad 有 title → title', () => {
-    expect(deriveAgentRefName(mockSession({ role: 'leader', derivation: 'parent', title: 'Captain' }))).toBe('Captain');
+  it('leader/member/squad 有 title → title', async () => {
+    expect(await deriveAgentRefName(mockSession({ role: 'leader', derivation: 'parent', title: 'Captain' }))).toBe('Captain');
   });
-  it('name 不取 sessionId 片段（程序构造性原则）', () => {
+  it('name 不取 sessionId 片段（程序构造性原则）', async () => {
     // 即使 session.id 是 ULID，name 也只取 title/templateType，不带 sid 前缀
     const s = mockSession({ id: '01KABCDEF', derivation: 'subagent', role: 'rocky', subAgentTemplateType: 'explorer' });
-    expect(deriveAgentRefName(s)).toBe('explorer');
-    expect(deriveAgentRefName(s)).not.toContain('01K');
+    expect(await deriveAgentRefName(s)).toBe('explorer');
+    expect(await deriveAgentRefName(s)).not.toContain('01K');
+  });
+
+  // ── [v0.0.340 决策 1] squad 成员 sender + memberStore 注入 → 反查实时名 ──
+  it('[v0.0.340] squad 成员 sender（squadId+memberId）+ memberStore 实时名 → 实时名（覆盖 title 快照）', async () => {
+    const s = mockSession({ role: 'mate', derivation: 'parent', title: '旧名快照', squadId: 'SQ-1', memberId: 'MEM-1' });
+    const lookup = makeLookup({}, {
+      getMember: async () => ({ name: '新名字' }),
+    });
+    expect(await deriveAgentRefName(s, lookup)).toBe('新名字');
+  });
+  it('[v0.0.340] member 已删（getMember undefined）→ fallback title（不抛错）', async () => {
+    const s = mockSession({ role: 'mate', derivation: 'parent', title: '旧名快照', squadId: 'SQ-1', memberId: 'MEM-GONE' });
+    const lookup = makeLookup({}, {
+      getMember: async () => undefined,
+    });
+    expect(await deriveAgentRefName(s, lookup)).toBe('旧名快照');
+  });
+  it('[v0.0.340] squad 成员 sender 但无 memberStore 注入 → title（行为不变）', async () => {
+    const s = mockSession({ role: 'mate', derivation: 'parent', title: 'Old-Title', squadId: 'SQ-1', memberId: 'MEM-1' });
+    expect(await deriveAgentRefName(s)).toBe('Old-Title');
+  });
+  it('[v0.0.340] subagent 分支优先于反查（memberStore 注入也不反查 templateType）', async () => {
+    const s = mockSession({ derivation: 'subagent', role: 'rocky', subAgentTemplateType: 'explorer', squadId: 'SQ-1', memberId: 'MEM-1' });
+    const lookup = makeLookup({}, {
+      getMember: async () => ({ name: '不应被使用' }),
+    });
+    expect(await deriveAgentRefName(s, lookup)).toBe('explorer');
+  });
+  it('[v0.0.340] memberStore.getMember 抛错 → 静默 fallback title', async () => {
+    const s = mockSession({ role: 'mate', derivation: 'parent', title: 'Fallback-Title', squadId: 'SQ-1', memberId: 'MEM-1' });
+    const lookup = makeLookup({}, {
+      getMember: async () => { throw new Error('boom'); },
+    });
+    expect(await deriveAgentRefName(s, lookup)).toBe('Fallback-Title');
   });
 });
 

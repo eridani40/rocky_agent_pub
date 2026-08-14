@@ -193,6 +193,25 @@ export async function saveWorkspaceFile(
 }
 
 /**
+ * [v0.0.339] GET /session/:id/workspace/stat?path= —— workspace 文件大小判定（打开分流用）。
+ * path = 相对 workspaceDir 的路径（同 whitelistResolve 安全面，不读文件内容只 statSync）。
+ * 返 { size: number }（文件字节数；目录/不存在 → 404；越界 → 400；非 GET → 405）。
+ * 失败 throw（与既有 ws API 一致）。
+ */
+export async function statWorkspaceFile(
+  sessionId: string,
+  path: string,
+  base?: string,
+): Promise<{ size: number }> {
+  const q = new URLSearchParams({ path }).toString();
+  return req<{ size: number }>(
+    `/session/${encodeURIComponent(sessionId)}/workspace/stat?${q}`,
+    undefined,
+    base,
+  );
+}
+
+/**
  * [v0.0.320] GET /session/:id/workspace/search?q= —— 工作区递归全量搜索（D8/D10）。
  * [v0.0.324] 上限 100 条（从 200 降）；q 含 `/` 时匹配完整相对路径（非 basename），不含 `/` 时 basename 匹配。
  * q 非空：后端递归遍历 workspaceDir（ignore node_modules/.git），substring 大小写不敏感

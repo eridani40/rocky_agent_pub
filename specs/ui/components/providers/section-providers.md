@@ -16,6 +16,14 @@ providers group 内容区根：持 view 状态机（list | detail）+ draft/snap
 - list → detail：点 provider 卡 / 添加提供商
 - detail → list：面包屑返回 / 保存成功后
 
+## detail 保存模型（v0.0.317 SaveBar）
+
+`component-provider-detail.tsx`（无独立 spec，契约记于此）：
+- **dirty**：`isDirty(snapshot, draft)`——draft 与初始 snapshot 任一字段不同（含 protocolId 变化 + models 长度/内容 diff）。
+- **[v0.0.317] SaveBar 替换原自定义 inline save-bar**：`<SaveBar variant="detail" dirty={dirty} saving={saving} onSave={handleSave} onCancel={handleReset} />`（`component-save-bar.tsx`）。
+- **saving state**：`useState(false)`；handleSave 改 async 包装——`setSaving(true); try { await onSaved(draft) } finally { setSaving(false) }`。
+- **reset**：`handleReset = () => setDraft(snapshot)`。
+
 ## 复用关系
 - 被组合：page-app-config（providers group 时渲染）
 - 组合了：component-provider-list-card × N / component-provider-detail / 新增 provider

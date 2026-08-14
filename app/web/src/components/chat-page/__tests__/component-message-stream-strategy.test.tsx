@@ -18,8 +18,8 @@
  *   - tool-batch：标题文案「工具调用」
  */
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { render, screen, cleanup, within } from '@testing-library/react';
-import { ComponentMessageStream } from '../component-message-stream';
+import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
+import { ComponentMessageStream, extractSendMessageBody } from '../component-message-stream';
 import { MemberAvatar } from '../../common/member-avatar';
 import { groupMessageFilter, resolveGroupActor } from '../chat-actor-strategy';
 import type { Message } from '../types';
@@ -414,5 +414,120 @@ describe('[v0.0.96.ui_fix F2] spinner 双源门控：runActive || sessionRunning
       />,
     );
     expect(querySpinner()).toBeNull();
+  });
+});
+
+describe('[v0.0.331 P0] extractSendMessageBody — send_message content 容错提取', () => {
+  it('array 正常形态（type: text）→ join 提取', () => {
+    expect(extractSendMessageBody([{ type: 'text', text: 'hello' }, { type: 'text', text: 'world' }])).toBe(
+      'hello\nworld',
+    );
+  });
+
+  it('array 缺 type（[{"text":"..."}] 脏数据形态）→ 仍取 text', () => {
+    // 根因场景：LLM 传缺 type block → 旧 filter(c=>c.type==='text') 全滤 → 空白；修复后取 text
+    expect(extractSendMessageBody([{ text: 'hi' }])).toBe('hi');
+    expect(extractSendMessageBody([{ text: 'a' }, { text: 'b' }])).toBe('a\nb');
+  });
+
+  it('string → 直接当正文', () => {
+    expect(extractSendMessageBody('plain string body')).toBe('plain string body');
+  });
+
+  it('object item 包裹（{item: "..."}）→ 解包取 string', () => {
+    expect(extractSendMessageBody({ item: 'wrapped' })).toBe('wrapped');
+  });
+
+  it('object item 包裹数组（{item: [{text:"x"},{text:"y"}]}）→ 递归提取', () => {
+    expect(extractSendMessageBody({ item: [{ text: 'x' }, { text: 'y' }] })).toBe('x\ny');
+  });
+
+  it('object 直接含 text 字段（单 block 对象）→ 取 text', () => {
+    expect(extractSendMessageBody({ text: 'single block' })).toBe('single block');
+  });
+
+  it('空 / null / undefined / number → 空字符串', () => {
+    expect(extractSendMessageBody('')).toBe('');
+    expect(extractSendMessageBody(null)).toBe('');
+    expect(extractSendMessageBody(undefined)).toBe('');
+    expect(extractSendMessageBody(42)).toBe('');
+    expect(extractSendMessageBody([])).toBe('');
+    expect(extractSendMessageBody([{ type: 'image', data: 'x' }])).toBe(''); // 非 text 字段块 → 滤掉
+  });
+});
+
+describe('[v0.0.331 P1\'] out 信封 _rawTruncated → 显示「发送失败（参数截断）」', () => {
+  /** 构造 assistant 消息：仅 send_message tool_call（无 text block，避免同 messageId 多 row）+ 对应 tool_result（error 态） */
+  function sendMsgEnvelopeMsg(args: Record<string, unknown>, resultIsError = true): Message[] {
+    return [
+      {
+        id: 'as1',
+        sessionId: 'S1',
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_call',
+            id: 'tc1',
+            name: 'send_message',
+            arguments: args,
+          },
+        ],
+        createdAt: '2026-06-29T00:00:01Z',
+      },
+      {
+        id: 'tr1',
+        sessionId: 'S1',
+        role: 'tool',
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'tc1',
+            isError: resultIsError,
+            content: [{ type: 'text', text: 'some failure detail' }],
+          },
+        ],
+        createdAt: '2026-06-29T00:00:02Z',
+      },
+    ];
+  }
+
+  it('arguments._rawTruncated=true + error → 展开显示「发送失败（参数截断）」', () => {
+    render(
+      <ComponentMessageStream
+        messages={sendMsgEnvelopeMsg({ target: 'parent', content: [], _rawTruncated: true })}
+      />,
+    );
+    // 信封 toggle 可展开（error 态）
+    const toggle = within(getRow('as1')).getByTestId('a2a-envelope-toggle');
+    fireEvent.click(toggle);
+    // 展开后 body 显示截断提示（而非 result 提取的 failure detail）
+    const body = within(getRow('as1')).getByTestId('a2a-envelope-body');
+    expect(body.textContent).toContain('发送失败（参数截断）');
+    expect(body.textContent).not.toContain('some failure detail');
+  });
+
+  it('arguments._rawTruncated 非 true + error → 仍显示 result 提取失败原因（原逻辑）', () => {
+    render(
+      <ComponentMessageStream
+        messages={sendMsgEnvelopeMsg({ target: 'parent', content: [] }, true)}
+      />,
+    );
+    const toggle = within(getRow('as1')).getByTestId('a2a-envelope-toggle');
+    fireEvent.click(toggle);
+    const body = within(getRow('as1')).getByTestId('a2a-envelope-body');
+    expect(body.textContent).toContain('some failure detail');
+    expect(body.textContent).not.toContain('发送失败（参数截断）');
+  });
+
+  it('done 态（非 error）→ 展开显示 bodyText 内容（_rawTruncated 不介入）', () => {
+    render(
+      <ComponentMessageStream
+        messages={sendMsgEnvelopeMsg({ target: 'parent', content: [{ text: '正常正文' }] }, false)}
+      />,
+    );
+    const toggle = within(getRow('as1')).getByTestId('a2a-envelope-toggle');
+    fireEvent.click(toggle);
+    const body = within(getRow('as1')).getByTestId('a2a-envelope-body');
+    expect(body.textContent).toContain('正常正文');
   });
 });

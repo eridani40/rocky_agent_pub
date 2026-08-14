@@ -105,7 +105,7 @@ interface SquadDetail {
   charter: Charter;               // embedded 4 字段
   budget: { limit: number; window: "daily"; scope: "team" } | null;  // [v0.0.116] null=off=不限量；非null=on=限量
   enableHeartBeat: boolean;       // [v0.0.33.4] 实跑（scheduler killswitch，总开关）
-  enableGroupChat: boolean;       // [v0.0.270] 群聊可见性（true=注入 SquadChat + UI 入口可见；false=两者隐藏；存量无字段回显 ?? true=开）
+  enableGroupChat: boolean;       // [v0.0.270] 群聊可见性（true=注入 SquadChat + UI 入口可见；false=两者隐藏；存量无字段回显 ?? true=开）；**[v0.0.340] 新建团队默认 false=关**（POST /squad 响应回显 false；PATCH toggle 可改）
   timezone?: string;              // [v0.0.33.4] IANA tz（如 "Asia/Shanghai"），activeWindows + daily 回血窗口都跟它；缺省 user local
   heartbeatConfig: {              // [v0.0.116] squad 级统一心跳配置（null=未配=默认 interval=15/全天/all）
     interval: number;             // 5|15|30|60，默认 15
@@ -304,6 +304,8 @@ interface PatchMemberBody {
 ```
 
 > `[v0.0.114]` **`intro` 可编辑**——PATCH body 带 `intro` 即更新该成员一句话介绍（`trim()` 后落库）。校验与创建口径一致：提供 `intro` 但 `trim()` 后为空 → `400 intro required`；不传 `intro` 不影响其他字段。旧 member（无 intro）可经此补填。前端在成员管理面板（`member-intro-input`）编辑。
+
+> `[v0.0.340]` **改名写时全同步**——PATCH body 带 `name` 时 `patchMemberService` 在 `putMember` 成功后**同步关联 session.title**（该成员 session）：判据 = 改名发生 || 关联 title !== patch.name（覆盖「上次部分失败后重试」）；仅 `session.titled !== true` 的默认标题被同步（titled=true = AI 起名/用户自定义，**不覆盖**）；`updateSession` 只传 `{ title }` 不传 `titled`（保留 existing 值，CAS 语义不破坏）；同步失败抛错透传（部分失败可见、重试可修复——「改彻底 + 诚实上报」老板原则）。**读侧配套**（[v0.0.340 决策 1]）：信封 targetName / in 信封 sender 名 / 系统提示 selfName 统一从 memberStore 反查实时成员名（`session.squadId+memberId → MemberStore.getMember`），session.title 只保留「会话标题」语义——改名后信封显示新名，无需刷新/重进。
 
 > `[v0.0.142]` **`workStyle` 可编辑 + 可清空**——PATCH body 带 `workStyle` 即更新该成员工作方式（`trim()` 后落库）。**与 intro 关键区别 = 可空无校验**：提供空串 `""` → **清空回写空串（无 `400`）**，不传不影响其他字段。**[v0.0.169] 起 workStyle 两面可写**：`PATCH /squad/:id/member/:mid`（用户编辑面板 `member-workstyle-input`）+ **hire（§2.1）**（fresh 直传 / derive 复制父 + `overrides.workStyle` 覆盖，语义同本条）；**agent `team` 工具仍不暴露 workStyle**（`team.edit` 服务端显式剔除 + `team.hire` 剔除 `overrides.workStyle`，`specs/tech/squad/[P1]squad_tools.md §2`）。workStyle 仅注入该成员自己个人 session 的 prompt（tech `[P1]prompt_sections.md §3.1`），不进 Team Roster。
 

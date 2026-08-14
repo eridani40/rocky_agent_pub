@@ -3,7 +3,7 @@ type: spec
 title: File Write Lock（进程内文件写加锁）
 priority: P1
 status: active
-updated: 2026-07-01
+updated: 2026-08-13
 since: v0.0.38
 ---
 
@@ -179,25 +179,25 @@ export class CompositeStore implements CrudStore {
 
 ## 5. write/edit 工具改动点（`app/server/src/tools/file-{write,edit}.ts`）
 
-- **加锁**：把现有 sync 写动作包进 `withFileLock(filePath, async () => { ... })`（**同步等待**模式，工具须返回成功失败给 agent）。
-- **补崩溃原子**：`writeFileSync` → `atomicWriteSync`（fs-io.ts 现成，spec §3.6）。
-- **edit 的 read-modify-write 整段在锁内**：`readFileSync → replace → atomicWriteSync` 三步须在同一 `withFileLock` 闭包内，否则 read 与 write 之间可能被插入写。
+- **加锁**：把写动作包进 `withFileLock(filePath, async () => { ... })`（**同步等待**模式，工具须返回成功失败给 agent）。
+- **补崩溃原子**：裸 `writeFile` → `atomicWriteAsync`（fs-io.ts，v0.0.345 起工具层用 async 版；`atomicWriteSync` 继续服务 persistence 层存量调用，spec §3.6）。
+- **edit 的 read-modify-write 整段在锁内**：`readFile → replace → atomicWriteAsync` 三步须在同一 `withFileLock` 闭包内，否则 read 与 write 之间可能被插入写。
 - `ctx.readSet` 语义不变（仍是工具层的「已读」标记），加锁不影响 readSet 维护点。
 - 错误处理：锁内 fn 抛错由 withFileLock 冒泡，工具 catch 后照旧返回 `errorResult`。
 
 ```typescript
-// file-write 伪码（关键 diff）
+// file-write 伪码（关键 diff，v0.0.345 起工具层 IO 真异步）
 - writeFileSync(filePath, content, 'utf8');
-+ await withFileLock(filePath, async () => { atomicWriteSync(filePath, content); });
++ await withFileLock(filePath, async () => { await atomicWriteAsync(filePath, content); });
 
 // file-edit 伪码（关键 diff，read-modify-write 整段入锁）
 - const body = readFileSync(filePath, 'utf8');
 - const next = ...replace...;
 - writeFileSync(filePath, next, 'utf8');
 + await withFileLock(filePath, async () => {
-+   const body = readFileSync(filePath, 'utf8');
++   const body = await readFile(filePath, 'utf8');
 +   const next = ...replace...;            // 唯一性/未找到 在锁内重判（防 read 后被插写改了计数）
-+   atomicWriteSync(filePath, next);
++   await atomicWriteAsync(filePath, next);
 + });
 ```
 - edit 的「occurrences 统计 + 唯一性判定」**移入锁内重判**：避免 read 时唯一、read 到 write 之间另一 edit 插入第二次出现导致 replace 走非预期分支（保守：锁内重新 countOccurrences）。
@@ -243,8 +243,8 @@ export class CompositeStore implements CrudStore {
 
 | callsite | 文件 | 操作 | 模式 |
 |---|---|---|---|
-| fileWriteTool.run | tools/file-write.ts:69 | withFileLock(filePath) 包 atomicWriteSync | [wait] |
-| fileEditTool.run | tools/file-edit.ts:73-100 | withFileLock(filePath) 包 read+replace+atomicWriteSync（occurrences 锁内重判） | [wait] |
+| fileWriteTool.run | tools/file-write.ts:93 | withFileLock(filePath) 包 atomicWriteAsync（v0.0.345 起工具层 IO 真异步） | [wait] |
+| fileEditTool.run | tools/file-edit.ts:100 | withFileLock(filePath) 包 read+replace+atomicWriteAsync（occurrences 锁内重判） | [wait] |
 
 ### 6.4 不迁 [skip]
 

@@ -256,15 +256,16 @@ ipcMain.handle(IPC.session.list, (_e, args) => server.session.list(args));
 
 ### 4.4 通用打开外部资源 IPC
 
-> renderer 沙箱调「系统浏览器 / 系统默认应用 / 读绝对路径文本文件」须经 preload 暴露的 `window.rockyShell` 三 channel。**范本 = `app/electron/src/computer-permissions-ipc.ts`**（顶层不 import electron，纯 `compute*` 函数注入 `ShellLike`/`FsLike` 依赖可 UT；electron 仅在 `register*` 内 require）。
+> renderer 沙箱调「系统浏览器 / 系统默认应用 / 读绝对路径文本文件 / **stat 绝对路径文件**」须经 preload 暴露的 `window.rockyShell` 四 channel。**范本 = `app/electron/src/computer-permissions-ipc.ts`**（顶层不 import electron，纯 `compute*` 函数注入 `ShellLike`/`FsLike` 依赖可 UT；electron 仅在 `register*` 内 require）。
 
-三 channel（**channel 名硬编码，非 protocols**——对齐 v0.0.105 既有 `computer:*` 范式；待 IPC 数量增长再统收 protocols）：
+四 channel（**channel 名硬编码，非 protocols**——对齐 v0.0.105 既有 `computer:*` 范式；待 IPC 数量增长再统收 protocols）：
 
 | channel | payload | 返回 | 主进程实现 |
 |---|---|---|---|
 | `shell:openExternal` | `{ url: string }`（web scheme） | `Promise<{ ok: boolean; reason?: string }>` | `shell.openExternal(url)` → 系统默认浏览器 |
 | `shell:openPath` | `{ path: string }`（**绝对路径**，main 已展开） | `Promise<{ ok: boolean; reason?: string }>` | `shell.openPath(absPath)` → 系统默认应用（不支持类型兜底） |
 | `shell:readFileText` | `{ path: string }`（**绝对路径**） | `Promise<{ ok: boolean; content?: string; reason?: string }>` | `fs.readFile(absPath, 'utf8')` → 喂内置 viewer |
+| `shell:stat` `[v0.0.339]` | `{ path: string }`（**绝对路径**） | `Promise<{ ok: boolean; size?: number; reason?: string }>` | `computeFileStat(absPath, fs)`：`fs.stat` → `{ok:true, size}`；ENOENT→`not-found` / EACCES→`permission-denied` / stat 缺省→`stat-unavailable`；只 stat 不读内容 |
 
 **不变量**：
 

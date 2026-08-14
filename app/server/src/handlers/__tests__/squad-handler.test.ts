@@ -158,10 +158,10 @@ describe('SquadHandler enableGroupChat — v0.0.270 群聊开关（api §1.3/§1
     expect((await jsonBody(r3)).enableGroupChat).toBe(true);
   });
 
-  it('PATCH 其他字段（undefined enableGroupChat）→ 不修改（建队默认 true 保持）', async () => {
+  it('PATCH 其他字段（undefined enableGroupChat）→ 不修改（建队默认 false 保持）', async () => {
     const r = await handleSquadRoute(patchReq({ name: 'renamed' }), 'PATCH', `/squad/${squadId}`, deps);
     expect(r.status).toBe(200);
-    expect((await jsonBody(r)).enableGroupChat).toBe(true);
+    expect((await jsonBody(r)).enableGroupChat).toBe(false);
   });
 
   it('存量 squad 无 enableGroupChat 字段 → GET toDetail ?? true 兜底（缺省=开）', async () => {
@@ -184,11 +184,11 @@ describe('SquadHandler enableGroupChat — v0.0.270 群聊开关（api §1.3/§1
     expect((await jsonBody(r)).enableGroupChat).toBe(true);
   });
 
-  it('GET /squad 列表 → toSummary 回显 enableGroupChat（建队默认 true）', async () => {
+  it('GET /squad 列表 → toSummary 回显 enableGroupChat（建队默认 false）', async () => {
     const r = await handleSquadRoute(new Request('http://t/squad'), 'GET', '/squad', deps);
     const b = await jsonBody(r);
     expect(Array.isArray(b.items)).toBe(true);
-    expect(b.items[0]!.enableGroupChat).toBe(true);
+    expect(b.items[0]!.enableGroupChat).toBe(false);
   });
 });
 

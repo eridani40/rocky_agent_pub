@@ -25,7 +25,7 @@ export const sendMessageTool: Tool = {
     description:
       'Send a message to another agent (a2a). target = AgentRef | sessionId | "parent". ' +
       'needReply (default:true): true = recipient must reply via send_message; false = fyi. Usually needReply is true, unless asked to be false. ' +
-      'content is an array of {type:"text", text:string} blocks. ' +
+      'content is an array of {type:"text", text:string} blocks, e.g. [{"type":"text","text":"hi"}]. Each block MUST include the "type" field. ' +
       'Returns { messageId } immediately (fire-and-forget). Sub-agents can only target parent.',
     intro: 'Send a message to another agent by session id',
     inputSchema: {
@@ -192,6 +192,58 @@ async function checkSquadClique(
 }
 
 /**
+ * [v0.0.331] 规范化 send_message content（语义唯一来源，与工具定义同文件防漂移）。
+ * 从 normalizeSendMessageInput 内循环抽出，行为逐字段一致：
+ *   - array：每块校验 object + text 是 string，缺 type 补 `type:'text'`（未知 type 不透传）
+ *   - string → [{type:'text',text:str}]（形态 C）
+ *   - object（非数组）→ `.item ?? obj` 解包；解包后仍单 block object → 包数组（形态 A/B）
+ *   - 其他（number/null/undefined 等）→ error 形态（由调用方处理，不抛）
+ * @returns ContentBlock[]（成功）| { error: string }（失败，语义与 normalizeSendMessageInput 原 error 一致）
+ */
+export function normalizeContentBlocks(
+  rawContent: unknown,
+): ContentBlock[] | { error: string } {
+  // 形态 A/B：object（非数组）→ 解包 .item ?? obj
+  let content: unknown = rawContent;
+  if (content !== null && typeof content === 'object' && !Array.isArray(content)) {
+    const obj = content as Record<string, unknown>;
+    content = obj.item ?? obj;
+  }
+  // 形态 C：字符串 → 单 text block
+  if (typeof content === 'string') {
+    content = [{ type: 'text', text: content }];
+  }
+  // 形态 B：单 block 对象 → 包成数组
+  if (content !== null && typeof content === 'object' && !Array.isArray(content)) {
+    content = [content];
+  }
+  // 此刻 content 必须是数组（其他形态 → error）
+  if (!Array.isArray(content)) {
+    return {
+      error: 'send_message: content must be array of {type:"text",text:string} blocks (or a single block/string)',
+    };
+  }
+  // 校验每个 block 至少有 text 字段（容错：缺 type 补 'text'）
+  const blocks: ContentBlock[] = [];
+  for (const block of content) {
+    if (block === null || typeof block !== 'object') {
+      return { error: 'send_message: content block must be object' };
+    }
+    const b = block as Record<string, unknown>;
+    const text = b.text;
+    if (typeof text !== 'string') {
+      return { error: 'send_message: content block missing text string' };
+    }
+    // send_message 容错只产出 text block（LLM 误传的未知 type 不透传——避免脏数据落库）
+    blocks.push({ type: 'text', text });
+  }
+  if (blocks.length === 0) {
+    return { error: 'send_message: content must be non-empty array' };
+  }
+  return blocks;
+}
+
+/**
  * [BUG-031] 规范化 send_message 入参：把 LLM 常见异常形态转成 spec §5.1 权威形态。
  *
  * 处理的异常形态（真 LLM 实测）：
@@ -200,6 +252,8 @@ async function checkSquadClique(
  *   C. content 是字符串 → 包成 [{type:"text",text:str}]；D. 数组保留原样
  *   E. [v0.0.68 R5] needReply 缺失（顶层 + content 内都无）→ default:true（spec §5.1 default:true）
  *      显式 boolean（含 false）保留不变（UC-14：false 不被覆盖）
+ *
+ * content 形态统一交给 normalizeContentBlocks（v0.0.331 抽出，语义唯一来源）。
  *
  * @returns 成功：{target, content:ContentBlock[], needReply, inReplyTo}；失败：{error}
  */
@@ -211,78 +265,32 @@ function normalizeSendMessageInput(input: ToolInput): {
   error?: string;
 } {
   const target = input.target;
-  let rawContent: unknown = input.content;
   let needReply: unknown = input.needReply;
   let inReplyTo: unknown = input.inReplyTo;
 
-  // 形态 A/B：content 是对象（非数组、非 null）→ 提取嵌套字段
-  if (rawContent !== null && typeof rawContent === 'object' && !Array.isArray(rawContent)) {
-    const obj = rawContent as Record<string, unknown>;
-    // 提取嵌套在 content 里的 needReply / inReplyTo（形态 A/D：LLM 误把顶层字段嵌进 content）
+  // 形态 A/D：content 是对象（非数组、非 null）→ 提取嵌套在 content 里的 needReply/inReplyTo
+  if (input.content !== null && typeof input.content === 'object' && !Array.isArray(input.content)) {
+    const obj = input.content as Record<string, unknown>;
+    // 提取嵌套的 needReply / inReplyTo（LLM 误把顶层字段嵌进 content）
     if (typeof obj.needReply === 'boolean' && typeof needReply !== 'boolean') {
       needReply = obj.needReply;
     }
     if (typeof obj.inReplyTo === 'string' && typeof inReplyTo !== 'string') {
       inReplyTo = obj.inReplyTo;
     }
-    // payload：优先取 obj.item（LLM 实测形态），否则 obj 本身视作单 block
-    const payload: unknown = obj.item ?? obj;
-    rawContent = payload;
   }
 
-  // 形态 C：字符串 → 单 text block
-  if (typeof rawContent === 'string') {
-    rawContent = [{ type: 'text', text: rawContent }];
-  }
-
-  // 形态 B：单 block 对象 → 包成数组
-  if (rawContent !== null && typeof rawContent === 'object' && !Array.isArray(rawContent)) {
-    rawContent = [rawContent];
-  }
-
-  // 此刻 rawContent 必须是数组
-  if (!Array.isArray(rawContent)) {
+  // 形态 A/B/C/D 统一交给 normalizeContentBlocks（解包/包数组/补 type/error 语义一致）
+  const normalizedContent = normalizeContentBlocks(input.content);
+  if ('error' in normalizedContent) {
     return {
       target,
       content: [],
       needReply: false,
-      error: 'send_message: content must be array of {type:"text",text:string} blocks (or a single block/string)',
+      error: normalizedContent.error,
     };
   }
-
-  // 校验每个 block 至少有 text 字段（容错：缺 type 补 'text'）
-  const content: ContentBlock[] = [];
-  for (const block of rawContent) {
-    if (block === null || typeof block !== 'object') {
-      return {
-        target,
-        content: [],
-        needReply: false,
-        error: 'send_message: content block must be object',
-      };
-    }
-    const b = block as Record<string, unknown>;
-    const text = b.text;
-    if (typeof text !== 'string') {
-      return {
-        target,
-        content: [],
-        needReply: false,
-        error: 'send_message: content block missing text string',
-      };
-    }
-    // send_message 容错只产出 text block（LLM 误传的未知 type 不透传——避免脏数据落库）
-    content.push({ type: 'text', text });
-  }
-
-  if (content.length === 0) {
-    return {
-      target,
-      content: [],
-      needReply: false,
-      error: 'send_message: content must be non-empty array',
-    };
-  }
+  const content = normalizedContent;
 
   // [v0.0.68 R5] needReply 改可选 default:true（spec §5.1）。
   //   - engine.validateInput default-fill 已在 tool.run 前注入 input.needReply=true（缺省时）
@@ -304,7 +312,9 @@ function normalizeSendMessageInput(input: ToolInput): {
 
 /**
  * [v0.0.311] 解析 target 的可读显示名（供前端信封 targetName）。
- * 优先级：① AgentRef object 的 .name（LLM 已填）→ ② session record 的 .title → ③ undefined
+ * 优先级：① AgentRef object 的 .name（LLM 已填）→ ② memberStore 反查（target session 是 squad 成员时，
+ *   [v0.0.340 决策 1] 读单一源：成员名权威源 = memberStore，不再把 session.title 当成员名读）→
+ *   ③ session record 的 .title（non-squad-member：subagent/squad chat/standalone fallback）→ ④ undefined
  * 覆盖 subagent 等 non-squad-member 场景（前端只有 squad members 列表，查不到 subagent）。
  */
 async function resolveTargetDisplayName(
@@ -317,10 +327,25 @@ async function resolveTargetDisplayName(
     const name = (target as { name?: unknown }).name;
     if (typeof name === 'string' && name.length > 0) return name;
   }
-  // 优先级 2：从 session record 取 title
+  // 优先级 2：target session 是 squad 成员 → memberStore 反查实时名（改名后不依赖 title 快照）
   try {
     const session = await rtc.store.getSession(targetSid);
-    if (session?.title && session.title.length > 0) return session.title;
+    if (session) {
+      if (
+        session.squadId !== undefined &&
+        session.memberId !== undefined &&
+        rtc.memberStore
+      ) {
+        try {
+          const member = await rtc.memberStore.getMember(session.squadId, session.memberId);
+          if (member?.name && member.name.length > 0) return member.name;
+        } catch {
+          // member 反查失败（member 已删/读失败）静默 fallback，不抛错
+        }
+      }
+      // 优先级 3：session.title fallback（subagent/squad chat/standalone 等 non-squad-member）
+      if (session.title && session.title.length > 0) return session.title;
+    }
   } catch {
     // getSession 失败不阻塞投递结果，fallback undefined
   }

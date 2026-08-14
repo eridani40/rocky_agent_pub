@@ -1,0 +1,106 @@
+# member_rename_envelope_tc2 — [v0.0.340] 改名信封 bug A+B 修复（写时全同步 + 读单一源）
+#
+# 覆盖契约（bug-member-rename-envelope-old-name-2026-08-12.md + change_plan 决策 1/2）：
+#   需求 2 方案 A（写时全同步）：PATCH member 改名 → memberStore 新名 + 关联 session.title 同步新名
+#     （titled=false 才同步，不覆盖 AI 起名/用户自定义标题）
+#   需求 2 方案 B（读单一源）：send_message 信封 targetName 反查 memberStore（实时权威）
+#     → 改名后发消息，信封显示新名（非旧 session.title）
+#
+# 确定性部分全 HTTP；信封 targetName 为真调 LLM（send_message 工具链路，同 agent_spawn_async_reply 先例）。
+# timeout 240（LLM 链路）；429/529/503 框架层自动 skip。
+case: member_rename_envelope_tc2
+module: squad
+timeout: 240
+
+setup:
+  - name: 建 squad（leader，初始名 leader-ren）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "rename-envelope-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "leader-ren"
+    save:
+      squad_id: .id
+      leader_sid: .members[0].sessionId
+    check:
+      - .id exists
+      - .leaderId exists
+      - .members[0].sessionId exists
+
+  - name: hire mate（fresh，初始名 mate-orig）
+    requests:
+      - method: POST
+        path: /squad/{squad_id}/member
+        body:
+          mode: "fresh"
+          name: "mate-orig"
+          intro: "rename envelope 验证用 mate"
+    save:
+      mate_mid: .member.id
+      mate_sid: .sessionId
+    check:
+      - .member.id exists
+      - .sessionId exists
+
+  - name: 读 mate session 初始 title（= 成员名，titled=false baseline）
+    requests:
+      - GET /session/{mate_sid}
+    check:
+      - .title == "mate-orig"
+
+steps:
+  - name: PATCH mate 改名 mate-orig → zz-renamed-mate（memberStore 写新名）
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}/member/{mate_mid}
+        body:
+          name: "zz-renamed-mate"
+    check:
+      - .member.name == "zz-renamed-mate"
+
+  - name: GET mate session — title 同步为新名（方案 A 写时全同步）
+    requests:
+      - GET /session/{mate_sid}
+    check:
+      - .title == "zz-renamed-mate"
+
+  - name: GET squad roster — members[] 呈现新名（roster 实时权威）
+    requests:
+      - GET /squad/{squad_id}
+    check:
+      - .members[] any .name == "zz-renamed-mate"
+
+  - name: 驱动 leader 真调 send_message 给改名后的 mate（target=mate_sid 字符串，prod 主路径）
+    requests:
+      - method: POST
+        path: /session/{leader_sid}/messages
+        body:
+          # v0.0.158 删 providerId/modelId body override（静默忽略）；leader 走 squad.modelDefault=MiniMax-M3 兜底
+          content: "请调用 send_message 工具向会话 {mate_sid} 发送一条消息：target 参数直接传该字符串 ID（不要包装成对象），content 为「改名信封验证」。发送成功后回复「已发送」即可。必须调用工具，不要提问，直接执行。"
+    save:
+      run_id: .runId
+    check:
+      - .runId exists
+
+  - name: poll leader transcript — tool_result 信封 targetName 显示新名（方案 B 读单一源）
+    poll:
+      request: GET /session/{leader_sid}/messages
+      until: '.items[] any .content[type=tool_result].content[type=text].text ~= "targetName"'
+      every: 2
+      timeout: 120
+    check:
+      # send_message tool_result = textResult(JSON{messageId, targetName}) → text 含 targetName 键 + 新名
+      # （zz-renamed-mate 唯一名；LLM 回复正文不会出现，双断言防误匹配）
+      - .items[] any .content[type=tool_result].content[type=text].text ~= "targetName"
+      - .items[] any .content[type=tool_result].content[type=text].text ~= "zz-renamed-mate"
+
+teardown:
+  - name: 解散 squad（级联清理 leader/mate sessions + members）
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+    check:
+      - .deleted == true

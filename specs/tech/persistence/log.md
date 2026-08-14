@@ -1,13 +1,23 @@
 ---
 type: log
 title: Persistence KB 变更记录
-updated: 2026-08-05
+updated: 2026-08-13
 ---
 
 # Persistence KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-13 · v0.0.345（atomicWriteAsync 新增 + 工具层 fs.promises 真异步）
+
+- **`[P1]file_write_lock.md`**：§5 write/edit 工具改动点伪码从 sync 版（writeFileSync/readFileSync/atomicWriteSync）改 async 版（`await readFile` + `await atomicWriteAsync`，整段仍在 withFileLock 闭包内）；§6.3 callsite 表 fileWriteTool.run / fileEditTool.run 行更新为 `atomicWriteAsync` + 现行号（file-write.ts:93 / file-edit.ts:100）。背景：v0.0.345 撤 worker pool，工具层 fs 操作一律 fs.promises 真异步（老板 13:37 拍板）；persistence 层存量 sync 路径（fs-yield 兜底 + atomicWriteSync 54 处调用方）本版本不动、不迁移。
+- 详情：`specs/tech/version_logs/v0.0.345/change_log.md`（撤 worker pool + 五工具 fs.promises + fs-io.ts 新增 atomicWriteAsync + 标准沉淀 + 实现偏差）
+
+## 2026-08-13 · v0.0.302（jsonlPut 热路径 tailCache 零读 append）
+
+- **`[P0]fs_crud_store_engine.md §3.4`**：补「热路径优化（v0.0.302）：模块级 tailCache 零读 append」段——`fs-jsonl.ts` 模块级 `tailCache: Map<dir, {segName, count, maxId}>`（纯进程内存、无持久化）；命中条件（`cache.has(dir)` 且 `id > cached.maxId`）→ 尾段未满纯 append / 满则新开段；冷填充（cache miss 或乱序回填走读文件路径，顺序 append 读一次填缓存）；失效时机（乱序回填/段重写/delete/update 等段结构变化即 `tailCache.delete(dir)`）。
+- 详情：`specs/tech/version_logs/v0.0.302/change_plan.md`（v0.0.302 编码期实现，此前 spec 同步缺失，本次补记）。
 
 ## 2026-08-05 · v0.0.257（慢查询性能日志埋点 — SlowQuerySink 注册点 + queryWithSlowLog 计时包装）
 

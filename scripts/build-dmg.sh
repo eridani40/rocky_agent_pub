@@ -22,6 +22,12 @@ set -a
 . ./prod.env
 set +a
 
+# 离线化（v0.0.342）：禁用 electron-builder CLI 每次启动的 update-notifier
+# （cli-util.js checkIsOutdated → simple-update-notifier 查 npm registry，弱网/断网下卡）。
+# 注：specs/tech/app/package/[P0]packaging_toolchain.md 尚无「离线打包」章节（§3.6 为
+# runtime-config.json），本脚本离线化逻辑为事实标准，文档待 doc-modifier 补充。
+export NO_UPDATE_NOTIFIER=1
+
 # 版本号权威源 = 根 package.json version（不再从 prod.env 手填 APP_VERSION）。
 # 注意：electron-builder 在 app/electron 子目录跑，默认读 app/electron/package.json
 # 的 version（=0.0.0 占位），而非根。故显式读根 package.json version 并通过
@@ -269,6 +275,29 @@ fi
 # 版本号注入：electron-builder 从 app/electron 子目录跑，默认读 app/electron/package.json
 # 的 version（0.0.0 占位）。用 --config.extraMetadata.version 覆盖为根 package.json 版本，
 # 保证产物名 rocky_agent-${APP_VERSION}-arm64.dmg 版本正确（不改任何 package.json 文件）。
+#
+# 离线化（v0.0.342）：electron-builder 默认 unpack 总是走 @electron/get 下载 electron zip
+# （即便本地 node_modules/electron/dist 已存在；且 @electron/get 对缓存 zip 仍每次下载
+# SHASUMS256.txt 校验 → 每次打包都联网）。这里显式 --config.electronDist 指向本地已解压的
+# dist（Electron.app 完整目录），builder 走「custom unpacked Electron distribution」copyDir
+# 分支，完全跳过下载/校验。dist 缺失时先跑 electron install.js 本地解压（幂等；命中
+# ~/Library/Caches/electron 缓存 zip 则零联网）。
+ELECTRON_DIST_DIR="app/electron/node_modules/electron/dist"
+if [ ! -f "$ELECTRON_DIST_DIR/version" ]; then
+  echo "[build-dmg.sh] ③ electron dist 缺失，尝试本地解压（electron install.js，命中缓存零联网）..."
+  # electron install.js 读小写 electron_config_cache（npm config 风格，install.js:46）；
+  # @electron/get 不消费大写 ELECTRON_CACHE。显式传默认缓存路径（与 @electron/get
+  # env-paths 默认 ~/Library/Caches/electron 一致），命中缓存 zip 则零联网。
+  # || true：set -e 下 install.js 失败（如无缓存 zip 且断网）不提前退出，
+  # 让下方第二个 if 打印可操作 ERROR 提示（exit 3）。
+  (cd app/electron/node_modules/electron && electron_config_cache="$HOME/Library/Caches/electron" node install.js) || true
+fi
+if [ ! -f "$ELECTRON_DIST_DIR/version" ]; then
+  echo "[build-dmg.sh] ERROR: electron dist 仍缺失（$ELECTRON_DIST_DIR/version）— 离线打包需要本地已解压的 Electron dist 或缓存 zip。请先在有网环境跑一次 bun install 或 node app/electron/node_modules/electron/install.js。" >&2
+  exit 3
+fi
+ELECTRON_DIST_ABS="$(cd "$ELECTRON_DIST_DIR" && pwd)"
+echo "[build-dmg.sh] ③ electronDist=$ELECTRON_DIST_ABS (offline, skip download)"
 echo "[build-dmg.sh] ③ running electron-builder ..."
 (
   cd app/electron
@@ -277,6 +306,7 @@ echo "[build-dmg.sh] ③ running electron-builder ..."
     --config.extraMetadata.version="$APP_VERSION" \
     --config.directories.output="$BUILD_OUT_DIR" \
     --config.productName="$APP_NAME" \
+    --config.electronDist="$ELECTRON_DIST_ABS" \
     --publish never
 )
 

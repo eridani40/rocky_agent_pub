@@ -21,6 +21,7 @@ import type {
   PersistedInstanceRecord,
 } from './types';
 import type { ChromeMcpDriver } from './chrome-mcp-driver';
+import type { BrowserInstanceLedger } from './instance-ledger';
 
 /** manager 句柄表条目（impl 扩展私有字段 WorkerHandle/AttachHandle，manager 不读） */
 export interface BrowserHandle {
@@ -58,10 +59,18 @@ export interface ModeImplEnv {
   allocatePort(): Promise<number>;
   /** 释放端口（close/失败路径必达；幂等） */
   releasePort(port: number): void;
+  /** 资源台账（v0.0.334 B2：manager 经 env 透传 impl；launch insert / close delete） */
+  ledger: BrowserInstanceLedger;
   /** attach 驱动（ChromeMcpDriver 单例，bootstrap 注入；缺省 → attach launch fail-closed） */
   attachDriver?: ChromeMcpDriver;
   /** attach switch 门禁（读 connectorManager.getState switch；缺省 → attach launch fail-closed） */
   isAttachEnabled?(): boolean;
+  /**
+   * v0.0.334 fix：attach 失活即时摘表回调（manager 装配注入，绑定 manager.discardInstance）。
+   * impl 失活分支调用（attach 失活 = Chrome 已关、MCP 已断，资源实际已死，无需等 close 兜底）。
+   * 可选（worker impl 不强制实现/注入）；同步无副作用（仅删内存 Map，不调 impl.close）；幂等。
+   */
+  discardInstance?(key: string): void;
 }
 
 /** ModeImpl —— 无状态策略集（launch/execute/close/cleanupOrphan?） */
@@ -70,8 +79,9 @@ export interface ModeImpl {
    * 启动实例并返回 handle。key 由 manager 计算传入（instanceKey 保留在 manager）；
    * manager 负责复用/清理旧实例（幂等语义在 manager 状态机），impl.launch 总是「新启动」。
    * 失败 → error（含门禁/连接/端口等 kind）。
+   * v0.0.337 H6：可选第 4 参 signal（attach 超时 abort 感知用；worker impl 忽略不实现）。
    */
-  launch(key: string, opts: BrowserLaunchOptions, env: ModeImplEnv): Promise<LaunchResult>;
+  launch(key: string, opts: BrowserLaunchOptions, env: ModeImplEnv, signal?: AbortSignal): Promise<LaunchResult>;
   /** 执行 action（handle 由 manager 传 ready 实例）。崩溃/失活 → handle.state='dead' + error */
   execute(
     handle: BrowserHandle,
@@ -79,11 +89,25 @@ export interface ModeImpl {
     params: BrowserActionParams,
     ctx: ExecuteCtx,
   ): Promise<BrowserExecuteResult>;
-  /** 关闭实例（幂等：多次 no-op）。资源清理（kill/rm/端口/记录）全在 impl */
-  close(handle: BrowserHandle, env: ModeImplEnv): Promise<void>;
+  /**
+   * 关闭实例（幂等：多次 no-op）。资源清理（kill/rm/端口/记录）全在 impl。
+   * v0.0.336：返回结构化 CloseResult（含 ok/error 失败通道）——老板三层一致原则：
+   * close 清理失败必须诚实上报（ok=false + error），不能默默吞掉后还删实例、报 ok。
+   * ok=true 时 text 为提示文本（attach close 调试态残留引导；manager 透传到 BrowserExecuteResult.text）；
+   * 无提示 text undefined → manager 保持现文本 'closed'。
+   */
+  close(handle: BrowserHandle, env: ModeImplEnv): Promise<CloseResult>;
   /** 孤儿清理（开机自检按 rec.mode 分发；attach 不持久化 → 无此方法） */
   cleanupOrphan?(rec: PersistedInstanceRecord, env: ModeImplEnv): void;
 }
+
+/**
+ * close 结构化结果（v0.0.336 三层一致：清理失败诚实上报）。
+ * ok=true 清理成功（text 可选提示文本）；ok=false 清理失败（error 含 kind/message，manager 不删 instances）。
+ */
+export type CloseResult =
+  | { ok: true; text?: string }
+  | { ok: false; error: { kind?: string; message: string } };
 
 /** mode → impl 路由（代替一切 mode switch） */
 export interface ModeImplRegistry {

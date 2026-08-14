@@ -181,6 +181,10 @@ interface ToolCallBlock {
 - LLM 返回了 id → 直接使用
 - LLM 未返回 id → 框架自动生成 ULID
 
+**arguments 半截容错（`_raw` / `_rawTruncated`）**：LLM 流式输出的 arguments JSON 片段可能被截断（parse 失败）。`safeParseArgs`（agent-loop-stream.ts + replay-collector.ts 各一份）解析失败时返回 `{ _raw: <原始buf>, _rawTruncated: true }`——`_raw` 保留原始半截串（不进 LLM 上下文），`_rawTruncated: true` 标记截断。前端消费方（send-message-envelope 渲染）据此显示「发送失败（参数截断）」，而非空白。
+
+**send_message 落库前 normalize（[v0.0.331 P1]）**：`closeActive()`（agent-loop-stream.ts）/ `reconstitute()`（replay-collector.ts）在 `name === 'send_message'` 且 arguments 无 `_raw` 时，对 `arguments.content` 调 `normalizeContentBlocks`（见 `multi_agent/[P1]subagent_derivation.md §5.1`）——缺 `type` 的 block 补 `type:'text'`。原因：前端 out 信封正文从 LLM 原始 arguments 提取，若只按 `type==='text'` 过滤会因缺 type 全滤 → 展开空白。normalize 使落库数据永远权威形态（`_raw` 半截路径不补 content，由 `_rawTruncated` 标记展示）。
+
 ### 4.7 ToolResultBlock
 
 ```typescript

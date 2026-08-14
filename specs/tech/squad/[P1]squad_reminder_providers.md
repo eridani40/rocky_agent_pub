@@ -74,7 +74,7 @@ interface ReminderCtx {
   subagent → [parent]（拓扑硬约束仅 parent）
   standalone（!sessionType）→ []
   ```
-- **关键保留**：**benched 过滤**（`state !== 'benched'`；state 缺失按 deployed 兼容旧数据，readMembers 单点过滤）；**270 enableGroupChat 门控**（`enableGroupChat !== false`，undefined=旧 record=开；SquadChat 行随门控显隐，成员私聊不受影响）；**mate 对端可达性不丢**（name + sessionId 仍输出，a2a 语义不变）。
+- **关键保留**：**benched 过滤**（`state !== 'benched'`；state 缺失按 deployed 兼容旧数据，readMembers 单点过滤）；**270 enableGroupChat 门控**（`enableGroupChat !== false`，undefined=旧 record=开；**[v0.0.340] 新建团队默认 false=关**；SquadChat 行随门控显隐，成员私聊不受影响）；**mate 对端可达性不丢**（name + sessionId 仍输出，a2a 语义不变）。
 - **产出格式**（成员行 R8）：
   ```
   [squad:agents] 团队当前状态：

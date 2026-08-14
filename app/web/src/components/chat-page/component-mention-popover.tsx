@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useCallback, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { resolveApiBase } from '../../lib/api-base';
+import { FileIcon, FolderIcon } from './icons';
 
 /**
  * MentionItem（镜像 server schema，前端透传不解释）。
@@ -18,9 +19,12 @@ import { resolveApiBase } from '../../lib/api-base';
  *   - address：按 type 不同字段不同（file/skill=path；workitem=kind+id；member=id）
  *   - display：pill 渲染唯一依据（icon/label/badge）
  *   - listView：popover 列表渲染（title/subtitle/icon），运行时短暂消费
+ *   - isDir：file provider 目录命中 true；缺省=文件（member/skill/workitem 不设）
  */
 export interface MentionItem {
   type: string;
+  /** 是否为目录条目（file provider 目录命中 true；缺省=文件，向后兼容） */
+  isDir?: boolean;
   // ─── Address ───
   /** file/skill 路径（workitem/member 不使用此字段） */
   path?: string;
@@ -63,6 +67,8 @@ interface SearchState {
   items: MentionItem[];
   nextCursor?: string;
   loading: boolean;
+  /** 服务端是否截断（命中数超 100 早停）；翻页 append 时保留透传 */
+  truncated?: boolean;
 }
 
 /**
@@ -111,6 +117,8 @@ export function MentionPopover({
           items: append ? [...s.items, ...(data.items ?? [])] : (data.items ?? []),
           nextCursor: data.nextCursor,
           loading: false,
+          // truncated 透传：翻页 append 保留（超限提示持续显示，不阻塞「加载更多」）
+          truncated: data.truncated === true || (append ? s.truncated : false),
         }));
         if (!append) setFocusIndex(0);
       } catch (e) {
@@ -258,30 +266,54 @@ export function MentionPopover({
             {t('mention.noMatch')}
           </div>
         ) : (
-          state.items.map((item, idx) => {
-            // path 可能 undefined（workitem/member），用复合 id 作 key/data-attr
-            const itemId = item.path ?? (item.kind && item.id ? `${item.kind}/${item.id}` : item.id) ?? item.listView.title;
-            return (
-            <button
-              key={itemId}
-              type="button"
-              data-action-key="chat.mention.select"
-              data-item-id={itemId}
-              data-item-type={item.type}
-              onClick={() => onSelect(item)}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
-                idx === focusIndex ? 'bg-[var(--color-accent-surface)]' : 'hover:bg-[var(--surface-2)]'
-              }`}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-fg truncate">{item.listView.title}</div>
-                {item.listView.subtitle && (
-                  <div className="text-[10px] text-muted truncate">{item.listView.subtitle}</div>
+          <>
+            {state.items.map((item, idx) => {
+              // path 可能 undefined（workitem/member），用复合 id 作 key/data-attr
+              const itemId = item.path ?? (item.kind && item.id ? `${item.kind}/${item.id}` : item.id) ?? item.listView.title;
+              // file provider：目录 FolderIcon gold / 文件 FileIcon muted（对齐工作区搜索 ws-ico 样式）；
+              // 非 file provider（skill/member/workitem）保持现状——不渲染 icon，仅文本
+              const isDir = item.isDir === true;
+              return (
+              <button
+                key={itemId}
+                type="button"
+                data-action-key="chat.mention.select"
+                data-item-id={itemId}
+                data-item-type={item.type}
+                onClick={() => onSelect(item)}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
+                  idx === focusIndex ? 'bg-[var(--color-accent-surface)]' : 'hover:bg-[var(--surface-2)]'
+                }`}
+              >
+                {item.type === 'file' && (
+                  <span
+                    className={`inline-flex shrink-0 relative ${isDir ? 'text-gold' : 'text-muted'}`}
+                    data-testid={`mention-item-icon-${isDir ? 'dir' : 'file'}`}
+                  >
+                    {isDir ? <FolderIcon size={13} /> : <FileIcon size={13} />}
+                  </span>
                 )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium text-fg truncate">{item.listView.title}</div>
+                  {/* 下排路径始终展示：file provider 保证根路径 '/' 或 dirname 非空，无条件渲染；
+                      非 file provider 有 subtitle 才渲染（保持现状） */}
+                  {(item.type === 'file' || item.listView.subtitle) && (
+                    <div className="text-[10px] text-muted truncate">{item.listView.subtitle}</div>
+                  )}
+                </div>
+              </button>
+              );
+            })}
+            {/* 服务端 100 早停截断 → 超限提示（i18n；不阻塞「加载更多」滚动翻页） */}
+            {state.truncated && state.items.length > 0 && (
+              <div
+                data-action-key="chat.mention.search-too-many"
+                className="px-3 py-2 text-[10px] text-muted text-center"
+              >
+                {t('mention.searchTooMany')}
               </div>
-            </button>
-            );
-          })
+            )}
+          </>
         )}
       </div>
     </div>

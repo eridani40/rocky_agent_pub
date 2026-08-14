@@ -3,7 +3,7 @@ type: spec
 title: Scripts（运行与打包脚本）
 priority: P0
 status: active
-updated: 2026-07-10
+updated: 2026-08-13
 since: v0.0.1
 related: [[P0]environments.md, ../package/[P0]package_structure.md]
 ---
@@ -16,12 +16,14 @@ related: [[P0]environments.md, ../package/[P0]package_structure.md]
 
 ## 1. 概述
 
-`scripts/` 是**人工调试与发布**的入口（见项目 CLAUDE.md：`scripts/` 仅用于人工调试，自动化测试走 `tests/` 下的 `env_start.sh`）。三个脚本各自 source 对应环境配置：
+`scripts/` 是**人工调试与发布**的入口（见项目 CLAUDE.md：`scripts/` 仅用于人工调试，自动化测试走 `tests/` 下的 `env_start.sh`）。各脚本各自 source 对应环境配置：
 
 ```
-scripts/unit-test.sh  ──source──→ test.env  ──→ 跑全量 UT（bun run test）
-scripts/run-dev.sh    ──source──→ dev.env   ──→ 起开发态应用
-scripts/build-dmg.sh  ──source──→ prod.env  ──→ 打包 dmg / exe 产物
+scripts/unit-test.sh            ──source──→ test.env  ──→ 跑全量 UT（bun run test）
+scripts/run-dev.sh              ──source──→ dev.env   ──→ 起开发态应用
+scripts/build-dmg.sh            ──source──→ prod.env  ──→ 打包 dmg / exe 产物
+scripts/update-app.sh           ──（无 env）──→ 自助更新已安装 app（杀 → 替换 → 重启）
+scripts/cleanup-chrome-debug.sh ──（无 env）──→ Chrome 调试态残留检测（只读检测 + 清理指引）
 ```
 
 脚本只做「source env + 调用对应工具链」，不重复实现业务逻辑。
@@ -33,6 +35,8 @@ scripts/build-dmg.sh  ──source──→ prod.env  ──→ 打包 dmg / exe
 | `unit-test.sh` | `test.env` | 跑全量单元测试 | 终端报告 + 退出码 | `./scripts/unit-test.sh` |
 | `run-dev.sh` | `dev.env` | 启动开发态应用（热重载） | 运行中的 dev 进程 | `./scripts/run-dev.sh` |
 | `build-dmg.sh` | `prod.env` | 打包发布产物 | `*.dmg`（mac）/ `*.exe`（win） | `./scripts/build-dmg.sh` |
+| `update-app.sh` | 无 | 自助更新已安装 app（杀 → 替换 → 重启） | 更新的 `/Applications/<APP_NAME>.app` | `nohup bash scripts/update-app.sh [version] > /tmp/rocky-update.log 2>&1 &` |
+| `cleanup-chrome-debug.sh` | 无 | Chrome 调试态残留检测（只读检测 + 清理指引） | 终端检测报告（无文件产物） | `bash scripts/cleanup-chrome-debug.sh` |
 
 **退出语义统一**：成功退出码 `0`；失败（测试失败、启动失败、打包失败）非 `0`，便于 CI 与脚本串联判断。
 
@@ -61,9 +65,27 @@ scripts/build-dmg.sh  ──source──→ prod.env  ──→ 打包 dmg / exe
   1. `prod.env` 缺失 → exit 1（提示从 `prod.env.example` 拷贝）。
   2. 根 `package.json` 的 `version` 无效（空 / `0.0.0` 占位）→ exit 2（提示先在 `package.json` 设版本号）。
   3. `prod.env` 缺关键字段（`APP_NAME` / `APP_ENV` / `API_PORT` / `WEB_PORT` / `DATA_DIR`）→ exit 2。**签名凭证可留空**（v0.0.1 允许未签名，空则脚本 unset 空签名键让 builder 跳过，不致命）。
-- **动作**：source prod.env → 读根 `package.json` version → 生成 `runtime-config.json`（白名单非密钥键，打进 asar，见 packaging_toolchain §3.6）→ 两段式 build（`vite build` → `web-dist`；`tsc -b` → `dist`）→ `electron-builder`（`--config.extraMetadata.version=<根版本>` 注入版本）产出安装包。
+- **动作**：source prod.env → 读根 `package.json` version → 生成 `runtime-config.json`（白名单非密钥键，打进 asar，见 packaging_toolchain §3.6）→ 两段式 build（`vite build` → `web-dist`；`tsc -b` → `dist`）→ **离线准备（`[v0.0.342]` `export NO_UPDATE_NOTIFIER=1` 禁 update-notifier 联网检查；检查 `app/electron/node_modules/electron/dist/version`，缺失则 electron `install.js` 本地解压命中 `~/Library/Caches/electron` 缓存 zip 零联网，仍失败 exit 3；详见 packaging_toolchain §3.10）** → `electron-builder`（`--config.extraMetadata.version=<根版本>` 注入版本 + `--config.electronDist=<本地 dist>` 走 custom unpacked copyDir 分支跳过下载/SHASUMS 校验）产出安装包。
 - **产物**：macOS → `rocky_agent-<version>-arm64.dmg`；Windows → `*.exe` 为同流程的平台变体；落 `${BUILD_OUT_DIR}`（缺省 `release/`）。
 - **退出码**：前置校验失败 1/2；产物缺失 3/4；否则打包工具退出码透传。
+
+### 3.4 `update-app.sh`
+
+- **source**：无（不读任何 `.env`——脚本只做「杀 app → 替换 .app → 重启」，不涉环境配置）。
+- **前置**：`release/` 下有 dmg（`rocky_agent-<version>-arm64.dmg`；不传 version 取最新）。
+- **动作**：① 缓冲 2s（让调用方 bash 返回）→ ② 杀 `/Applications/rocky_agent.app`（pkill + 等待退出最多 5s + `pkill -9` 兜底含 Helper）→ ③ `hdiutil attach` 挂载 dmg → ④ `rm -rf` + `cp -R` 替换 .app → ⑤ `hdiutil detach` → ⑥ **`sync` + `sleep 3` 等文件落盘**（`[v0.0.337]` 修复重启白屏：cp ~290MB 后立即 `open` 会读到未写完的文件）→ ⑦ `open` 重启 app。
+- **产物**：更新的 `/Applications/rocky_agent.app` + 日志 `/tmp/rocky-update.log`。
+- **退出码**：dmg 缺失 / .app 不在 dmg 中 → 非 0。
+- **边界**：**必须 `nohup bash scripts/update-app.sh [version] > /tmp/rocky-update.log 2>&1 &` 脱离 app 进程运行**（否则 app 被 kill 时脚本一起死）；不读 prod.env、不改 app 自身启动逻辑；`[v0.0.337]` 起安装后强制 `sync` + 3s 才 `open`。
+
+### 3.5 `cleanup-chrome-debug.sh`（[v0.0.330]）
+
+- **source**：无（不读任何 `.env`——只读检测，不写文件不改环境）。
+- **用途**：browser attach（chrome://inspect 远调模式）close 后，用户 Chrome 可能残留调试态（9222 端口监听 / 「Chrome 正受到自动测试软件的控制」提示条 / Allow remote debugging 仍勾选）——本脚本检测残留并输出可照做的清理指引。
+- **动作**（三段只读检测 + 指引）：① `lsof -iTCP:9222 -sTCP:LISTEN` 检测 9222 监听（仅报告进程，**不 kill**）；② 检测 `DevToolsActivePort` 文件（mac `~/Library/Application Support/Google/Chrome/` + linux `~/.config/google-chrome|chromium/`，读首行端口）；③ 输出清理指引（chrome://inspect 取消勾选 Allow remote debugging → Chrome 自动重启回非调试；或完全退出 Chrome 重启）。
+- **产物**：终端检测报告（无文件产物）。
+- **退出码**：0（纯检测无失败分支）。
+- **边界**：**不 kill 用户 Chrome**（丢标签页/会话不可接受）——能力边界实证：对用户已开 Chrome 的调试态无编程关闭 API（change_plan §12），脚本只给指引；一次性人工清理工具，不进自动化流程。
 
 ## 4. 设计决策
 
@@ -102,6 +124,9 @@ scripts/build-dmg.sh  ──source──→ prod.env  ──→ 打包 dmg / exe
 
 # 打包发布（mac 出 dmg）
 ./scripts/build-dmg.sh
+
+# 自助更新已安装 app（脱离 app 进程运行）
+nohup bash scripts/update-app.sh > /tmp/rocky-update.log 2>&1 &
 ```
 
 `unit-test.sh` 骨架（仅示意契约，非实现）：
@@ -128,7 +153,7 @@ bun run test
 
 | 零件 | 归属 |
 |------|------|
-| 三脚本的用途/source/产物/退出语义、命名与存在性约定 | 本文件 ✅ |
+| 五脚本的用途/source/产物/退出语义、命名与存在性约定 | 本文件 ✅ |
 | 三环境语义与 `.env` schema、`.example` 模板 | `[P0]environments.md` |
 | `env_start.sh` / `env_shutdown.sh`（自动化启停） | api-testing / e2e-testing skill |
 | `run_all.sh` / `collect.sh` / `RESUME` / `_DONE` / timing | tests/api 与 tests/e2e 自动化执行协议（本文件 §6a 文档化归属） |

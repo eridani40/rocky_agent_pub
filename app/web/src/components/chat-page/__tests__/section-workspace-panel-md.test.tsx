@@ -31,6 +31,7 @@ const {
   watchMock,
   unwatchMock,
   watchSetMock,
+  statWorkspaceFileMock,
   chatApiPath,
 } = vi.hoisted(() => ({
   getWorkspaceTreeMock: vi.fn(),
@@ -41,6 +42,10 @@ const {
   watchMock: vi.fn(),
   unwatchMock: vi.fn(),
   watchSetMock: vi.fn(),
+  // [v0.0.339] 文本分流 stat：缺省 reject（模拟 stat 失败 → 降级内置；不真调 HTTP）
+  statWorkspaceFileMock: vi.fn(async () => {
+    throw new Error('no http in ut');
+  }),
   chatApiPath: require('node:path').resolve(__dirname, '../../../lib/chat-api.ts'),
 }));
 
@@ -55,6 +60,9 @@ vi.mock(chatApiPath, () => ({
   watchWorkspaceDir: (...args: unknown[]) => watchMock(...args),
   unwatchWorkspaceDir: (...args: unknown[]) => unwatchMock(...args),
   watchWorkspaceSet: (...args: unknown[]) => watchSetMock(...args),
+  // [v0.0.339] statWorkspaceFile 直接传 mock（带实现 mock 推断为无参签名，
+  // spread unknown[] 包装触发 TS2556——与 open-local-path.test.ts 一致）
+  statWorkspaceFile: statWorkspaceFileMock,
 }));
 
 import { SectionWorkspacePanel } from '../section-workspace-panel';
@@ -81,6 +89,7 @@ beforeEach(() => {
   watchMock.mockReset();
   unwatchMock.mockReset();
   watchSetMock.mockReset();
+  statWorkspaceFileMock.mockReset();
   watchMock.mockResolvedValue({ ok: true });
   unwatchMock.mockResolvedValue({ ok: true });
   watchSetMock.mockResolvedValue({ ok: true });
@@ -155,12 +164,13 @@ describe('SectionWorkspacePanel v0.0.241 多格式拦截扩展', () => {
     expect(openWorkspaceItemMock).not.toHaveBeenCalled();
   });
 
-  it('.csv 文件 → 命中拦截走内置 editor（结构化格式）', async () => {
+  it('.csv 文件 → [v0.0.339] 无条件系统打开（CSV/TSV 不内置：openWorkspaceItem kind=file，不 stat 不读）', async () => {
     getWorkspaceTreeMock.mockResolvedValue(treeWith({ name: 'data.csv', path: 'data.csv', type: 'file' }));
     render(<SectionWorkspacePanel sessionId="sess-1" />);
     await clickOpenFile();
-    await vi.waitFor(() => expect(readWorkspaceFileMock).toHaveBeenCalledWith('sess-1', { path: 'data.csv' }));
-    expect(openWorkspaceItemMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(openWorkspaceItemMock).toHaveBeenCalledWith('sess-1', { path: 'data.csv', kind: 'file' }));
+    expect(readWorkspaceFileMock).not.toHaveBeenCalled();
+    expect(statWorkspaceFileMock).not.toHaveBeenCalled();
   });
 
   it('.env 文件 → 命中拦截（特判 basename 整体匹配 .env）', async () => {

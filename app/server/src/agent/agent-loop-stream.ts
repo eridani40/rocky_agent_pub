@@ -14,6 +14,7 @@
  * thinking_delta→reasoning_block_*；tool_call_delta→tool_call_*；usage→usage_block；finish→关 active block
  */
 import { ulid } from '../config/ulid';
+import { normalizeContentBlocks } from './tools/send-message-tool';
 import type {
   ContentBlock,
   TextBlock,
@@ -244,11 +245,17 @@ export class StreamConsumer {
         }),
       );
       const args = safeParseArgs(a.argumentsBuf);
+      // [v0.0.331 P1] 落库前 normalize send_message 的 arguments.content（缺 type 补 'text'，
+      // 治本：新数据永不空白 + 切断 LLM 上下文自增强）。仅 send_message 且非 _raw 半截路径生效。
+      const finalArgs =
+        a.toolName === 'send_message' && args._raw === undefined
+          ? { ...args, content: normalizeContentBlocks(args.content) }
+          : args;
       const block: ToolCallBlock = {
         type: 'tool_call',
         id: a.toolCallId,
         name: a.toolName,
-        arguments: args,
+        arguments: finalArgs,
       };
       this.blocks.push(block);
     }
@@ -291,7 +298,7 @@ export class StreamConsumer {
   }
 }
 
-/** 容错解析 tool_call arguments（拼接的 JSON 片段）；解析失败返回空对象 */
+/** 容错解析 tool_call arguments（拼接的 JSON 片段）；解析失败返回 {_raw, _rawTruncated:true} */
 function safeParseArgs(buf: string): Record<string, unknown> {
   if (!buf) return {};
   try {
@@ -302,5 +309,6 @@ function safeParseArgs(buf: string): Record<string, unknown> {
   } catch {
     // 解析失败：保留 raw（容错）
   }
-  return { _raw: buf };
+  // [v0.0.331 P1'] 加 _rawTruncated 标记：前端 D3 据此显示「发送失败（参数截断）」
+  return { _raw: buf, _rawTruncated: true };
 }

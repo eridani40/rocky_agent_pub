@@ -52,15 +52,6 @@ import type {
 import { errorResult, ToolErrorCode } from './types';
 import { type ApprovalManager, approvalManager as defaultApprovalManager } from './approval-manager';
 import type { ChildProcessRegistry } from './child-process-registry';
-// worker pool 分流辅助（isWorkerableTool + runViaWorker + runViaTool + ToolRunResultLike）
-import {
-  isWorkerableTool,
-  runViaWorker,
-  runViaTool,
-  type ToolRunResultLike,
-} from './engine-worker-dispatch';
-export { isWorkerableTool } from './engine-worker-dispatch';
-import type { ToolWorkerPool } from './worker-pool/pool';
 // [v0.0.130.hang] 超时常量 + resolveEffectiveTimeout + formatTimeoutText 拆到 engine-timeout.ts
 // （避免本文件继续膨胀）；re-export 保持对外符号位置不变（caller 仍从 '../engine' 引用）。
 import { TIMEOUT_GRACE_MS, TOOL_TIMEOUT_CEILING_MS, formatTimeoutText, resolveEffectiveTimeout } from './engine-timeout';
@@ -111,28 +102,13 @@ export class ToolExecutionEngine {
   private readonly approvalManager: ApprovalManager;
 
   /**
-   * [v0.0.307] worker 线程池（可选注入）。
-   * 注入后白名单纯 IO 工具（read/write/edit/glob/grep/skill）执行挪线程，
-   * 避免大 grep/read 阻塞 event loop。缺省 undefined → 全部走主线程原路径（向后兼容）。
-   */
-  private readonly _workerPool: ToolWorkerPool | undefined;
-
-  /** [v0.0.307] 只读访问 workerPool（UT 验证注入用） */
-  get workerPool(): ToolWorkerPool | undefined {
-    return this._workerPool;
-  }
-
-  /**
    * 构造引擎。
    *
    * @param approvalManager 可选，默认使用进程级单例（bootstrap 零参构造仍可用）；
    *                        UT 可注入 fresh ApprovalManager 保证隔离。
-   * @param workerPool      [v0.0.307] 可选 worker 线程池。注入后白名单工具走 pool.submit，
-   *                        缺省 undefined → 全部走主线程原路径（向后兼容）。
    */
-  constructor(approvalManager?: ApprovalManager, workerPool?: ToolWorkerPool) {
+  constructor(approvalManager?: ApprovalManager) {
     this.approvalManager = approvalManager ?? defaultApprovalManager;
-    this._workerPool = workerPool;
   }
 
   /**
@@ -286,13 +262,8 @@ export class ToolExecutionEngine {
     const backstopMs = Math.min(effectiveTimeoutMs + TIMEOUT_GRACE_MS, TOOL_TIMEOUT_CEILING_MS);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      // 分流：白名单纯 IO 工具 + workerPool 注入 → 走 worker 线程池
-      // worker 侧无独立 timer，超时仍由主线程 backstop race 控制（D5 约束）
-      const useWorker = this._workerPool && isWorkerableTool(call.name);
       // runPromise 在 try 内创建：工具 run 若同步抛错也被 catch 转 RUNTIME_ERROR
-      const runPromise = useWorker
-        ? runViaWorker(this._workerPool!, call, ctx)
-        : runViaTool(tool, call, ctx);
+      const runPromise = tool.run(call.arguments as ToolInput, ctx);
       const timeoutPromise = new Promise<typeof TIMEOUT_SENTINEL>((resolve) => {
         timer = setTimeout(() => resolve(TIMEOUT_SENTINEL), backstopMs);
       });

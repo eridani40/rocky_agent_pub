@@ -268,11 +268,19 @@ interface AgentManager {
 ```typescript
 send_message({
   target: AgentRef | string,    // 完整 AgentRef，或 sessionId / 别名字串（"parent"/"squadchat"/"leader"/角色 name）
-  content: ContentBlock[],
+  content: ContentBlock[],      // 权威形态：array of {type:"text", text:string}；容错见下 [v0.0.331]
   needReply?: boolean,          // [v0.0.68 R5] 可选，default:true（schema default + engine default-fill 注入）
   inReplyTo?: string            // 关联原 message.id（thread；约定见 a2a_protocol §4.3）
 }): Promise<{ messageId: string }>
 ```
+
+> **[v0.0.331] content 容错契约（`normalizeContentBlocks`，语义唯一来源 = `app/server/src/agent/tools/send-message-tool.ts`）**：LLM 实际传参不总是权威数组形态（真实 glm/deepseek 17-20% 传缺 type 的 `[{"text":"..."}]` 或 string/object），工具侧统一经 `normalizeContentBlocks(rawContent)` 收敛为 `ContentBlock[]`：
+> - array：每块校验 object + `text` 是 string，**缺 `type` 补 `type:'text'`**（未知 type 不透传，避免脏数据落库）
+> - string → `[{type:'text', text:str}]`
+> - object（非数组）→ `.item ?? obj` 解包；解包后仍单 block object → 包数组
+> - 其他（number/null/undefined 等）→ `{ error }` 形态（调用方处理，不抛）
+> - 工具 desc 含字面示例 + 强调 **Each block MUST include the "type" field**（防再生，对 glm/deepseek 部分有效）
+> - **落库前同样 normalize**：agent-loop-stream `closeActive()` + replay-collector `reconstitute()` 在 `send_message` 且 arguments 非 `_raw` 时调同一函数补 `type:'text'`（新数据永不空白；`_raw` 半截路径由 `_rawTruncated` 标记，不补 content）。normalize 后进入 LLM 上下文的 tool_use.input 为补全形态，语义不变。
 
 > **[v0.0.68 R5]** needReply 从「★ 必填」改可选 + `default:true`：
 > - schema 层：`required` 移出 `needReply`；`properties.needReply.default = true`
@@ -296,6 +304,8 @@ send_message({ target, content, needReply, inReplyTo? }):
 ```
 
 target.loop drain 看到 `sender.source = "agent"` → 按 a2a_protocol §4.1 处理（`needReply=true` 时必回；通过 `send_message(to = sender.agent.ref)` 回）。
+
+**信封显示名 targetName 语义（[v0.0.340 决策 1]）**：工具结果含 targetName（供前端 out 信封渲染），`resolveTargetDisplayName` 优先级 = ① AgentRef.name（LLM 已填）→ ② **memberStore 反查实时成员名**（target session 有 squadId+memberId 且 `rtc.memberStore`；成员名权威源 = memberStore，`getMember(squadId, memberId)?.name` 非空即返回）→ ③ session.title（subagent/squad chat/standalone 等 non-squad-member fallback）→ ④ undefined。**改名后信封显示新名、与 roster 永远一致**（不再读创建时 title 快照）；member 反查失败（member 已删/读失败）静默 fallback 不抛错；不改 target 解析/路由逻辑（名字不参与寻址）。
 
 ### 5.3 拓扑编码
 

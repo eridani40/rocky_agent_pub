@@ -105,11 +105,13 @@ function wrapClient(raw: any): McpClient & WrappedClient {
   };
 }
 
-/** 包裹 transport，暴露统一 close */
+/** 包裹 transport，暴露统一 close + pid（MCP 子进程 pid，attach 台账锚点；拿不到 undefined） */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function wrapTransport(raw: any) {
   return {
     close: async () => raw.close?.(),
+    // 现有代码已用 t._process 收 stderr（createStdioTransport），pid 同源；拿不到时 undefined（不抛）
+    pid: typeof raw?._process?.pid === 'number' ? raw._process.pid : undefined,
     // SDK 内部需要原始 transport 对象
     raw,
   };

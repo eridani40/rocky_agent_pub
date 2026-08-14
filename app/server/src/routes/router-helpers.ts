@@ -96,8 +96,9 @@ export function matchSessionPath(pathname: string): {
   //   file/save 含 '/'：放在 alternation 最前并替换为 '-'，sub 归一为 workspace_file-save
   // [v0.0.271] 加 watch-set（声明式替换关注集合，api §2.6.5）
   // [v0.0.320] 加 search（递归全量搜索文件名/文件夹名，api version_logs v0.0.320 §1.3）
+  // [v0.0.339] 加 stat（GET 文件大小判定，api version_logs v0.0.339）
   const ws = pathname.match(
-    /^\/session\/([^/]+)\/workspace\/(file\/save|tree|open|pick-directory|watch|watch-set|unwatch|save-image|file|search)$/,
+    /^\/session\/([^/]+)\/workspace\/(file\/save|tree|open|pick-directory|watch|watch-set|unwatch|save-image|file|search|stat)$/,
   );
   if (ws) return { id: ws[1]!, sub: `workspace_${ws[2]!.replace('/', '-')}` };
   // [v0.0.21] /session/:id/debug/system-prompt（test gate）

@@ -17,11 +17,11 @@ import type {
   BrowserLaunchOptions,
   PersistedInstanceRecord,
 } from './types';
-import type { BrowserHandle, ExecuteCtx, LaunchResult, ModeImpl, ModeImplEnv } from './mode-impl';
+import type { BrowserHandle, CloseResult, ExecuteCtx, LaunchResult, ModeImpl, ModeImplEnv } from './mode-impl';
 import { resolveUserDataDir, DEFAULT_PROFILE_NAME } from './profile';
 import { defaultSpawn, type WorkerSpawnDeps } from './node-worker-driver';
 import { spawnPersistentWorker, launchConfirm, waitExit, withAbort } from './persistent-worker';
-import { persistInstance, unpersistInstance, isPidAlive, killProcessGroupByPid, toRecord, errMsg } from './instance-record';
+import { isPidAlive, killProcessGroupByPid, toRecord, errMsg } from './instance-record';
 import { formatSnapshotText } from '../snapshot-store';
 
 const LAUNCH_CONFIRM_TIMEOUT_MS = 20_000;
@@ -37,7 +37,7 @@ export interface WorkerModeImplOptions {
 export interface WorkerHandle extends BrowserHandle {
   /** managed-profile: 持久目录; headless: mkdtemp 临时目录 */
   userDataDir?: string;
-  /** managed-profile: 持久目录名（persistInstance 记录用） */
+  /** managed-profile: 持久目录名（台账记录用） */
   profileName?: string;
   /** headless/managed-profile 独占端口（instance 生命周期内固定） */
   cdpPort?: number;
@@ -113,10 +113,10 @@ export class WorkerModeImpl implements ModeImpl {
     handle.chromePid = launchOutcome.chromePid; // 确认帧携带（旧 worker undefined 兼容）
     handle.state = 'ready';
     try {
-      persistInstance(env.dataDir, toRecord(handle));
+      env.ledger.insert(toRecord(handle));
       handle.persisted = true;
     } catch (e) {
-      console.warn(`[worker-mode-impl] persistInstance 失败（best-effort）: ${errMsg(e)}`);
+      console.warn(`[worker-mode-impl] ledger.insert 失败（best-effort）: ${errMsg(e)}`);
     }
     return { ok: true, handle, text: `launched ${opts.mode}` };
   }
@@ -148,7 +148,7 @@ export class WorkerModeImpl implements ModeImpl {
     }
   }
 
-  async close(handle: BrowserHandle, env: ModeImplEnv): Promise<void> {
+  async close(handle: BrowserHandle, env: ModeImplEnv): Promise<CloseResult> {
     const wh = handle as WorkerHandle;
     if (wh.state !== 'dead' && wh.worker) {
       try {
@@ -180,11 +180,12 @@ export class WorkerModeImpl implements ModeImpl {
       wh.cdpPort = undefined;
     }
     if (wh.persisted) {
-      safeCleanup(handle.key, 'unpersistInstance', () => unpersistInstance(env.dataDir, handle.key));
+      safeCleanup(handle.key, 'ledger.delete', () => env.ledger.delete(handle.key));
       wh.persisted = false;
     }
     wh.worker = undefined;
     handle.state = 'dead'; // 幂等：二次 close 全字段已清 → no-op
+    return { ok: true }; // v0.0.336 CloseResult：worker close 全 safeCleanup best-effort 不抛 → ok
   }
 
   cleanupOrphan(rec: PersistedInstanceRecord, env: ModeImplEnv): void {
@@ -195,8 +196,8 @@ export class WorkerModeImpl implements ModeImpl {
     } else if (isPidAlive(rec.workerPid)) {
       killProcessGroupByPid(rec.workerPid);
     }
-    if (rec.mode === 'headless') rmSync(rec.userDataDir, { recursive: true, force: true });
-    unpersistInstance(env.dataDir, rec.key);
+    if (rec.mode === 'headless' && rec.userDataDir) rmSync(rec.userDataDir, { recursive: true, force: true });
+    env.ledger.delete(rec.key);
   }
 
   /** screenshot 落盘（INV-157-1/3）：decode base64 JSON → ctx.snapshot.save → 路径文本 */

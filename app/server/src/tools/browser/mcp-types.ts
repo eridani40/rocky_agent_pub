@@ -56,6 +56,8 @@ export interface StdioTransportOptions {
 /** transport 句柄（只暴露 close；连接由 client.connect 完成） */
 export interface McpTransport {
   close(): Promise<void>;
+  /** MCP 子进程 pid（v0.0.334 B5：attach 台账锚点，孤儿 MCP 代理回收用；可选字段旧 mock 不破坏） */
+  pid?: number;
 }
 
 /** stderr 诊断收集器（pipe 模式由 factory 注入；attach_failed 归因用） */

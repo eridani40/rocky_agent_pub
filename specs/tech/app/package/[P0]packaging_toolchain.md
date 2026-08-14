@@ -126,6 +126,25 @@ scripts/build-dmg.sh ──source──→ prod.env ──→ electron-builder �
 - 故 `②c`（better-sqlite3）与 `②d`（posix）形态同（node-gyp direct Electron ABI rebuild）但失败语义异：硬依赖 exit 1 / 未激活 warn+skip。
 **反例**：若走 `npx @electron/rebuild`，node-abi 不认 electron 42 ABI → rebuild 必败；若 posix rebuild 失败仍 warn+skip（误抄 ②c 语义），packaged 主进程 `require('posix')` 崩 → bash nofile 抬升失效 → "第一次 bash 就坏"未救急。
 
+### 3.10 离线打包（v0.0.342）：electronDist 本地化 + NO_UPDATE_NOTIFIER
+
+**结论**：electron-builder 默认打包链路有**两个固定联网点**，v0.0.342 起 `build-dmg.sh` 根治——断网/弱网可完成打包，不依赖每次联网下载：
+1. **update-notifier（CLI 启动即联网）**：electron-builder CLI 每次启动跑 `cli-util.js checkIsOutdated → simple-update-notifier` 查 npm registry，弱网/断网下卡住。→ 脚本顶部 `export NO_UPDATE_NOTIFIER=1` 禁用。
+2. **electron zip 下载（unpack 必经 @electron/get）**：electron-builder 默认 unpack **总走 `@electron/get` 下载 electron zip——即便本地 `node_modules/electron/dist` 已存在**；且 `@electron/get` 对缓存 zip 仍**每次下载 `SHASUMS256.txt` 做校验**（cacheMode: Bypass）→ 每次打包必联网。→ 显式 `--config.electronDist=<本地已解压 dist 绝对路径>`，builder 走「custom unpacked Electron distribution」**copyDir 分支，完全跳过下载/SHASUMS 校验**。
+
+**dist 缺失兜底（install.js 本地解压，幂等）**：`build-dmg.sh` ③ 前检查 `app/electron/node_modules/electron/dist/version`；缺失则跑 electron `install.js` 本地解压——命中 `~/Library/Caches/electron` 缓存 zip 则**零联网**。install.js 读**小写** `electron_config_cache`（npm config 风格，install.js:46）；`@electron/get` 不消费大写 `ELECTRON_CACHE`，故显式传默认缓存路径（与 @electron/get env-paths 默认 `~/Library/Caches/electron` 一致）。`|| true`：`set -e` 下 install.js 失败（无缓存 zip 且断网）不提前退出，由下方 `[ ! -f dist/version ]` 二次检查打印可操作 ERROR（exit 3）——不静默失败。
+
+**断网/弱网使用说明**：
+- **前提**：本地已有已解压 electron dist（`app/electron/node_modules/electron/dist/version`）或缓存 zip（`~/Library/Caches/electron/electron-v<ver>-darwin-<arch>.zip`）。
+- **全新机器无缓存**：需先在有网环境跑一次 `bun install`（或 `node app/electron/node_modules/electron/install.js`）产生 dist/缓存；此后断网可打包。
+- dist 缺失且无缓存 zip → exit 3 明确报错并给出可操作指引，不假装成功。
+
+**环境变量**：`ELECTRON_CONFIG_CACHE`（**小写**，npm config 风格）指向 `~/Library/Caches/electron`——electron `install.js` 读它定位缓存；`@electron/get` 默认 env-paths 同路径。大写 `ELECTRON_CACHE` 不被 install.js 消费。
+
+代码路径：`scripts/build-dmg.sh`（顶部 `export NO_UPDATE_NOTIFIER=1` → ③ 前 `ELECTRON_DIST_DIR` 检查 + install.js 兜底 → `ELECTRON_DIST_ABS` 计算 → electron-builder `--config.electronDist="$ELECTRON_DIST_ABS"`）→ electron-builder「custom unpacked Electron distribution」copyDir 分支。
+
+**反例**：若本地已有 dist 但不传 `--config.electronDist`，builder 仍走 `@electron/get` 下载 zip + 每次拉 `SHASUMS256.txt` 校验 → 断网必败；若只禁 update-notifier 不 electronDist，下载卡点仍在。
+
 ## 4. 示例
 
 ### 4.1 `app/electron/electron-builder.yml`（精简，关键字段不省略）
@@ -179,8 +198,9 @@ dmg:
      · posix（node-gyp direct，**exit 1** 语义——packaged 主进程 raise-nofile 硬依赖，见 §3.9）
 ③ vite build（在 app/web/，产物 → app/electron/web-dist）
 ④ 编译主进程 TS（app/electron/src → app/electron/dist，含 raise-nofile.ts）
-⑤ electron-builder（读 electron-builder.yml + files 映射 app/plugins/dist → node_modules/@app/plugins
-   + --config.extraMetadata.version=<根版本> + 环境变量）
+⑤ electron-dist 离线准备（v0.0.342）：`export NO_UPDATE_NOTIFIER=1`（禁 update-notifier 联网检查）；检查 `app/electron/node_modules/electron/dist/version`，缺失则 `electron install.js` 本地解压（命中 `~/Library/Caches/electron` 缓存 zip 零联网；失败不静默，二次检查 exit 3）；计算 `ELECTRON_DIST_ABS`（见 §3.10）
+⑥ electron-builder（读 electron-builder.yml + files 映射 app/plugins/dist → node_modules/@app/plugins
+   + --config.extraMetadata.version=<根版本> + --config.electronDist=<本地 dist，走 custom unpacked copyDir 分支跳过下载/SHASUMS> + 环境变量）
    ▼
    产物：${BUILD_OUT_DIR}/rocky_agent-<version>-arm64.dmg（mac）/ *.exe（win）
 ```
@@ -222,7 +242,7 @@ dmg:
 
 | 零件 | 归属 |
 |------|------|
-| electron-builder 选型、dmg/exe 产物形态、asar 处理、builder 配置字段归属、产物目录约定、runtime-config.json 注入机制（§3.6）、版本号注入机制（§3.5）、plugin 编译步作为 build 管线一步 + asar 映射（§3.7）、`app/server` 编译期资源镜像（`.md`/`.yaml` 等非 `.ts` 资源 cp + 校验，§3.8） | 本文件 ✅ |
+| electron-builder 选型、dmg/exe 产物形态、asar 处理、builder 配置字段归属、产物目录约定、runtime-config.json 注入机制（§3.6）、版本号注入机制（§3.5）、plugin 编译步作为 build 管线一步 + asar 映射（§3.7）、`app/server` 编译期资源镜像（`.md`/`.yaml` 等非 `.ts` 资源 cp + 校验，§3.8）、离线打包 electronDist 本地化 + NO_UPDATE_NOTIFIER（§3.10） | 本文件 ✅ |
 | 内置 plugin 编译产物形态 / server 外置 / loader 双模式 / asar 动态加载可行性 | `../../plugin_system/[P0]packaged_plugin_loading.md` |
 | `build-dmg.sh` 的脚本契约（用途/source/前置/退出码） | `app/envs/[P0]scripts.md` §3.3 |
 | `prod.env` 的 schema（白名单键 / 签名键 / BUILD_OUT_DIR） | `app/envs/[P0]environments.md` §3.4 |

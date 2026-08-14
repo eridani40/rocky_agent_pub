@@ -19,7 +19,7 @@ import { MentionNode, serializeEditorContent, PROVIDER_LABELS, addressAttrsFromI
 import type { MentionAttrs } from './chat-composer-extension';
 import { MentionPopover, type MentionItem, type MentionProviderMeta } from './component-mention-popover';
 import { resolveEnterAction } from './chat-composer-keys';
-import { detectMentionTrigger } from './chat-composer-helpers';
+import { detectMentionTrigger, getInsertedText, scanMentionQuery } from './chat-composer-helpers';
 import { processImagePaste } from './paste-image-handler';
 import { useChatDraft } from './use-chat-draft';
 
@@ -152,9 +152,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         return true;
       },
     },
-    onUpdate: ({ editor: ed }) => {
-      // 检测 @ 触发：检查当前光标前是否有 @ 且未被空格中断
-      detectTrigger(ed);
+    onUpdate: ({ editor: ed, transaction }) => {
+      // 双层门控（插入文本门控 + 面板状态门控）：
+      // 1. 插入文本门控（触发源）：getInsertedText 提取本次插入字符 → detectMentionTrigger
+      //    决定「能否触发」——insertedText 含 @ 才可能触发；不含 @ 返回 null（不触发）
+      // 2. 面板状态门控（决定是否关闭）：detectTrigger 函数式 setTrigger 读 prev 面板状态
+      //    面板开着时输入非 @ 字符 → 保留面板仅刷新 query（UC-4）；面板关着 → 真正 null
+      const insertedText = getInsertedText(transaction);
+      detectTrigger(ed, insertedText);
       // [v0.0.267] 编辑即写草稿缓存（空内容由 saveDraft 自动清除）
       saveDraft(ed);
     },
@@ -174,10 +179,27 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // 原 initialContent effect（ref guard + empty check + queueMicrotask 注入）移入 useChatDraft。
   const { saveDraft, clearDraft } = useChatDraft(editor, sessionId, initialContent);
 
-  /** 检测 @ 触发（核心扫描抽到 detectMentionTrigger 纯函数；本处负责 setTrigger）。 */
-  const detectTrigger = useCallback((ed: NonNullable<typeof editor>) => {
-    const query = detectMentionTrigger(ed);
-    setTrigger(query === null ? null : { query });
+  /**
+   * 检测 @ 触发（双层门控第二层：面板状态门控）。
+   * 函数式 setTrigger 读 prev 面板状态：
+   *   - query !== null（插入文本含 @）→ { query }（触发/重触发，query 实时更新）
+   *   - 不含 @ 但面板开着（prev !== null）→ { query: scanMentionQuery(ed) } 保留面板仅刷新 query（UC-4）
+   *   - 不含 @ 且面板关着 → null（不触发）
+   * 插入文本门控（detectMentionTrigger）在 onUpdate 层已完成，本处只管「要不要关闭」。
+   */
+  const detectTrigger = useCallback((ed: NonNullable<typeof editor>, insertedText: string) => {
+    const query = detectMentionTrigger(ed, insertedText);
+    setTrigger((prev) => {
+      // 插入文本含 @ → 触发/重触发（query 实时更新）
+      if (query !== null) return { query };
+      // 不含 @ 但面板开着：光标前仍有 @ → 保留面板仅刷新 query（UC-4）；@ 已被删 → 关面板
+      if (prev !== null) {
+        const refreshed = scanMentionQuery(ed);
+        return refreshed !== null ? { query: refreshed } : null;
+      }
+      // 不含 @ 且面板关着 → 不触发
+      return null;
+    });
   }, []);
 
   /** 发送消息（序列化 editor → 字符串） */

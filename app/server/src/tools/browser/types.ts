@@ -48,15 +48,13 @@ export interface SnapshotResult {
  * 浏览器连接选项（driver.connect 入参）。
  * mode ①② 必填 executablePath（或自动发现）/ 可选 headless；
  * mode ②③ 用 profileName 定位持久目录；
- * mode ③ 用 cdpUrl 作为 fallback。
+ * mode ③ 仅 autoConnect（chrome://inspect 远调模式，无需端点）。
  */
 export interface BrowserConnectOptions {
   /** mode ②③：profile 名（持久目录 / attach 定位） */
   profileName?: string;
   /** mode ①②（与 profile 正交）。true=无头 */
   headless?: boolean;
-  /** mode ③ fallback（用户已手动 --remote-debugging-port） */
-  cdpUrl?: string;
   /** mode ①② chrome 路径（覆盖自动发现） */
   executablePath?: string;
   /** mode ③ attach 非默认 profile 时透传 --userDataDir（定位 Brave/Edge 等） */
@@ -187,7 +185,7 @@ export class BrowserError extends Error {
 
 // ============================================================
 // [v0.0.264] Browser Instance Manager 类型（常驻实例 + 持久 worker）
-// [v0.0.266] attach 纳入：mode 扩展 'attach'，worker-based 字段可选 + session/cdpUrl 承载
+// [v0.0.266] attach 纳入：mode 扩展 'attach'，worker-based 字段可选 + session 承载
 // [v0.0.266 T3] BrowserInstance 迁 mode-impl.ts（BrowserHandle + impl 私有扩展）
 // ============================================================
 
@@ -208,13 +206,16 @@ export interface WorkerSessionState {
   lastRefs: Record<string, RefInfo>;
 }
 
-/** browser-instances.json 记录条目（开机自检/残留清理数据锚点；不存运行时 worker/state） */
+/** browser_instances 台账记录条目（开机自检/残留清理数据锚点；不存运行时 worker/state） */
 export interface PersistedInstanceRecord {
   key: string;
-  mode: 'headless' | 'managed-profile';
+  /** 三模式统一入台账（v0.0.334 B：attach 的 MCP 子进程也入台账） */
+  mode: BrowserMode;
   profileName?: string;
-  userDataDir: string;
-  cdpPort: number;
+  /** worker-based 必填（headless 临时目录 / managed 持久目录）；attach 无（空） */
+  userDataDir?: string;
+  /** worker-based 必填（CDP 端口）；attach 无（空） */
+  cdpPort?: number;
   workerPid: number;
   /** chrome 进程 pid（v0.0.272 起 launch 确认帧上报；旧记录无此字段=undefined，孤儿判定走 ppid 兼容） */
   chromePid?: number;
@@ -226,7 +227,5 @@ export interface BrowserLaunchOptions {
   mode: 'headless' | 'managed-profile' | 'attach';
   /** 仅 managed-profile 有意义 */
   profileName?: string;
-  /** attach 连接端点（缺省 → DEFAULT_ATTACH_CDP_URL driver 内部兜底）；仅 attach 有意义 */
-  cdpUrl?: string;
   executablePath?: string;
 }

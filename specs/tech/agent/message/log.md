@@ -1,13 +1,18 @@
 ---
 type: log
 title: Message KB 变更记录
-updated: 2026-07-26
+updated: 2026-08-12
 ---
 
 # Message KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-12 · v0.0.331（ToolCallBlock arguments 半截容错 `_rawTruncated` + send_message 落库前 normalize）
+
+- **`[P0]agent_message_interface.md §4.6`**：ToolCallBlock 补两段——① **arguments 半截容错**：`safeParseArgs`（agent-loop-stream.ts + replay-collector.ts）parse 失败返回 `{ _raw: <原始buf>, _rawTruncated: true }`（`_raw` 不进 LLM 上下文；`_rawTruncated` 供前端显示「发送失败（参数截断）」而非空白）；② **send_message 落库前 normalize（[v0.0.331 P1]）**：`closeActive()` / `reconstitute()` 对 `name==='send_message'` 且无 `_raw` 时调 `normalizeContentBlocks` 补缺 type block（权威形态契约见 `multi_agent/[P1]subagent_derivation.md §5.1`）——修复 out 信封正文按 `type==='text'` 过滤全滤导致的展开空白。
+- 详情：`specs/tech/version_logs/v0.0.331/change_plan.md` + `change_log.md`
 
 ## 2026-07-26 · v0.0.206（sender.channel.instanceId → configId — channel 无状态化 wire 改名）
 

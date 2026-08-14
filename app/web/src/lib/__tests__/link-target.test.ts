@@ -27,6 +27,8 @@ function mockRockyShell() {
     openExternal: vi.fn(async () => ({ ok: true })),
     openPath: vi.fn(async () => ({ ok: true })),
     readFileText: vi.fn(async () => ({ ok: true, content: '' })),
+    // [v0.0.339] 文本分流 stat：小文件(100B) → 内置 editor（openLocalPath ④ 分支异步 getSize）
+    stat: vi.fn(async () => ({ ok: true, size: 100 })),
   };
   // jsdom window
   (window as unknown as { rockyShell: unknown }).rockyShell = api;
@@ -37,6 +39,9 @@ beforeEach(() => mockRockyShell());
 afterEach(() => {
   delete (window as unknown as { rockyShell?: unknown }).rockyShell;
 });
+
+/** 冲刷微任务（[v0.0.339] openLocalPath 文本分支异步 getSize → onEditor 在微任务后触发） */
+const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('isDangerousScheme', () => {
   it('javascript: 拦截', () => {
@@ -196,10 +201,11 @@ describe('openLinkTarget 分发', () => {
     expect(api.openPath).not.toHaveBeenCalled();
   });
 
-  it('local + 12 格式 + 有 onLocalViewer → 调 onLocalViewer（不调 openPath）', () => {
+  it('local + 12 格式 + 有 onLocalViewer → 调 onLocalViewer（不调 openPath）', async () => {
     const api = mockRockyShell();
     const onLocalViewer = vi.fn();
     openLinkTarget('config.yaml', { onLocalViewer });
+    await flush();
     expect(onLocalViewer).toHaveBeenCalledOnce();
     const target = onLocalViewer.mock.calls[0]![0];
     expect(target.path).toBe('config.yaml');
@@ -234,9 +240,10 @@ describe('openLinkTarget 分发', () => {
     vi.unstubAllGlobals();
   });
 
-  it('.env basename → onLocalViewer 触发（12 格式 env 命中）', () => {
+  it('.env basename → onLocalViewer 触发（12 格式 env 命中）', async () => {
     const onLocalViewer = vi.fn();
     openLinkTarget('/abs/.env', { onLocalViewer });
+    await flush();
     expect(onLocalViewer).toHaveBeenCalledOnce();
   });
 });

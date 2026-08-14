@@ -17,16 +17,16 @@
  * 即 oldString 传真实内容即可（不要求 LLM 手动剥离）。
  *
  * 并发原子（spec §5）：
- *   - **read-modify-write 整段入锁**：readFileSync → countOccurrences → 唯一性判定 → replace → atomicWriteSync
+ *   - **read-modify-write 整段入锁**：readFile → countOccurrences → 唯一性判定 → replace → atomicWriteAsync
  *     全部在同一 withFileLock 闭包内，否则 read 与 write 之间可能被另一 edit 插写改了计数（C8/C9）。
  *   - **occurrences 锁内重判（C9）**：把「统计 + 唯一性/未找到判定」移入锁闭包，防 read 时唯一、
  *     read 到 write 之间被另一 edit 插入第二次出现导致 replace 走非预期分支。
- *   - atomicWriteSync 替换裸 writeFileSync，补崩溃原子（tmp→fsync→rename）。
+ *   - atomicWriteAsync 替换裸 writeFile，补崩溃原子（tmp→fsync→rename，fs.promises 真异步）。
  *   - 快速失败校验（绝对路径/oldString===newString/readSet）仍在锁外（不必持锁）。
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { atomicWriteSync } from '../persistence/fs-io';
+import { atomicWriteAsync } from '../persistence/fs-io';
 import { withFileLock } from '../persistence/file-lock';
 import type { Tool, ToolCtx, ToolInput, ToolRunResult } from './types';
 import { errorResult, textResult, ToolErrorCode } from './types';
@@ -71,10 +71,16 @@ export const fileEditTool: Tool = {
     const replaceAll = input.replaceAll === true;
 
     // 先 read 后 edit
-    if (!existsSync(filePath)) {
+    let existingStat: Awaited<ReturnType<typeof stat>> | undefined;
+    try {
+      existingStat = await stat(filePath);
+    } catch {
+      existingStat = undefined; // ENOENT → 不存在
+    }
+    if (!existingStat) {
       return errorResult(`[${ToolErrorCode.NOT_FOUND}] file not found: ${filePath}`);
     }
-    if (statSync(filePath).isDirectory()) {
+    if (existingStat.isDirectory()) {
       return errorResult(`[${ToolErrorCode.INVALID_INPUT}] path is a directory: ${filePath}`);
     }
     if (!ctx.readSet?.has(filePath)) {
@@ -95,7 +101,7 @@ export const fileEditTool: Tool = {
         // 读真实文件内容（非 cat -n 版本，直接匹配）
         let body: string;
         try {
-          body = readFileSync(filePath, 'utf8');
+          body = await readFile(filePath, 'utf8');
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           return { kind: 'err', result: errorResult(`[${ToolErrorCode.RUNTIME_ERROR}] failed to read file: ${msg}`) };
@@ -119,7 +125,7 @@ export const fileEditTool: Tool = {
         // 执行替换 + 原子写
         const next = replaceAll ? body.split(oldString).join(newString) : body.replace(oldString, newString);
         try {
-          atomicWriteSync(filePath, next);
+          await atomicWriteAsync(filePath, next);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           return { kind: 'err', result: errorResult(`[${ToolErrorCode.RUNTIME_ERROR}] failed to write file: ${msg}`) };

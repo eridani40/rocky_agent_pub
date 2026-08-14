@@ -1,13 +1,18 @@
 ---
 type: log
 title: Envs KB 变更记录
-updated: 2026-07-10
+updated: 2026-08-12
 ---
 
 # Envs KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-12 · v0.0.337
+
+- **`update-app.sh` 补入 `scripts.md` 契约（§3.4）**：四脚本契约表 + 概述更新——`update-app.sh` 无 env source（杀 app → 替换 .app → 重启），`[v0.0.337]` 起安装后强制 `sync` + 3s 等文件落盘再 `open`（修重启白屏：cp ~290MB 后立即 open 读到未写完文件）。→ `scripts.md §1/§2/§3.4/§5/§6`。
+- 详情：`specs/tech/version_logs/v0.0.337/change_log.md`。
 
 ## 2026-08-10 · v0.0.317
 

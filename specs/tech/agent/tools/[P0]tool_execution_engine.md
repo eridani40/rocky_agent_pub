@@ -3,7 +3,7 @@ type: spec
 title: Tool Execution Engine（串行执行引擎）
 priority: P0
 status: active
-updated: 2026-08-09
+updated: 2026-08-13
 since: v0.0.8
 ---
 
@@ -16,7 +16,7 @@ since: v0.0.8
 
 工具执行引擎是 agent loop ③ 的核心。LLM 产出一批 `ToolCallBlock`（在一条 assistant message 里），引擎**串行**逐个执行，每个产出对应的 `ToolResultBlock`，回灌对话供 LLM 下一轮看到。
 
-**串行**：一次只执行一个工具调用，`await` 完成才下一个。不做并发（避免文件竞争 / 资源冲突 / 顺序依赖问题）。单工具执行可经 worker pool 挪线程（白名单纯 IO 工具 read/write/edit/glob/grep 走 worker_threads 线程池，避免大 grep/read 阻塞 event loop），但批内串行顺序不变。
+**串行**：一次只执行一个工具调用，`await` 完成才下一个。不做并发（避免文件竞争 / 资源冲突 / 顺序依赖问题）。工具一律在**主线程**执行（v0.0.345 撤 worker pool 后无线程池分流）；工具层 fs 操作一律 `node:fs/promises` 真异步（libuv 线程池，避免大 grep/read 阻塞 event loop），但批内串行顺序不变。
 
 ## 2. 核心类型
 
@@ -269,7 +269,7 @@ executeOne(config, call, sharedReadSet):
 
 ## 6. 不做的事（边界）
 
-- ❌ **不并发执行**（批内串行；单工具可 worker 化——白名单纯 IO 工具 read/write/edit/glob/grep 经 worker pool 挪线程执行，但不改变批量串行调度顺序）
+- ❌ **不并发执行**（批内串行；工具在主线程执行，不挪线程——工具层 fs 操作经 fs.promises 走 libuv 线程池，但不改变批量串行调度顺序）
 - ❌ **不自己注册/持有工具**（`Tool[]` 由 `SessionConfig.tools` 持有，引擎从 config 取，见 overall §3）
 - ❌ **不构造 ToolDefinition**（由 `Tool.definition` 提供）
 - ❌ **不管执行时机**（何时调 execute 归 agent loop ③）
@@ -281,7 +281,7 @@ executeOne(config, call, sharedReadSet):
 |---|---|
 | 串行执行 + resolve/validate/interaction 分流/run/wrap + allowedTools 门控 + sharedReadSet + buildPendingResult | 本文（tool_execution_engine）✅ |
 | 三层超时解析（resolveEffectiveTimeout）+ runTool backstop race + ctx.signal 装配 + formatTimeoutText 契约 + childRegistry 装配 | 本文 §4.2（engine-timeout.ts）✅ |
-| worker 线程池（白名单纯 IO 工具挪线程）+ 三路径探测 + readSet 跨 worker apply | `worker-pool/`（pool.ts/types.ts/worker-entry.ts/index.ts）+ `engine-worker-dispatch.ts` ✅ |
+| 工具在主线程串行执行（v0.0.345 撤 worker pool 后无线程池分流）；工具层 fs 操作一律 `node:fs/promises` 真异步（libuv 线程池，不阻塞 event loop） | 本文 §1 ✅（历史 worker 线程池见 v0.0.307/v0.0.345 change_log） |
 | 各工具实现（run / interaction / onReply / schema / defaultTimeoutMs） | file_op / bash / web / agent / skill / ask-question |
 | ChildProcessRegistry 类 + run 级 killAll sweep + bash 组杀清理 | `child-process-registry.ts` + `bash_tools.md §4.5` + `../agent_interface_and_loop/[P0]agent_interrupt.md §3.1` |
 | Tool[] 持有（SessionConfig.tools）+ 工具清单 | `index.md` |

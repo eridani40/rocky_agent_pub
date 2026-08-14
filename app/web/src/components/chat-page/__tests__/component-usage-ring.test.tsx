@@ -182,16 +182,19 @@ describe('ComponentUsagePanel 展开态（§3.2 / §4.6-§4.7 + v0.0.326 head �
     expect(screen.getAllByText('合计').length).toBeGreaterThan(0);
   });
 
-  it('panel 定位：top-full + right-[96px] 左下展开、让开右侧 float-menu（v0.0.328 修复 326）', () => {
+  it('panel 定位：top-full + right-[48px] 左下展开、贴近 ring 左缘且不碰 float-menu（v0.0.332 收窄 328 的 96px 退让）', () => {
     const { container } = render(<ComponentUsagePanel usage={mkUsage({})} />);
     clickTrigger();
-    // 展开浮层（w-[300px] 容器）必须带 right-[96px] 偏移，避开 chat 右缘 float-menu 竖排并留视觉缓冲；
+    // 展开浮层（w-[300px] 容器）必须带 right-[48px] 偏移：panel 右缘 = ring 左缘 - 12px 缓冲
+    // （ring 宽 36px + 12px = 48px，实测 ring 右缘=容器右缘）；同时不碰 chat 右缘 float-menu
+    // （float-menu 左缘在 ring 左缘左 4px，panel 右缘 934 < float-menu 左缘 942，留 8px 间隙）。
     // 不得回退为 right-0（right-0 时 panel 右缘贴环右缘，300px 宽会盖住 float-menu 列）。
     const panel = container.querySelector('.w-\\[300px\\]')!;
     expect(panel).toBeTruthy();
     expect(panel.className).toContain('top-full');
-    expect(panel.className).toContain('right-[96px]');
+    expect(panel.className).toContain('right-[48px]');
     expect(panel.className).not.toContain('right-0');
+    expect(panel.className).not.toContain('right-[96px]');
   });
 
   it('forked/sub total=0 时隐藏（§4.7 行可见规则）', () => {

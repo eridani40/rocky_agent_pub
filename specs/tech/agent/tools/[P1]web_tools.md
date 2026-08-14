@@ -83,7 +83,7 @@ tools/  (本 KB 子目录)
 > 1. ~~**browser attach 驱动分裂**~~ → **已接受**（MCP(③) + Playwright(①②) 两栈驱动 + `BrowserDriver`/`BrowserSession` 统一抽象）。
 > 2. ~~**browser 反检测**~~ → **不做**（camofox 路线复杂易失效）。
 > 3. ~~**browser 截图+坐标**（computer-use）~~ → **不做**（下一阶段，主用 a11y tree + element ref）。
-> 4. **browser profile 占用冲突** → 报错 + 提示，**不抢锁不排队**；远程 attach cdpUrl loopback 私网 fail-closed；attach 不做 token 鉴权（单机本地）；chrome-devtools-mcp 用 `@latest`（不钉死）。
+> 4. **browser profile 占用冲突** → 报错 + 提示，**不抢锁不排队**；远程 attach cdpUrl loopback 私网 fail-closed（`[v0.0.334]` **cdpUrl 已删**——attach 仅 autoConnect 无 URL 输入，SSRF 面消失，见 `[P1]browser_tool.md`）；attach 不做 token 鉴权（单机本地）；chrome-devtools-mcp 用 `@latest`（不钉死）。
 > 5. ~~**三工具优先级与裁剪**~~ → **三工具全做**（不分期）。
 
 > 变更历史见 `log.md`（本 KB 位置轴）+ `specs/tech/version_logs/vX.Y/change_log.md`（跨版本发布说明）。

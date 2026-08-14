@@ -1,6 +1,6 @@
 # Web Tools API（v0.0.23 — web_search / web_fetch / browser 工具协议面 + 配置/连接器）
 
-> version: 1.4 `[v0.0.266 modified]` · 引入版本 v0.0.23 · 2026-08-06
+> version: 1.5 `[v0.0.330 modified]` · 引入版本 v0.0.23 · 2026-08-12
 > 管什么：v0.0.23 引入的 3 个 agent tool（LLM 可调）的工具协议面契约（`ToolDefinition`：name / description / inputSchema + 输出 ToolResultBlock 形态 + isError 分支）+ app_config `web` group 配置（`[v0.0.89]` 随 dev_config 废弃迁自 `dev_config`，走 `/config/app?group=web`）+ 连接器端点组（browser attach 用户侧门禁）。
 > 不管什么：工具内部实现（jina race / SSRF / chrome launch / MCP attach 细节 → `specs/tech/agent/tools/[P1]web_{search,fetch}_tool.md` + `[P1]browser_tool.md`）；连接器状态机内部（→ `specs/tech/config/[P1]connectors.md`）；UI（→ `specs/ui/overall/05-connectors.md` + `specs/ui/components/connector-page/`）；session/messages/SSE 通用契约（→ `04-agent-session.md`）。
 > **本文件是 AT（API Test）web tools / config-web / connector 域的唯一依据**：api-verifier 黑盒 curl + SSE 观察，不读代码。
@@ -116,11 +116,12 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
                        "selectPage","evaluate","screenshot","close"] },
       // [v0.0.264] +launch/+close（headless/managed-profile 常驻实例生命周期；attach 语义）
       // [v0.0.266] -disconnect（统一 close：attach close = 断开 MCP 连接，不杀用户 chrome）
+      // [v0.0.330] desc 三模式示例 + 参数传递铁律（launch 一次性传初始化参数，之后只需 mode+action）
+      // [v0.0.334] -cdpUrl（attach 仅 autoConnect，无 URL 输入）+ desc 简化（自动连接 + 前置条件 + 同意流程 + 失败引导 + 共享浏览器安全警告 + 模式路由）
       profileName: { type: "string" },
       url: { type: "string" },
       ref: { type: "string" },
-      text: { type: "string" },
-      cdpUrl: { type: "string" }
+      text: { type: "string" }
     }
   }
 }
@@ -130,11 +131,12 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
 |------|------|------|------|------|
 | `mode` | enum `headless`/`managed-profile`/`attach` | ✅ | — | chrome 启动/连接模式 |
 | `action` | enum | ✅ | — | `launch`/`navigate`/`snapshot`/`click`/`type`/`listPages`/`selectPage`/`evaluate`/`screenshot`/`close` + `[v0.0.264]` `launch`/`close`（headless/managed-profile 常驻实例生命周期）+ `[v0.0.266]` close 统一覆盖 attach（断开 MCP 连接，不再有独立 `disconnect` action） |
-| `profileName` | string | mode=②③ 必填 | — | profile 名；正则 `/^[a-z0-9][a-z0-9-]*$/` ≤64 |
+| `profileName` | string | mode=② launch 必填（`[v0.0.330]` 仅 launch 初始化参数） | — | profile 名；正则 `/^[a-z0-9][a-z0-9-]*$/` ≤64；创建后 navigate/close 无需再传（handle 承载） |
 | `url` | string | action=navigate 必填 | — | 目标 URL |
 | `ref` | string | action=click/type 必填 | — | element ref（来自 snapshot） |
 | `text` | string | action=type 必填 | — | 待输入文本 |
-| `cdpUrl` | string | — | — | mode=③ fallback；**本地 loopback（127.x/::1/localhost）豁免 SSRF**（CDP 控制面 ≠ 页面导航，attach 本机 chrome 正常用法），非 loopback 远程/私网/`file://` fail-closed `[v0.0.29 modified]` |
+
+> `[v0.0.334]` -cdpUrl：attach 仅 autoConnect（自动连接本机 chrome://inspect 远调模式），**无任何 URL 输入**——SSRF 门禁段删除。
 
 > 完整可选字段（pageId/format/script 等）以 BrowserSession 协议为准（见 tech `[P1]browser_tool.md` §2）。
 
@@ -148,14 +150,14 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
 | `navigate`/`click`/`type`/`selectPage` | 简短结果描述（如 `navigated to <url>`） |
 | `evaluate` | script 返值序列化（unknown） |
 | `screenshot` | 辅助，`{ mime, data(base64) }`（可空，作 vision 校验/给 LLM 看长相） |
-| `close` `[v0.0.264]` | `closed`（幂等：无 instance → `no instance`）；attach 语义 = 断开 MCP 连接（不杀用户 chrome）`[v0.0.266]` |
+| `close` `[v0.0.264]` | `closed`（`[v0.0.330]` 无 instance → 报错 `no_browser_instance` 提示先 launch，不再静默 no-op）；attach 语义 = 断开 MCP 连接 + 检测调试态残留并返回引导提示（不杀用户 chrome）`[v0.0.266]` → `[v0.0.330]` 残留检测 → `[v0.0.336]` 清理失败返回 `close_incomplete` 错误（不删实例可重试） |
 
 ### 4.3 isError 分支（`[v0.0.46]` attach 门禁分层 + `[v0.0.264]` 前置校验）
 
 | 分支 | isError | content[0].text |
 |------|---------|-----------------|
 | mode=attach launch 且 switch=off `[v0.0.46]` | **true** | `browser attach 未启用：请在「连接器 → 浏览器」中开启开关`（kind='not_enabled'，**不连接、不 spawn MCP**） |
-| mode=attach launch 连接失败 `[v0.0.266]` | **true** | `browser attach 连接失败：<原因>`（chrome 未开 remote debugging / 版本 <144 / 拒绝 prompt / list_pages round-trip 失败；kind='attach_failed'；沿用 `[v0.0.34]` 失败即停不重试） |
+| mode=attach launch 连接失败 `[v0.0.266]`→`[v0.0.334]` 版本引导→`[v0.0.337]` 失败清理升级 | **true** | `browser attach 连接失败：<原因>`（chrome 未开 remote debugging / 拒绝 prompt / list_pages round-trip 失败；kind='attach_failed'；沿用 `[v0.0.34]` 失败即停不重试）——`[v0.0.334]` 探测本机 Chrome 版本：<144 → 明确「检测到 Chrome v<v>（<144），attach 需 Chrome ≥144（chrome://inspect 远调模式），请升级 Chrome 后重试」；≥144 或探测失败 → 引导「开启/批准 remote debugging」；`[v0.0.337]` 失败时 driver 内部三层清理（graceful close → kill mcp 进程组 → watchdog `--parent-pid` pkill，best-effort）+ launch 超时 abort（signal 透传，abort → 立即清理）+ 失败入台账（insert 不 delete，留给启动自检回收） |
 | mode=attach 且 HITL 审批被拒 | **true** | 审批拒绝说明 |
 | mode=①② 无 instance 调 action `[v0.0.264]` | **true** | `当前会话没有 headless/managed-profile 浏览器实例，请先调用 browser(action="launch")`（kind='no_browser_instance'；前置校验铁律） |
 | mode=③ 无 attach instance 调操作 action `[v0.0.266]` | **true** | `当前会话没有 attach 浏览器实例，请先调用 browser(action="launch", mode="attach")`（kind='no_browser_instance'；不再 lazy connect） |
@@ -163,16 +165,17 @@ chrome 自动化三模式：① headless ② managed-profile（持久 profile）
 | mode=①② worker 崩溃 `[v0.0.264]` | **true** | `worker 崩溃: <原因>，请重新 launch`（kind='worker_crashed'） |
 | mode=①② action 超时 `[v0.0.264]` | **true** | `cdp_timeout`（kill instance，提示重新 launch） |
 | mode=③ 操作时连接失活 `[v0.0.266]` | **true** | `attach 浏览器连接已断开（Chrome 可能被关闭），请重新 launch`（检测 dispatchAction 返回文本匹配失活模式 → 自动清理失活实例，下次需重新 launch） |
+| close 清理失败 `[v0.0.336]` | **true** | `close 清理不完整（实例保留可重试）: <原因>`（kind='close_incomplete'；impl.close 任一清理步骤失败 ok=false 或抛错 → manager 不删 instances，调用方可重试 close；execute/idle 收尾路径 catch 不逃逸，仍返回原预期文案） |
 | mode=② profile 占用冲突 | **true** | `profile <name> in use` + 提示（不抢锁不排队） |
-| mode=③ cdpUrl **非 loopback**（远程私网 / 169.254.169.254 / `file://`）fail-closed | **true** | SSRF 拒绝 |
-| mode=③ cdpUrl loopback（127.x / ::1 / localhost） | — | **豁免** SSRF（CDP 控制面，attach 本机 chrome 正常用法）`[v0.0.29 modified]` |
 | 其他（chrome 启动失败 / navigate 超时 / ref 不存在等） | **true** | 原因 |
+
+> `[v0.0.334]` -cdpUrl：删「mode=③ cdpUrl 非 loopback fail-closed / loopback 豁免」两行（attach 无 URL 输入，SSRF 面消失）。
 
 **needsApproval**：`input.mode === 'attach'` → HITL 审批（操作用户真实浏览器）；mode ①② 不审批。
 
-**生命周期语义（对调用方，`[v0.0.46]` lazy connect + disconnect action + `[v0.0.264]` 常驻实例 launch/close + `[v0.0.266]` attach 并入 InstanceManager）**：三模式统一由 BrowserInstanceManager 管理——**首次调用 `action='launch'` 建立实例**（幂等：已 ready 复用；attach 的 launch = ChromeMcpDriver.connect，key=`sessionId:attach`），此后 navigate/snapshot/click/type 等 action 在同一实例上执行（页面/登录态/lastRefs 跨 tool_call 保持），`action='close'` 显式关闭：mode ①② 三要素清理（killProcessGroup + headless rmSync + usedPorts.delete），mode ③ attach 断开 MCP 连接（**不杀用户 chrome** / 不删目录 / 不释放端口 / 不持久化）；**非 launch/close action 前置校验**：无 instance → `no_browser_instance` 报错提示先 launch（三模式统一，attach 不再隐式 lazy connect）；attach 操作时 CDP 断线（chrome 被关闭）→ 检测失活 → 自动清理 → 下次需重新 launch（异常自愈）；session 结束/agent DELETE 兜底 releaseSession；服务关闭 shutdown hook releaseAll + 开机自检清孤儿（详见 tech `[P1]browser_instance_manager.md`）。ConnectorManager 瘦身为「switch 门禁 + UI 状态」（enable/disable/bootstrap/getState/getAll/isReady），不再持有 attach session / owner。
+**生命周期语义（对调用方，`[v0.0.46]` lazy connect + disconnect action + `[v0.0.264]` 常驻实例 launch/close + `[v0.0.266]` attach 并入 InstanceManager + `[v0.0.330]` instanceKey 收敛 + close 残留检测 + `[v0.0.334]` 删 cdpUrl + sqlite 台账 + `[v0.0.336]` close 三层一致）**：三模式统一由 BrowserInstanceManager 管理——**首次调用 `action='launch'` 建立实例**（幂等：已 ready 复用；同 session 同 mode 重复 launch 复用不换 profile；attach 的 launch = ChromeMcpDriver.connect（仅 autoConnect），key=`sessionId:attach`），此后 navigate/snapshot/click/type 等 action 在同一实例上执行（页面/登录态/lastRefs 跨 tool_call 保持），`action='close'` 显式关闭：mode ①② 三要素清理（killProcessGroup + headless rmSync + usedPorts.delete + 台账硬删），mode ③ attach 断开 MCP 连接 + **显式回收 mcp 主进程组 + 兜底杀 detached watchdog** + 台账硬删（`[v0.0.334]` attach MCP 子进程入台账；`[v0.0.336]` G4/G5 进程回收，`--parent-pid` 精确锚定不误杀）+ 检测调试态残留并返回引导提示（**不杀用户 chrome** / 不删目录 / 不释放端口；`[v0.0.330]` 无实例 close → `no_browser_instance` 报错；`[v0.0.336]` 任一清理步骤失败 → `close_incomplete` 错误 + **不删 instances 可重试**）；**非 launch/close action 前置校验**：无 instance → `no_browser_instance` 报错提示先 launch（三模式统一，attach 不再隐式 lazy connect）；attach 操作时 CDP 断线（chrome 被关闭）→ 检测失活 → 自动清理 → 下次需重新 launch（异常自愈）；session 结束/agent DELETE 兜底 releaseSession；服务关闭 shutdown hook releaseAll + **开机自检按 sqlite 台账清残留**（`[v0.0.334]` 替换 browser-instances.json；孤儿 MCP 代理/playwright worker/临时目录/锁/端口；不恢复不认领，agent 需要时重新 launch）。ConnectorManager 瘦身为「switch 门禁 + UI 状态」（enable/disable/bootstrap/getState/getAll/isReady），不再持有 attach session / owner。
 
-> **[v0.0.23.1] mode①② 内部实现路径（对外契约变化见 `[v0.0.264]`）**：v0.0.263 及以前 mode①② tool run 内调 `driver.executeOnce`（而非 `connect`）——`NodeWorkerDriver.executeOnce` spawn `node browser-worker.cjs` 子进程，worker 内 spawn chrome + connectOverCDP + dispatch 单个 action + cleanup chrome，stdout 返 `{ok,text?} \| {ok:false,error}`（**绕开 Bun 不支持 playwright connectOverCDP 的 bug**，oven-sh/bun#9357）。**[v0.0.264] mode①② 改走 BrowserInstanceManager 常驻实例**：`launch` 建立 → 其他 action 经 `InstanceManager.execute`（前置校验 + idle check + abort）→ `close` 关闭；`NodeWorkerDriver.executeOnce` 保留仅服务 web_fetch headless render（单次执行器，不引入常驻）；worker 协议升级为循环服务（`loop:true` 判常驻，跨 action 保持 lastRefs）。**[v0.0.266] mode③ attach 并入 InstanceManager**：`launch(mode='attach', cdpUrl?)` = ChromeMcpDriver.connect（经 InstanceManager 注入共享 attachDriver 单例，key=`sessionId:attach` 幂等复用）；操作类 action 经 `getReadyInstance` 前置校验后 tool.ts 主进程 `dispatchAction`（attach 的 screenshot 落盘需 ToolCtx，execute 保持 worker 语义不混入）；CDP 断线失活 → 文本检测 `isAttachConnectionLost` → `handleAttachLost`（state=dead + disconnect 清理）→ 下次 `no_browser_instance` 引导重新 launch；`close(mode='attach')` = attachDriver.disconnect（不杀用户 chrome）。对外 schema 变化：`[v0.0.46]` action 枚举加 `disconnect`、`[v0.0.264]` action 枚举加 `launch`/`close`、`[v0.0.266]` action 枚举去 `disconnect` 统一 close（见 §4.1）。详见 tech `[P1]browser_tool.md` §3/§4/§7 + `[P1]browser_instance_manager.md`。
+> **[v0.0.23.1] mode①② 内部实现路径（对外契约变化见 `[v0.0.264]`）**：v0.0.263 及以前 mode①② tool run 内调 `driver.executeOnce`（而非 `connect`）——`NodeWorkerDriver.executeOnce` spawn `node browser-worker.cjs` 子进程，worker 内 spawn chrome + connectOverCDP + dispatch 单个 action + cleanup chrome，stdout 返 `{ok,text?} \| {ok:false,error}`（**绕开 Bun 不支持 playwright connectOverCDP 的 bug**，oven-sh/bun#9357）。**[v0.0.264] mode①② 改走 BrowserInstanceManager 常驻实例**：`launch` 建立 → 其他 action 经 `InstanceManager.execute`（前置校验 + idle check + abort）→ `close` 关闭；`NodeWorkerDriver.executeOnce` 保留仅服务 web_fetch headless render（单次执行器，不引入常驻）；worker 协议升级为循环服务（`loop:true` 判常驻，跨 action 保持 lastRefs）。**[v0.0.266] mode③ attach 并入 InstanceManager**：`launch(mode='attach', cdpUrl?)` = ChromeMcpDriver.connect（经 InstanceManager 注入共享 attachDriver 单例，key=`sessionId:attach` 幂等复用）；操作类 action 经 `getReadyInstance` 前置校验后 tool.ts 主进程 `dispatchAction`（attach 的 screenshot 落盘需 ToolCtx，execute 保持 worker 语义不混入）；CDP 断线失活 → 文本检测 `isAttachConnectionLost` → `handleAttachLost`（state=dead + disconnect 清理）→ 下次 `no_browser_instance` 引导重新 launch；`close(mode='attach')` = attachDriver.disconnect（不杀用户 chrome）。对外 schema 变化：`[v0.0.46]` action 枚举加 `disconnect`、`[v0.0.264]` action 枚举加 `launch`/`close`、`[v0.0.266]` action 枚举去 `disconnect` 统一 close（见 §4.1）。**`[v0.0.334]` cdpUrl 已删**：`launch(mode='attach')` 不再接受连接端点，恒走 autoConnect；attach MCP 子进程入 sqlite 台账（`browser_instances` 表），app 启动按台账清孤儿 MCP 代理。详见 tech `[P1]browser_tool.md` §3/§4/§7 + `[P1]browser_instance_manager.md`。
 
 ## 5. app_config `web` group（复用 `/config/app`）
 
@@ -263,6 +266,10 @@ interface ToggleConnectorBody {
 
 ## 10. 版本
 
+version: 1.8 `[v0.0.337 modified]`（1.7 → 1.8：**attach launch 失败/超时清理升级，HTTP 端点契约零变化**——§4.3 attach 连接失败行补「driver 内部三层清理（graceful close → kill mcp 进程组 → watchdog `--parent-pid` pkill，best-effort）+ launch 超时 abort（signal 透传，abort → 立即清理）+ 失败入台账（insert 不 delete，留给启动自检回收）」。技术架构详见 `specs/tech/agent/tools/[P1]browser_tool.md` + `[P1]browser_instance_manager.md` + `specs/tech/version_logs/v0.0.337.attach_launch_failure_leak/change_plan.md`）。
+version: 1.7 `[v0.0.336 modified]`（1.6 → 1.7：**attach close 三层一致 + cache key 对称，HTTP 端点契约零变化**——§4.2 close 行补「清理失败返回 `close_incomplete` 错误（不删实例可重试）」；§4.3 isError 分支新增「close 清理失败 `[v0.0.336]`」行（kind='close_incomplete'，impl.close 任一清理步骤失败 ok=false 或抛错 → manager 不删 instances，execute/idle 收尾路径 catch 不逃逸）；生命周期语义补「attach close 显式回收 mcp 主进程组 + 兜底杀 detached watchdog（`--parent-pid` 精确锚定）+ connect/disconnect cache key 对称（同一 `resolveDefaultChromeUserDataDir` 解析，根除 launch 复用死连接）」。技术架构详见 `specs/tech/agent/tools/[P1]browser_tool.md` v1.9 + `[P1]browser_instance_manager.md` + `specs/tech/version_logs/v0.0.336.attach_close_process_leak/change_plan.md`）。
+version: 1.6 `[v0.0.334 modified]`（1.5 → 1.6：**browser 工具删 cdpUrl + attach 仅 autoConnect + 失败版本引导，HTTP 端点契约零变化**——§4.1 ToolDefinition 删 `cdpUrl` property（剩 mode/action/profileName/url/ref/text）+ desc 简化（attach 自动连接用户已开 Chrome，无需指定地址 + 前置条件 Chrome ≥144 + 同意流程 + 失败引导 + 共享浏览器安全警告 + 模式路由「我的 chrome→attach / 登录态→managed-profile / 默认→headless」）；§4.1 字段表删 cdpUrl 行；§4.3 删 SSRF 两行（无 URL 输入，SSRF 面消失）+ attach 连接失败行补「版本 <144 → 明确提示升级 Chrome / ≥144 → 引导开启批准 remote debugging」；生命周期语义补「attach MCP 子进程入 sqlite 台账 + 开机自检按台账清残留」。技术架构详见 `specs/tech/agent/tools/[P1]browser_tool.md` v1.8 + `[P1]browser_instance_manager.md`）。
+version: 1.5 `[v0.0.330 modified]`（1.4 → 1.5：**browser attach 缺省 autoConnect + close 残留检测 + instanceKey 收敛，HTTP 端点契约零变化**——§4.1 注释补 desc 三模式示例 + 参数传递铁律；`profileName` 改「仅 launch 初始化参数」（`[v0.0.330]` instanceKey 三模式统一 `sid:mode`，创建后 navigate/close 无需再传）；`cdpUrl` 补「缺省 autoConnect 自动连 chrome://inspect 远调模式，不再塞 127.0.0.1:9222；显式 cdpUrl = 连接用户自开调试 Chrome，close 只断连、调试态由用户管理」；§4.2 close 行改「无 instance → `no_browser_instance` 报错提示先 launch（不再静默 no-op）；attach = 断开 MCP 连接 + 检测调试态残留并返回引导提示」；§4.3 生命周期语义补「同 session 同 mode 重复 launch 复用不换 profile + attach close 残留检测提示」。技术架构详见 `specs/tech/agent/tools/[P1]browser_tool.md` v1.7 + `[P1]browser_instance_manager.md`）。
 version: 1.4 `[v0.0.266 modified]`（1.3 → 1.4：**browser attach 生命周期并入 InstanceManager + action 枚举去 disconnect，HTTP 端点契约零变化**——§4.1 browser tool `inputSchema.action` 枚举移除 `disconnect`（统一 `close`：attach close = 断开 MCP 连接，不杀用户 chrome）；§4.2 移除 disconnect result 行、close 行补 attach 语义；§4.3 isError 分支按 attach 新语义重写（`not_enabled` 门禁保留；`in_use_by_other` 删除——attach 变 session 级 key=`sessionId:attach` 无全局占用；lazy connect 失败改 launch 连接失败 `attach_failed`；新增 mode=③ 无 instance 前置校验 + 操作失活自愈分支）；§4.3 生命周期语义按三模式统一 BrowserInstanceManager 管理更新（launch=connect / 操作经 getReadyInstance+dispatchAction / close=disconnect；失活自动清理引导重新 launch；ConnectorManager 瘦身为 switch 门禁 + UI 状态）。技术架构详见 `specs/tech/agent/tools/[P1]browser_instance_manager.md` + tech `[P1]browser_tool.md` v1.6）。
 version: 1.3 `[v0.0.264 modified]`（1.2.2 → 1.3：**browser 工具 action 枚举扩展 launch/close + 常驻实例前置校验，HTTP 端点契约零变化**——§4.1 browser tool `inputSchema.action` 枚举增加 `launch`/`close`（headless/managed-profile 常驻实例生命周期）；§4.2 添加 launch/close result 行；§4.3 isError 分支新增 mode①② 前置校验四态（`no_browser_instance` / `idle_timeout` / `worker_crashed` / `cdp_timeout`）；§4.3 生命周期语义按 BrowserInstanceManager 常驻实例更新（launch 建立 → action 前置校验 → close 关闭；session 结束 releaseSession + shutdown hook + 开机自检）；§4.3 内部实现路径更新（mode①② 从 executeOnce 一次性改走 InstanceManager 常驻，executeOnce 保留仅 web_fetch）。技术架构详见 `specs/tech/agent/tools/[P1]browser_instance_manager.md` + tech `[P1]browser_tool.md` v1.5）。
 version: 1.2.2 `[v0.0.123 modified]`（1.2.1 → 1.2.2：**web_search Zhipu provider 1→2 + list 语义补账，无 HTTP 契约变更**——§2 内置 Zhipu 从单 implId `zhipu` 拆为 `zhipu_coding_plan`（MCP 订阅额度）/ `zhipu_api`（REST 按量计费）两独立 impl；§2.2 错误分支/`resolveProvider` 从过时的 exclusive `getExclusiveExtension` 改为 v0.0.72 list 单点路由（type 未配置 / impl 未激活 / 不可用三态）；§5 inventory 透传 impls 从单 provider 改两 impl + choice-cards 改下拉（v0.0.121）。GET/PUT `/config/app?group=web_search` 端点/schema/redact 全不变，仅样例 implId 值 + provider 清单。旧 `zhipu` 一次性迁移到 `zhipu_coding_plan` 见 `app_config.md §3.6`。详见 `specs/tech/version_logs/v0.0.123/change_log.md`）。

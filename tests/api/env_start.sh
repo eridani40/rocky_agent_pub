@@ -113,6 +113,11 @@ for _grp in web_search see_image runtime web consolidation; do
   fi
 done
 
+# 8b. 构建 browser worker bundle（幂等，~1s）：headless/managed 常驻走 browser-worker.cjs，
+#   产物已 gitignore（D-F），每次 test/ET 启动前重建保证协议最新（loop/chromePid 等）。
+echo "[env_start] 8b. building browser worker (bun run build:worker) ..."
+(cd "$ROOT_DIR" && bun run build:worker)
+
 # 9. start server（NODE_ENV=test，继承 secret 环境变量）
 ROCKY_TEST_MOCK_LLM="${ROCKY_TEST_MOCK_LLM:-0}"
 # computer native port mock（AT 默认 mock，禁止真实 OS 操作；外部可覆盖为 off 测真实路径）

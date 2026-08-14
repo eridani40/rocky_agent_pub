@@ -86,7 +86,8 @@ grid `296px + 1fr` 两列：
 
 ### 3.2 管理 tab（ManageTab 内联）
 
-- **squad 元信息编辑**：name / description / modelDefault（PATCH /squad/:id）。
+- **squad 元信息编辑**：name / description / modelDefault（PATCH /squad/:id）。modelDefault 用 `chat/ModelPicker`（`studio.squad.select-default-model` actionKey）。
+- **[v0.0.344] model select 加宽**：`component-manage-tab.tsx` 传 `triggerClassName="w-full whitespace-nowrap overflow-hidden text-ellipsis"`——trigger 宽度跟随容器（对齐同区域 INPUT/Dropdown），长模型名（minimax-xxx/deepseek-xxx）完整显示。`triggerClassName` 是 `ModelPicker` 的 [v0.0.344] 新可选 prop：消费方覆盖 trigger 宽度 className；**缺省 `??` 保持 v0.0.72 UIFix2 的 `w-[180px] whitespace-nowrap overflow-hidden text-ellipsis`**（trigger 尺寸稳定防布局跳动，存量消费方零影响）。
 - **默认推理强度（v0.0.279，effortDefault）**：modelDefault 下方加 effortDefault 下拉（Dropdown 原语 `component-shared-selector`，4 档 default/low/high/max，state 初始 = `detail.effortDefault`——后端回显 ?? 'default' 恒有值）；dirty 判定 `effortDefault !== detail.effortDefault`（改档可 save / 改回不可）；save patch 恒带 effortDefault（显式 'default' 也落盘，对齐后端 PATCH `!== undefined` + 显式落盘语义）。团队默认覆盖链：成员显式档（low/high/max）→ 用之；否则团队 effortDefault（low/high/max）→ 用之；否则 undefined（厂商默认，encode 不注入）——详见 `specs/tech/agent/providers_and_models/[P0]llm_protocol_interface.md §3.8`。i18n：`studio:manageTab.effortDefaultLabel` + `studio:manageTab.effortOptions.{default|low|high|max}`（en/zh 双语）。
 - **`[v0.0.237 removed]`** 原 charter 编辑器（4 字段 form + history）已随 charter 全链路移除——管理 tab 不再有 charter section。
 - **危险操作区（team 硬删除/解散）**：底部删除按钮 + 二次确认弹层（复用 ModalShell）。须**输入完整队名匹配**才启用「确认删除」（防误删）；确认 → `DELETE /squad/:id`（硬删：member session + 历史 + 调度全物理清、不可逆；工作产出保留——workspaces/交付/temp/outputs/reports 原地不动，详 `11a-squad-endpoints.md §1.5`）→ 从 sidebar 移除 + 切走选中。
@@ -94,7 +95,7 @@ grid `296px + 1fr` 两列：
 ### 3.3 自动工作 tab（AutoworkTab 内联，五块垂直堆叠）
 
 - **自主性 toggle**（总开关 killswitch）：= `squad.enableHeartBeat`（PATCH /squad/:id，toggle 后 ≤1s 生效——killswitch 走调度层 handler gate0 动态，job 恒注册）。关 = 心跳收起/停调度（角色纯 reactive）。
-- **群聊开关（v0.0.270，enableGroupChat）**：= `squad.enableGroupChat`（PATCH /squad/:id，默认 true=开）。关 = 群聊可见性关闭——agents 不再注入 SquadChat（squad_agents_status 不渲染 SquadChat 行）、坐席卡「群聊」按钮隐藏、`send_message('squadchat')` 报错（成员仅私聊）；squad 实体/session 恒存在，仅控可见性，重开即时恢复。组件契约 `studio-page/component-group-chat-toggle.md`。
+- **群聊开关（v0.0.270，enableGroupChat）**：= `squad.enableGroupChat`（PATCH /squad/:id；**[v0.0.340] 新建团队默认关**，存量无字段回显 `?? true`=开）。关 = 群聊可见性关闭——agents 不再注入 SquadChat（squad_agents_status 不渲染 SquadChat 行）、坐席卡「群聊」按钮隐藏、`send_message('squadchat')` 报错（成员仅私聊）；squad 实体/session 恒存在，仅控可见性，重开即时恢复。组件契约 `studio-page/component-group-chat-toggle.md`。
 - **heartbeat-config（squad 级心跳配置）**：interval segmented chip（5/15/30/60，默认 15）+ activeWindows 多段增删（每段 start/end + 移除按钮 + 「添加时间段」按钮 + 空态提示）+ scope switch（all/whitelist + 成员勾选）+ 保存/重置（reset → heartbeatConfig=null）。写走 `PATCH /squad/:id {heartbeatConfig}`（组件 spec `heartbeat-config.md` 权威）。总开关关时显「已被总开关停用」提示。
 - **budget meter（含配置交互）**：仪表展示（consumed/remaining/limit + 进度条 + 窗口结束时间，轮询 GET /squad/:id/budget/usage + SSE `session_usage_update` 即时 refetch）+ 配置块（开关 off→null 不限量 / on→limit 限量，默认 1_000_000 + limit 输入 + 保存）；budget=null 显「不限量」。写走 `PATCH /squad/:id {budget}`。
 - **调度历史**：`GET /squad/:id/scheduler/history?limit=50`，每条含 role / reason(heartbeat|file-changed) / result(fired|skipped_*) / at / path? / actionSummary?；时间倒序（最新在前）；手动刷新按钮（无 SSE 实时推送）。

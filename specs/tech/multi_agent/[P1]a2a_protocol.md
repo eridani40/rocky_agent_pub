@@ -61,9 +61,12 @@ interface AgentRef {
 | `'leader'` / `'mate'` / `'squad'` | 同名 | squad 角色 |
 | `'rocky'`（playground 主会话） | **`'rocky'`** | 顶层非角色 session（最常见的「parent」场景：playground 主会话 spawn 出 subagent，parent 自身不是任何 squad 角色） | |
 
-**name 派生**（`inbox-enrich.ts:deriveAgentRefName`）：
-- subagent → `subAgentTemplateType`（如 `"explorer"`）；缺省 → `"subagent"`
-- 其他（含 standalone parent / leader / mate / squad）→ `session.title`；无 title → `"parent"`
+**name 派生**（`inbox-enrich.ts:deriveAgentRefName`，[v0.0.340] 改 async + 可选 memberStore）：
+- subagent → `subAgentTemplateType`（如 `"explorer"`）；缺省 → `"subagent"`（subagent 分支优先于反查，templateType 语义不变）
+- **squad 成员（session.squadId+memberId 且注入 memberStore）→ `memberStore.getMember` 实时名（[v0.0.340 决策 1] 成员名权威源 = memberStore，不再把 session.title 当成员名读——in 信封 sender 名与 roster 永远一致，改名后显示新名）；反查失败静默 fallback title**
+- 其他（含 standalone parent / squad chat / non-squad-member）→ `session.title`；无 title → `"parent"`
+
+> **[v0.0.340 决策 1] 单一权威源（读）**：成员名权威源 = memberStore（squad 内唯一、人类可读寻址符）。所有「读成员名」路径（in 信封 sender 名 / out 信封 targetName / 系统提示 selfName+parentName）统一从 memberStore 反查（Session 已有 squadId/memberId 字段 → MemberStore.getMember），session.title 只保留「会话标题」语义（titled=true AI 起名/用户自定义不覆盖）。注入面：`EnrichSessionLookup.memberStore?`（inbox-enrich）+ `AgentManagerOptions.memberStore?`（agent-manager，缺省 undefined → 原行为测试兼容）+ bootstrap 装配（AgentManagerImpl 补 `new MemberStore({root:dataDir})`）；send-message-tool 经 `rtc.memberStore` 反查。写路径配套：`patchMemberService` 改名同步关联 session.title（仅 titled!==true；putMember 成功后 updateSession 只传 title 不传 titled；失败抛错透传——方案 A 写时全同步）。
 
 > **顶层 standalone parent 派生 spawn 上下文**：playground 主会话（[v0.0.56] role='rocky'）调 `agent.spawn` 派生子 agent 时，子 agent 收到的首任务 message `sender.agent.ref` 由 `parentAgentRef(ctx)` 派生（`runtime-context.ts`）：`type=ctx.parentType ?? 'subagent'` 占位（顶层 undefined → 占位 'subagent'，仅 runtime 用；进 inbox 前 `enrichForInbox` 会按发送方 session record 反查覆盖为真实 type，[v0.0.56] 即 `'rocky'`，旧 `'session'` 已废弃）；`name=ctx.parentName`（= `session.title ?? 'session'`）。AT `logical_view_prefix_tc1` 真实场景：parent=playground 主会话 → ref.type 经 enrich 后 = `'rocky'`（[v0.0.56]，旧 `'session'`）、ref.name = 派生 spawn 时的 session 描述（如「异步派生 explorer 子 agent」类 title）。本表权威：`inbox-enrich.ts:mapSessionTypeToAgentRefType` + `deriveAgentRefName`。
 
@@ -107,7 +110,7 @@ LLM 调 `send_message(target, ...)` 时，`target` 可填：
 | **role='mate'** | `[squadchat, leader, ...peers]` | 含同 squad 其他 mate（peer 协作 Q2）+ 自己派的 sub-agent（agent 工具内对接）。mate（B 方案：原 member，避免与 squad member entity 名撞） |
 | **role='rocky', derivation='main'** | `[]` | 顶层独立 session 无 a2a 对端 |
 
-**[v0.0.270] enableGroupChat 门控**：`role='leader'` / `role='mate'` 行中的 `squadchat` 条目由 `squad_agents_status.ts deriveSquadScoped()` 的 squadChatEnabled 构造门控——`squad.enableGroupChat === false` → SquadChat 行不渲染（compact 自动过滤）→ **system prompt + system_reminder 两头同时无 SquadChat 条目**（同一 provider 一处管两头，无第二注入点）。`!== false` 语义：undefined（旧 record）视为开，与 api toDetail `?? true` 一致。关态下 send_message('squadchat') → `resolveSquadAlias` 返 null → cannot resolve target（不静默投递）；'leader'/member name 私聊解析不受影响（全私聊语义）。
+**[v0.0.270] enableGroupChat 门控**：`role='leader'` / `role='mate'` 行中的 `squadchat` 条目由 `squad_agents_status.ts deriveSquadScoped()` 的 squadChatEnabled 构造门控——`squad.enableGroupChat === false` → SquadChat 行不渲染（compact 自动过滤）→ **system prompt + system_reminder 两头同时无 SquadChat 条目**（同一 provider 一处管两头，无第二注入点）。`!== false` 语义：undefined（旧 record）视为开，与 api toDetail `?? true` 一致。**[v0.0.340] 新建团队默认 false=关**（建队 `squad-service.ts createSquadService` 显式写 false；存量无字段读 `?? true`=开，不受影响；管理面板 toggle 可手动开）。关态下 send_message('squadchat') → `resolveSquadAlias` 返 null → cannot resolve target（不静默投递）；'leader'/member name 私聊解析不受影响（全私聊语义）。
 
 **重要约束**：**user 不在任何 squad_agents_status 列表里**——agent ↔ user 不走 send_message（user 在每个 session UI 旁；agent 想答 user 出 final text，agent 想主动找 user 看 §1 群聊路径）。
 

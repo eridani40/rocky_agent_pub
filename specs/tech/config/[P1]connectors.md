@@ -38,7 +38,7 @@ since: v0.0.23
 
 **关键语义（`[v0.0.46]` 修正 + `[v0.0.266]` 连接态瘦身）**：switch 与 connection **完全解耦**——`switch=on` **仅表示「用户已启用此功能」**（不再实时反映是否连上）：
 - 用户 toggle on → 立即 `switch=on`（持久化 intent）+ `connection=disconnected`（尚未 connect）。
-- **`[v0.0.266]` 连接态不再由 ConnectorManager 维护**：attach 连接/断开/失活全部归 InstanceManager（launch=connect / close=disconnect / 失活自愈下沉 AttachModeImpl），`connection` 恒 `disconnected`（仅 UI 展示用）。LLM 调 `browser({mode:'attach', action:'launch'})` → AttachModeImpl.launch → attachDriver.connect（见 §6），`switch` 保持 `on` 全程不变。
+- **`[v0.0.266]` 连接态不再由 ConnectorManager 维护**：attach 连接/断开/失活全部归 InstanceManager（launch=connect / close=断 MCP + 调试态残留检测提示 / 失活自愈下沉 AttachModeImpl），`connection` 恒 `disconnected`（仅 UI 展示用）。LLM 调 `browser({mode:'attach', action:'launch'})` → AttachModeImpl.launch → attachDriver.connect（见 §6），`switch` 保持 `on` 全程不变。
 - 重启 `intent=on` → `switch=on`（UI 显启用）+ `connection=disconnected`（不 auto connect），LLM 用 attach launch 时才连。
 
 ## 3. 状态机
@@ -67,7 +67,7 @@ interface ConnectorState {
 | attach 连接失败（`[v0.0.34]` 判据真实化 list_pages round-trip 失败） | on（保持）`[v0.0.46]` | — | InstanceManager `connectAttachSession` 失败 → `{kind:'attach_failed'}`；**不自动重连**（沿用 §3.3）；用户再让 agent launch 触发重试 |
 | 用户点 toggle off（intent=off） | off | disconnected | 仅持久化 intent + UI switch=off；**不断已连接的 attach**（attach 连接归 InstanceManager，由 close/releaseSession 释放）`[v0.0.266]` |
 | 运行中 chrome 关闭/连接断（switch=on）`[v0.0.266]` | on（保持） | — | attach 操作时 CDP 失活 → AttachModeImpl.execute 内检测 `isAttachConnectionLost` → 置 handle.state='dead' + 返回 attach_lost → manager 收尾 closeInstance（disconnect + 删条目）→ 下次 `no_browser_instance` 引导重新 launch |
-| **session 结束（agent DELETE / idle）**`[v0.0.46]` | on（保持） | — | InstanceManager `releaseSession(sid)` 兜底：key 前缀 `sessionId:` 匹配（含 attach）→ attach 走 disconnectAttachSession（不杀用户 Chrome）`[v0.0.266]` |
+| **session 结束（agent DELETE / idle）**`[v0.0.46]` | on（保持） | — | InstanceManager `releaseSession(sid)` 兜底：key 前缀 `sessionId:` 匹配（含 attach）→ attach 走断 MCP + 调试态残留检测提示（不杀用户 Chrome）`[v0.0.266]` → `[v0.0.330]` 残留检测同 close 路径 |
 | **app 重启（持久化 intent=on）**`[v0.0.46]` | **on** | disconnected | ConnectorManager `bootstrap()` 只读 intent 恢复 UI 态；**不 connect、不 spawn chrome-devtools-mcp、不弹「有应用要调试」prompt**（对比 v0.0.34：立即 connecting）；attach 连接由用户下次 launch 建立 `[v0.0.266]` |
 
 > **`[v0.0.46]` 核心差异**：v0.0.34 把 switch=on 当作「立即 connect 意图」；v0.0.46 后 switch 退化为**纯功能开关**——connect 时机由 tool.run 首次调 attach 触发。**`[v0.0.266]` 进一步**：connect/disconnect/owner 职责整体迁 InstanceManager（launch=connect / close=disconnect / 失活自愈），ConnectorManager 只做 switch 门禁 + UI 状态（enable/disable/bootstrap/getState/getAll/isReady）——**connection 状态不再由 ConnectorManager 维护**（恒 disconnected，仅 UI 展示用）。
@@ -149,7 +149,7 @@ const im = new BrowserInstanceManager({
 });
 
 // browser_tool run 内（mode==='attach'，[v0.0.266 T3] 零 mode 分叉——操作类 action 统一走 execute）
-// launch → im.launch(sessionId, {mode:'attach', cdpUrl?})
+// launch → im.launch(sessionId, {mode:'attach'})（[v0.0.334] -cdpUrl，仅 autoConnect）
 //   ├─ isAttachEnabled() false → {kind:'not_enabled'}（引导用户去连接器页开启开关）
 //   └─ AttachModeImpl.launch → attachDriver.connect → BrowserSession（key=sessionId:attach 幂等复用）
 // 操作类 action → im.execute(sessionId, {mode:'attach'}, action, params, ctx)

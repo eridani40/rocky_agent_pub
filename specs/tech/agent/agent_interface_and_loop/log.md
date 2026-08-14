@@ -1,13 +1,27 @@
 ---
 type: log
 title: Agent Interface & Loop KB 变更记录
-updated: 2026-08-07
+updated: 2026-08-12
 ---
 
 # Agent Interface & Loop KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-12 · v0.0.340（in 信封 sender 名反查 memberStore — 决策 1 读单一源注入面）
+
+- **`[P0]agent_inbox_enqueue.md §2.5.3`**：name 反查规则表补 [v0.0.340 决策 1] squad 成员行——sender session 有 `squadId+memberId` 且注入 `lookup.memberStore` → `memberStore.getMember(squadId, memberId)?.name`（**实时成员名，成员名权威源 = memberStore**；in 信封 sender 名与 roster 永远一致，改名后显示新名）；反查失败静默 fallback title；subagent 分支优先（templateType 语义不变）。`deriveAgentRefName` 改 async；`EnrichSessionLookup` 加可选 `memberStore?`（缺省 undefined → 原行为）。
+- **`[P0]agent_manager.md §2.3`**：AgentManagerImpl 补可选 `memberStore?: MemberStore` 字段（bootstrap-agent-phase 装配注入 `new MemberStore({root:dataDir})`；缺省 undefined → enrich 不反查，测试兼容）；deliverTo enrich 调用带 `{ memberStore: this.memberStore }`（managerDeliverTo 经 childrenOps 透传）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `inbox-enrich.ts` deriveAgentRefName async + lookup.memberStore 反查 + subagent 优先 ✅；② `agent-manager.ts` AgentManagerOptions.memberStore? + childrenOps 透传 ✅；③ `bootstrap-agent-phase.ts` new AgentManagerImpl 补 memberStore（同 setSquadReminderDeps 同款模式）+ bootstrap-memberstore-injection.test.ts 装配级回归 ✅；④ buildAgentToolContext 闭包 deriveMemberName（selfName/parentName 反查）✅。
+- 详情：`specs/tech/version_logs/v0.0.340-squad-defaults-and-rename/change_plan.md` + `change_log.md`
+
+## 2026-08-12 · v0.0.338（mate 退出通知 interrupted 提示）
+
+- **`[P0]agent_loop_unified.md §3.2`**：mateExitNotify 装配段通知内容补「退出原因行（`[v0.0.338]` 条件追加）」——`stopReason === 'interrupted'` → `退出原因: interrupted（由用户中断，如需要可向用户查证）`（老板钦定文案）；其余 6 种 reason（no_tool_call/no_new_messages/max_iterations/doom_loop/error/tool_pending）输出逐字节不变。
+- **实现**：`mate-exit-notify.ts` formatMateExitNotify 条件分支（:99-103）；UT +2（interrupted 含提示 + 其他 6 种 not.toContain）；全量 10373 passed 零回归。
+- **偏离记录**：change_plan M1 原文「可询问用户」→ 代码「可向用户查证」（leader 派单 + 老板钦定文案，commit message 载明）；以代码为准。
+- 详情：`specs/tech/version_logs/v0.0.338.mate_exit_interrupted_tip/change_plan.md` + `change_log.md`
 
 ## 2026-08-07 · v0.0.273（mate run 退出通知 leader hook — mateExitNotify 装配）
 

@@ -3,7 +3,7 @@ type: spec
 title: File-System CRUD Store Engine（文件系统存储引擎）
 priority: P0
 status: active
-updated: 2026-08-05
+updated: 2026-08-13
 since: v0.0.2
 ---
 
@@ -89,6 +89,12 @@ jsonl 段文件每行即一条上述记录（同行序按 id 升序）。
 **结论**：新 id > 当前 shard 最大 id → append 尾段（尾段达 `jsonlMaxCount` 则新开一段）；新 id < 最大 id（乱序/回填）→ 二分定位段 + 重写段、插到正确行位置。**乱序回填后若插入位置在段首（新首条 id < 原段名），段名需更新为新首条 ULID**（删旧段文件、写新段名文件），保证 §3.2「段名=段首条」不变式（实现 `fs-jsonl.ts:jsonlPut` 插入分支 137-144 行；delete 同样在删首行后更新段名，见 `jsonlDelete` 197-205 行）。
 **理由**：transcript 的主路径是顺序 append（id 单调递增），append 尾段 O(1)；乱序回填是低频场景，重写段可接受。段名更新是维护「段名集合字典序 = id 范围序」的必要副作用——否则后续二分定位会落到错误段，导致 get/query 漏数据。
 **反例**：若全部走「append + 全局重排」，主路径被拖累；若禁止乱序写入，则回填历史数据无法支持；若回填后不更新段名，则段名不再等于段首条，二分定位语义破坏。
+
+**热路径优化（v0.0.302）：模块级 tailCache 零读 append**。`fs-jsonl.ts` 持有 `tailCache: Map<dir, { segName, count, maxId }>`（模块级、纯进程内存、无持久化）：
+- **命中条件**：`jsonlPut(dir, id, ...)` 时 `tailCache.has(dir)` 且 `id > cached.maxId`（顺序追加）→ 零读文件直接 append：尾段未满（`count < maxCount`）→ `appendSegmentLine` 纯 append 一行，count+1、maxId=id；尾段满 → 新开一段（段名=id）并重置缓存。
+- **冷填充**：cache miss 或乱序回填（`id <= maxId`）走原读文件路径（读尾段取当前 maxId）；顺序 append 时读一次填缓存，后续连续追加全走热路径。
+- **失效时机**：乱序回填（插入位置在段首/段中）、delete/update 重写段等任何改变段结构的操作 → `tailCache.delete(dir)`，下次访问重新冷填充。
+- **安全性**：缓存只加速「id 单调递增的连续 append」这一可判定的热路径；一旦出现乱序或段重写立即失效回退读文件，不会造成数据错误。
 
 ### 3.5 delete/update → 重写段，无 tombstone/compaction
 

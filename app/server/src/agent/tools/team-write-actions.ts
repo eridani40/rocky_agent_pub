@@ -154,7 +154,7 @@ export async function runDeploy(input: ToolInput, rtc: AgentToolRuntimeContext):
   try {
     const memberId = await resolveMemberId(rtc.memberStore!, rtc.selfSquadId!, roleId);
     const member = await deployMemberService(
-      { memberStore: rtc.memberStore! },
+      { memberStore: rtc.memberStore!, sessionStore: rtc.store },
       rtc.selfSquadId!,
       memberId,
       rtc.currentMessageId,
@@ -175,7 +175,7 @@ export async function runBench(input: ToolInput, rtc: AgentToolRuntimeContext): 
   try {
     const memberId = await resolveMemberId(rtc.memberStore!, rtc.selfSquadId!, roleId);
     const member = await benchMemberService(
-      { memberStore: rtc.memberStore! },
+      { memberStore: rtc.memberStore!, sessionStore: rtc.store },
       rtc.selfSquadId!,
       memberId,
       reason,
@@ -215,7 +215,7 @@ export async function runEdit(input: ToolInput, rtc: AgentToolRuntimeContext): P
   try {
     const memberId = await resolveMemberId(rtc.memberStore!, rtc.selfSquadId!, roleId);
     const member = await patchMemberService(
-      { memberStore: rtc.memberStore! },
+      { memberStore: rtc.memberStore!, sessionStore: rtc.store },
       rtc.selfSquadId!,
       memberId,
       patch,

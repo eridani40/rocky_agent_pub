@@ -17,14 +17,15 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import type { BrowserLaunchOptions, PersistedInstanceRecord } from '../types';
 import type { ModeImplEnv } from '../mode-impl';
 import { WorkerModeImpl, type WorkerHandle } from '../worker-mode-impl';
-import { instanceRecordPath } from '../instance-record';
+import { BrowserInstanceLedger } from '../instance-ledger';
+import { BunSqlDriver } from '../../../persistence/search-sql-driver';
 
 // mock node:fs：mkdtempSync 对 headless 前缀返回固定路径（不真建目录）；其余（测试 dataDir）走真实。
 vi.mock('node:fs', async (importOriginal) => {
@@ -111,18 +112,23 @@ function makeFakeWorker(): FakeWorkerControl {
   };
 }
 
-/** 测试临时 dataDir（instance-record 真实写文件） */
+/** 测试临时 dataDir + 真实 sqlite ledger（v0.0.334 B：台账替代 browser-instances.json） */
 let dataDir: string;
-beforeEach(() => {
+let ledger: BrowserInstanceLedger;
+let sqlDriver: BunSqlDriver;
+beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'worker-impl-ut-'));
+  sqlDriver = await BunSqlDriver.create(join(dataDir, 'browser.sqlite'));
+  ledger = new BrowserInstanceLedger(sqlDriver);
   rmSyncMock.mockClear();
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  sqlDriver.close();
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-/** mock env（allocatePort 固定 18800；releasePort 记录调用） */
+/** mock env（allocatePort 固定 18800；releasePort 记录调用；ledger 注入真实 sqlite） */
 function makeEnv(over: Partial<ModeImplEnv> = {}): ModeImplEnv & { releasePort: ReturnType<typeof vi.fn> } {
   const releasePort = vi.fn();
   return {
@@ -130,6 +136,7 @@ function makeEnv(over: Partial<ModeImplEnv> = {}): ModeImplEnv & { releasePort: 
     now: () => 1_000,
     allocatePort: async () => 18_800,
     releasePort,
+    ledger,
     ...over,
   } as ModeImplEnv & { releasePort: ReturnType<typeof vi.fn> };
 }
@@ -164,11 +171,9 @@ async function launchOk(
   return { fake, r };
 }
 
-/** 读实例记录文件 */
+/** 读台账记录（v0.0.334 B：listAll 替代 JSON 文件读） */
 function readRecords(): PersistedInstanceRecord[] {
-  const file = instanceRecordPath(dataDir);
-  if (!existsSync(file)) return [];
-  return JSON.parse(readFileSync(file, 'utf8')) as PersistedInstanceRecord[];
+  return ledger.listAll();
 }
 
 describe('WorkerModeImpl launch', () => {
@@ -391,6 +396,34 @@ describe('WorkerModeImpl close', () => {
     expect(env.releasePort.mock.calls.length).toBe(releaseCount); // 不重复释放端口
     expect(readRecords().length).toBe(0);
   });
+
+  it('[U9] managed-profile close 对称：kill 进程组 + releasePort + unpersist；不删 userDataDir（持久语义）', async () => {
+    const { impl, holder } = makeImpl();
+    const env = makeEnv();
+    const p = impl.launch('s1:managed-profile', { mode: 'managed-profile', profileName: 'p1' }, env);
+    const fake = await new Promise<FakeWorkerControl>((resolve) => {
+      setTimeout(() => resolve(holder.fake!), 10);
+    });
+    fake.emitStdout(JSON.stringify({ ok: true, text: 'launched' }) + '\n');
+    const lr = await p;
+    expect(lr.ok).toBe(true);
+    if (!lr.ok) return;
+    const wh = lr.handle as WorkerHandle;
+    const userDataDir = wh.userDataDir; // managed-profile 持久目录
+    expect(userDataDir).toBeTruthy();
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const rmCallsBefore = rmSyncMock.mock.calls.length;
+    await impl.close(lr.handle, env);
+    // 对称回收：close 帧 + kill worker 组 + releasePort + unpersist + 删记录
+    const closeLine = JSON.parse(fake.writtenTask().trim().split('\n').at(-1)!);
+    expect(closeLine.action).toBe('close');
+    expect(killSpy).toHaveBeenCalledWith(-23456, 'SIGKILL');
+    expect(env.releasePort).toHaveBeenCalledWith(18800);
+    expect(readRecords().length).toBe(0);
+    // 持久语义：不删用户数据目录（仅 headless 删目录）
+    expect(rmSyncMock.mock.calls.length).toBe(rmCallsBefore);
+    expect(lr.handle.state).toBe('dead');
+  });
 });
 
 describe('WorkerModeImpl cleanupOrphan', () => {
@@ -398,23 +431,15 @@ describe('WorkerModeImpl cleanupOrphan', () => {
     const { impl } = makeImpl();
     const env = makeEnv();
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
-    writeFileSync(
-      instanceRecordPath(dataDir),
-      JSON.stringify(
-        [
-          {
-            key: 's1:headless',
-            mode: 'headless',
-            userDataDir: '/tmp/orphan-ut',
-            cdpPort: 18801,
-            workerPid: process.pid,
-            createdAt: 0,
-          },
-        ],
-        null,
-        2,
-      ),
-    );
+    // seed 台账（v0.0.334 B：ledger.insert 替代 JSON 文件）
+    ledger.insert({
+      key: 's1:headless',
+      mode: 'headless',
+      userDataDir: '/tmp/orphan-ut',
+      cdpPort: 18801,
+      workerPid: process.pid,
+      createdAt: 0,
+    });
     impl.cleanupOrphan?.(
       {
         key: 's1:headless',

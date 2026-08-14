@@ -137,6 +137,8 @@ export function ManageTab({ detail, onSaveMeta, onDelete, onSaveBarChange }: Man
           actionKey="studio.squad.select-default-model"
           value={modelDefaultSel}
           onChange={(sel) => setModelDefaultSel(sel)}
+          // [v0.0.344] 加宽：w-full 跟随容器（对齐同区域 INPUT/Dropdown），长模型名（minimax-xxx/deepseek-xxx）完整显示
+          triggerClassName="w-full whitespace-nowrap overflow-hidden text-ellipsis"
         />
       </div>
       {/* [v0.0.279] 团队默认推理强度下拉（4 档，恒有值——detail 回显 ?? 'default'） */}

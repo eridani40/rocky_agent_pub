@@ -25,7 +25,7 @@ import { CompositeStore } from '../../persistence/composite';
 import { FsCrudStore } from '../../persistence/fs-store';
 import { SessionStore } from '../../agent/session-store';
 import { ulid } from '../../config/ulid';
-import { handleWorkspaceFileRead, handleWorkspaceFileSave } from '../session-workspace-file';
+import { handleWorkspaceFileRead, handleWorkspaceFileSave, handleWorkspaceStat } from '../session-workspace-file';
 import type { SessionHandlerDeps } from '../session';
 import type { AgentManagerImpl } from '../../agent/agent-manager';
 
@@ -555,5 +555,92 @@ describe('POST /session/:id/workspace/file/save', () => {
     );
     expect(r2.status).toBe(405);
     expect(r2.headers.get('allow')).toBe('POST');
+  });
+});
+
+// ============================================================
+// GET /session/:id/workspace/stat（v0.0.339：文件大小判定，打开分流用）
+// ============================================================
+
+describe('GET /session/:id/workspace/stat', () => {
+  it('正常 stat 文件 → 200 + { size }（只 stat 不读内容）', async () => {
+    writeFileSync(join(ws, 'big.log'), 'x'.repeat(1024));
+    const sid = await newSessionWithWorkspace(ws);
+    const r = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat?path=big.log`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r.status).toBe(200);
+    const parsed = await body(r);
+    expect(parsed.size).toBe(1024);
+  });
+
+  it('子目录文件 stat → 200 + { size }（与 file read 同 whitelistResolve 安全面）', async () => {
+    mkdirSync(join(ws, 'sub'), { recursive: true });
+    writeFileSync(join(ws, 'sub/nested.md'), 'hello');
+    const sid = await newSessionWithWorkspace(ws);
+    const r = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat?path=sub%2Fnested.md`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r.status).toBe(200);
+    expect((await body(r)).size).toBe(5);
+  });
+
+  it('文件不存在 → 404', async () => {
+    const sid = await newSessionWithWorkspace(ws);
+    const r = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat?path=missing.md`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r.status).toBe(404);
+  });
+
+  it('目录 → 404（stat 端点只服务文件大小判定）', async () => {
+    mkdirSync(join(ws, 'dir'), { recursive: true });
+    const sid = await newSessionWithWorkspace(ws);
+    const r = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat?path=dir`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r.status).toBe(404);
+  });
+
+  it('路径穿越 ../ → 400（whitelistResolve traversal）', async () => {
+    const sid = await newSessionWithWorkspace(ws);
+    const r = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat?path=..%2Fetc%2Fpasswd`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r.status).toBe(400);
+  });
+
+  it('绝对路径注入 /etc/passwd → 400', async () => {
+    const sid = await newSessionWithWorkspace(ws);
+    const r = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat?path=${encodeURIComponent('/etc/passwd')}`),
+      'GET', sid, makeDeps(),
+    );
+    expect(r.status).toBe(400);
+  });
+
+  it('path 缺失 / session 不存在 / 非 GET → 400 / 404 / 405', async () => {
+    const sid = await newSessionWithWorkspace(ws);
+    // path 缺失
+    const r1 = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat`), 'GET', sid, makeDeps(),
+    );
+    expect(r1.status).toBe(400);
+    // session 不存在
+    const r2 = await handleWorkspaceStat(
+      new Request(`http://x/session/01KVNOPE/workspace/stat?path=a.md`), 'GET', '01KVNOPE', makeDeps(),
+    );
+    expect(r2.status).toBe(404);
+    // 非 GET（POST）→ 405 + allow=GET
+    const r3 = await handleWorkspaceStat(
+      new Request(`http://x/session/${sid}/workspace/stat?path=a.md`), 'POST', sid, makeDeps(),
+    );
+    expect(r3.status).toBe(405);
+    expect(r3.headers.get('allow')).toBe('GET');
   });
 });

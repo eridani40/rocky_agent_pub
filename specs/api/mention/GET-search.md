@@ -1,6 +1,6 @@
 # GET /mention/search — Mention 搜索端点
 
-> version: 1.2 · 引入版本 v0.0.45 · 修订 v0.0.86（MentionItem 加 `display` 分组；workitem address 拆 `kind`+`id`）
+> version: 1.4 · 引入版本 v0.0.45 · 修订 v0.0.86（MentionItem 加 `display` 分组；workitem address 拆 `kind`+`id`）· 修订 v0.0.346（响应加 `truncated?: boolean`；file provider 目录条目 type='file'）· 修订 v0.0.346-2（MentionItem 加 `isDir?: boolean`；目录条目 listView.icon='folder'）
 > 管什么：mention 搜索 API 端点契约——前端传 provider + query + sessionId，server 路由到对应 provider 执行搜索并返回结果列表（含 address + display 完整字段）。
 > 不管什么：provider 内部实现（→ `specs/tech/mention/provider-interface.md`）；消息 content 结构（→ `specs/tech/mention/message-content.md`）；前端 MentionPopover 组件（→ `specs/ui/components/chat-page/mention-popover.md`）。
 > **本文件是 AT（API Test）mention search 域的唯一依据**：api-verifier 黑盒 curl，不读代码。
@@ -34,11 +34,15 @@ GET /mention/search?provider=file&query=help&sessionId=01KVCA58G80Y54TTF2S8ZPFR5
 interface SearchResponse {
   items: MentionItem[];
   nextCursor?: string;
+  /** [v0.0.346] 是否达搜索上限（files+dirs 合计 100）早停截断；仅 true 时输出，缺省省略（向后兼容） */
+  truncated?: boolean;
 }
 
 interface MentionItem {
   /** 类型标识（'file' | 'skill' | 'workitem' | 'member'，开放枚举） */
   type: string;
+  /** [v0.0.346-2] 是否为目录条目（file provider 目录命中 true；缺省 = 文件，向后兼容；member/skill/workitem 不设） */
+  isDir?: boolean;
 
   // ─── Address（按 type 不同字段不同） ───
   /** file/skill: 路径（file=workspaceDir 下相对；skill=绝对目录）。workitem/member: 不使用 */
@@ -82,6 +86,20 @@ interface MentionItem {
   ]
 }
 ```
+
+**响应示例（file provider — 命中超 100 早停截断，v0.0.346）**：
+```json
+{
+  "items": [
+    { "type": "file", "path": "src/utils/helper.ts", "display": { "icon": "file", "label": "helper.ts" }, "listView": { "title": "helper.ts", "subtitle": "src/utils/", "icon": "file" } },
+    { "type": "file", "isDir": true, "path": "src/components", "display": { "icon": "file", "label": "components" }, "listView": { "title": "components", "subtitle": "src/", "icon": "folder" } },
+    { "type": "file", "path": "README.md", "display": { "icon": "file", "label": "README.md" }, "listView": { "title": "README.md", "subtitle": "/", "icon": "file" } }
+  ],
+  "nextCursor": "MjA=",
+  "truncated": true
+}
+```
+> 目录命中条目复用 `type='file'` + `path=目录相对路径` + `isDir:true`（v0.0.346-2 起），`listView.icon='folder'`、`display.icon` 保持 `'file'`（pill 不区分，防历史消息不一致）；根路径条目 `subtitle='/'` 始终展示。文件条目 isDir 缺省（向后兼容）。
 
 **响应示例（skill provider）**：
 ```json
@@ -170,3 +188,4 @@ server 根据 sessionId 查 session record，按以下规则确定搜索范围�
 - **首次搜索**：不传 cursor。
 - **翻页**：传上一次响应的 `nextCursor`。
 - **终止条件**：响应中无 `nextCursor` 字段或缺失 = 无更多结果。
+- **truncated 语义（v0.0.346）**：file provider 命中集合（files+dirs 合计）达 100 上限早停 → 响应带 `truncated: true`（仅 true 时输出，缺省省略向后兼容）。前端据此渲染超限提示（`mention.searchTooMany`，不阻塞「加载更多」滚动翻页）；翻页 append 时 truncated 保留透传。

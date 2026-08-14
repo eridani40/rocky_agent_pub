@@ -1,13 +1,18 @@
 ---
 type: log
 title: Config KB 变更记录
-updated: 2026-08-04
+updated: 2026-08-13
 ---
 
 # Config KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-13 · v0.0.302（KvConfigService 读缓存）
+
+- **`[P0]app_config.md §5.1`（新增）**：`KvConfigService` 内置二级读缓存 `cache: Map<group, Map<key, data>>`——lazy fill（首次访问 group 整组 query 一次，之后零 fs 取 Map；空 Map 区分「未缓存/已缓存但空」）+ write-through invalidate（set/setGroup/delete 写后整组失效，下次 lazy 重填）+ 纯进程内存不持久化；`findRecord()`（set/delete 内部需 id）不走缓存。
+- 详情：`specs/tech/version_logs/v0.0.302/change_plan.md`（v0.0.302 编码期实现，此前的 spec 同步缺失，本次补记）。
 
 ## 2026-08-04 · v0.0.247 session 组 §3.15 补 4 分层 key + 存储硬上限同源说明
 

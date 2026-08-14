@@ -3,7 +3,7 @@ type: spec
 title: AppConfig Schema（用户配置 + 技术调参）
 priority: P0
 status: active
-updated: 2026-08-04
+updated: 2026-08-13
 since: v0.0.2
 ---
 
@@ -493,5 +493,14 @@ interface AppConfigService {
 - **权威组** record 缺失即未配置——service 不做「缺省→默认」回退；**可选覆盖调参组**（agent/context/logs，迁自废弃 dev_config）由消费方侧 `?? CODE_DEFAULT` 处理，service 仍只做裸 KV 读（见 §3.14）。
 - **`setGroup`**：按 group shard 批量 upsert（原子：该 group 内 items 全成功或全失败）；**其他 group record 完全不读不写**。供 UI「保存该 group」用（PRD §3.9.2）。底经 CrudStore 按 group shard 目录批量写。
 - HTTP facade 由 specs/api 统一对外（按域分路由），本文不定义端点。
+
+### 5.1 内存读缓存（KvConfigService 基类内置）
+
+`KvConfigService`（`app/server/src/config/kv-config-service.ts`）持有二级读缓存 `cache: Map<group, Map<key, data>>`：
+
+- **lazy fill**：`get()` / `listGroup()` 先经 `ensureGroupCache(group)`——首次访问某 group 时 query 整 group shard 一次，构建 `key→data` Map 填入；已缓存（`cache.has(group)`）则零 fs 直接取 Map。group 无 record 时填**空 Map**，区分「未缓存」与「已缓存但空」。
+- **write-through invalidate**：`set()` / `setGroup()` / `delete()` 写后调用 `invalidateGroup(group)` 删整组缓存条目，下次 get lazy 重填，保证缓存与磁盘一致。
+- **范围**：缓存只服务读路径（get/listGroup）；`findRecord()`（set/delete 内部需 record id）不走缓存，仍直接 query 该 group shard。
+- **不持久化**：纯进程内存，重启即空。
 
 > 变更历史见 [`log.md`](log.md)；跨版本发布说明见 [`specs/tech/version_logs/vX.Y/change_log.md`](../version_logs/)。

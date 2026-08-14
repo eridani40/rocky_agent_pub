@@ -135,10 +135,12 @@ export function ComponentUsagePanel({ usage, onCompact, onClear, summaryTask, se
         <div
 
           onClick={(e) => e.stopPropagation()}
-          // 左下展开 + 避让右侧功能区（v0.0.328 修复 326）：panel 右缘向左偏 96px，
-          //   让开 chat 右缘 float-menu 竖排（overlay right-6=24px + 本体宽 42px + 30px 视觉缓冲 = 96px），
-          //   不再 right-0 贴环右缘（那样 panel 300px 宽会盖住 float-menu 列）。
-          className="absolute top-full right-[96px] mt-1.5 bg-surface border border-border rounded-xl shadow-[0_12px_32px_rgba(40,30,20,0.16)] p-3.5 w-[300px] z-[var(--z-popover)]"
+          // 左下展开 + 避让右侧功能区（v0.0.328 修复 326 起；v0.0.332 收窄退让）：
+          //   panel 右缘 = ring 左缘 - 12px 缓冲（实测 ring 宽 36px，容器右缘即 ring 右缘，
+          //   right-[48px] = 36 + 12）；同时不碰 chat 右缘 float-menu（其左缘在 ring 左缘左 4px，
+          //   panel 右缘 934 < float-menu 左缘 942，留 8px 间隙）。
+          //   不回到 right-0（那样 panel 300px 宽会盖住 float-menu 列）。
+          className="absolute top-full right-[48px] mt-1.5 bg-surface border border-border rounded-xl shadow-[0_12px_32px_rgba(40,30,20,0.16)] p-3.5 w-[300px] z-[var(--z-popover)]"
         >
           {/* head：标题左 + CompactBtn/ClearBtn 右（v0.0.326 移入面板，size='sm'） */}
           <div className="flex items-center justify-between mb-3">

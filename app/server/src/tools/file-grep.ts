@@ -15,7 +15,7 @@
  * 默认不遵循 .gitignore（含隐藏文件）。
  */
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { Tool, ToolCtx, ToolInput, ToolRunResult } from './types';
@@ -92,7 +92,7 @@ export const fileGrepTool: Tool = {
     }
 
     // 降级：JS 遍历
-    const out = jsGrep({
+    const out = await jsGrep({
       root,
       regex,
       lineNumber,
@@ -181,17 +181,19 @@ interface JsOpts {
   headLimit: number;
 }
 
-/** JS 遍历实现 grep（ripgrep 不可用时降级路径） */
-function jsGrep(o: JsOpts): string {
+/** JS 遍历实现 grep（ripgrep 不可用时降级路径）。
+ * [v0.0.345] async 化：fs.promises（libuv 线程池，不阻塞 event loop）；
+ * headLimit 提前终止语义不变（串行 for...of await 不改变计数顺序）。 */
+async function jsGrep(o: JsOpts): Promise<string> {
   const globRe = o.globFilter ? globToRegExp(stripGlobRoot(o.globFilter)) : null;
   const lines: string[] = [];
   let emitted = 0;
 
-  const walk = (dir: string, depth: number): void => {
+  const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > MAX_DEPTH || emitted >= o.headLimit) return;
     let entries: Dirent[];
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = await readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -200,12 +202,12 @@ function jsGrep(o: JsOpts): string {
       const full = join(dir, ent.name);
       let st;
       try {
-        st = statSync(full);
+        st = await stat(full);
       } catch {
         continue;
       }
       if (st.isDirectory()) {
-        walk(full, depth + 1);
+        await walk(full, depth + 1);
         continue;
       }
       if (!st.isFile()) continue;
@@ -214,7 +216,7 @@ function jsGrep(o: JsOpts): string {
 
       let body: string;
       try {
-        body = readFileSync(full, 'utf8');
+        body = await readFile(full, 'utf8');
       } catch {
         continue;
       }
@@ -246,7 +248,7 @@ function jsGrep(o: JsOpts): string {
     }
   };
 
-  walk(o.root, 0);
+  await walk(o.root, 0);
   return lines.join('\n');
 }
 

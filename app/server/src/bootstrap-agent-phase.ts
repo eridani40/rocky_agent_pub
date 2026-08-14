@@ -32,9 +32,6 @@ import { InboxStore } from './agent/inbox';
 import { ToolExecutionEngine } from './tools/engine';
 import { defaultToolDefinitions } from './tools/registry';
 import { approvalManager } from './tools/approval-manager';
-// [v0.0.307] worker pool 单例（白名单纯 IO 工具执行挪线程）
-import { createToolWorkerPool, _resetToolWorkerPoolSingleton } from './tools/worker-pool';
-import type { ToolWorkerPool } from './tools/worker-pool';
 import { makeLoadTemplate, upsertExplorerTemplate } from './agent/tools/template-store';
 import { SquadStore, MemberStore } from './stores/squad-store';
 import {
@@ -92,18 +89,7 @@ export async function bootstrapAgentPhase(deps: {
 
   // 工具：engine + defaultToolDefinitions（workdir）；definitions 供 assemble → snapshot.tools 用。
   // SessionConfig.tools（defaultTools(workdir)）由 session-messages handler 在 POST messages 时构造。
-  // [v0.0.307] worker pool 单例注入：白名单纯 IO 工具（read/write/edit/glob/grep/skill）执行挪线程。
-  //   try-catch 降级：createToolWorkerPool 抛错 → 不传 workerPool，工具仍主线程跑（向后兼容）。
-  //   MUST 只装配一次（进程级单池，createToolWorkerPool 内部缓存）。
-  let workerPool: ToolWorkerPool | undefined;
-  try {
-    _resetToolWorkerPoolSingleton(); // 确保每次 bootstrap 从干净状态开始（防热重载残留旧池）
-    workerPool = createToolWorkerPool();
-  } catch {
-    // 降级：worker 创建失败 → engine 不传 workerPool，全部走主线程原路径
-    workerPool = undefined;
-  }
-  const toolEngine = new ToolExecutionEngine(undefined, workerPool);
+  const toolEngine = new ToolExecutionEngine(undefined);
   const toolDefinitions = defaultToolDefinitions(workdir);
 
   // SessionTypePolicy 装配（profile yaml 单源驱动工具解析）
@@ -160,6 +146,8 @@ export async function bootstrapAgentPhase(deps: {
     contextEngine,
     toolEngine,
     observability: observabilityManager,
+    // [v0.0.340 决策 1] memberStore 装配（inbox sender 名反查生产生效；同 :439 setSquadReminderDeps 同款模式）
+    memberStore: new MemberStore({ root: dataDir }),
     // sideRun 内部派生 allowedTools/maxIter（policy 单源；caller 不透传）
     sessionTypePolicy,
   });
@@ -291,6 +279,18 @@ export async function bootstrapAgentPhase(deps: {
       if (s.derivation === 'subagent') return 'subagent';
       return s.role ?? undefined;
     };
+    // [v0.0.340 决策 1] 成员名权威源 = memberStore：session 是 squad 成员（memberId+squadId）时
+    //   反查实时名（非空覆盖 title 快照）；否则 fallback title。反查失败静默 fallback 不抛错。
+    const deriveMemberName = async (s: typeof session): Promise<string | undefined> => {
+      if (!s || s.squadId === undefined || s.memberId === undefined) return undefined;
+      try {
+        const member = await memberStoreForCtx.getMember(s.squadId, s.memberId);
+        if (member?.name && member.name.length > 0) return member.name;
+      } catch {
+        // member 反查失败（member 已删/读失败）静默 fallback title
+      }
+      return undefined;
+    };
     // slim SessionKind（身份 4 字段）+ SessionContext（实例 ID）注入 rtc，
     // 工具改读 rtc.kind/sessionContext 做 caller 校验。
     const rtcKind = session
@@ -322,11 +322,11 @@ export async function bootstrapAgentPhase(deps: {
       parentSessionId: parentSid,
       parentRunId: runId,
       parentType: deriveType(session),
-      parentName: session?.title ?? 'session',
+      parentName: (await deriveMemberName(session)) ?? session?.title ?? 'session',
       parentScope: session?.derivation === 'subagent' ? 'subagent' : 'session',
       selfSessionId: sessionId, // caller self 身份（send_message 发送方）
       selfType: deriveType(session),
-      selfName: session?.title ?? 'session',
+      selfName: (await deriveMemberName(session)) ?? session?.title ?? 'session',
       ...(session?.squadId !== undefined ? { selfSquadId: session.squadId } : {}),
       ...(session?.memberId !== undefined ? { selfMemberId: session.memberId } : {}),
       squadStore: squadStoreForCtx,

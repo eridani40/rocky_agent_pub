@@ -31,6 +31,8 @@ export interface SearchResult {
   items: MentionItem[];
   /** 分页游标（undefined = 无更多结果） */
   nextCursor?: string;
+  /** 是否达搜索上限早停（v0.0.346；handler 响应仅 true 时输出，缺省省略向后兼容） */
+  truncated?: boolean;
 }
 
 /**
@@ -69,6 +71,8 @@ export interface SearchCtx {
 export interface MentionItem {
   /** 类型标识（'file' | 'skill' | 'workitem' | 'member'，开放枚举） */
   type: string;
+  /** 是否为目录条目（file provider 目录命中 true；缺省 = 文件，向后兼容；member/skill/workitem 不设） */
+  isDir?: boolean;
 
   // ─── Address（语义/地址；按 type 不同字段不同） ───
   /**

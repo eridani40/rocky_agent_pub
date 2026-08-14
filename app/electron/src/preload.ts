@@ -56,4 +56,6 @@ contextBridge.exposeInMainWorld('rockyShell', {
   writeFileText: (path: string, content: string) => ipcRenderer.invoke('shell:writeFileText', { path, content }),
   // [v0.0.280] 读绝对路径二进制 → base64（≤2MB）——absolute 源图片 viewer 用
   readFileBinary: (path: string) => ipcRenderer.invoke('shell:readFileBinary', { path }),
+  // [v0.0.339] stat 绝对路径文件 → { size }（文件大小判定，供前端打开分流）
+  stat: (path: string) => ipcRenderer.invoke('shell:stat', { path }),
 });

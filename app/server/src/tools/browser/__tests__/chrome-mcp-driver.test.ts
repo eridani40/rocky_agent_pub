@@ -4,12 +4,12 @@
  *       states/v0.0.23 verify test-plan（br_attach_tc1 semi-manual 由 verifier 跑）
  *
  * 覆盖（不 spawn 真 npx / 不连真 chrome）：
- *   - buildChromeMcpArgs：[v0.0.34] 默认 --browserUrl loopback（禁止自启）/ autoConnect:true 显式 opt-in → --autoConnect
- *     / cdpUrl → --browserUrl / ws → --wsEndpoint / userDataDir 透传 / 必备 experimental flag
+ *   - buildChromeMcpArgs：[v0.0.334] 恒 --autoConnect（删 browserUrl/wsEndpoint 分支）/ userDataDir 透传 / 必备 experimental flag
  *   - connect：handshake 成功后 listTools 校验含 list_pages；缺 → attach_failed
  *   - connect：[v0.0.34] 判据真实化——list_pages probe isError:true / callTool reject → attach_failed；probe 成功（isError falsy）→ connected
+ *   - connect：[v0.0.334] 错误消息版本差异化引导（mock detectChromeVersion：<144 → 请升级 Chrome；≥144/探测失败 → 现有引导）
  *   - connect：handshake 失败（ECONNREFUSED）→ BrowserError attach_failed
- *   - session 缓存：同 profile connect 复用、不同 profile 新连
+ *   - session 缓存：同 profile connect 复用、不同 profile 新连；key=[profileName, userDataDir] 二元组
  *   - MCP tool 映射：listPages/selectPage/navigate/snapshot/click/type/evaluate → 对应 MCP tool
  *     （注：[v0.0.34] connect 时 probe 多调一次 list_pages，session 断言前需 callToolCalls.length=0 重置）
  *   - close：只清 emulation 不杀用户 chrome（no-op，不抛）
@@ -23,7 +23,6 @@ import {
   isAttachConnectError,
   extractPages,
   parsePageIdNumber,
-  DEFAULT_ATTACH_CDP_URL,
 } from '../chrome-mcp-driver';
 import { parseChromeMcpSnapshot } from '../chrome-mcp-snapshot';
 import { BrowserError } from '../types';
@@ -34,6 +33,14 @@ import type {
   McpCallToolResult,
 } from '../mcp-types';
 
+/** mock detectVersion：UT 不真跑 chrome --version（DI 注入 ChromeMcpDriverOptions.detectVersion） */
+const detectVersion = vi.fn(async (): Promise<number | undefined> => undefined);
+
+beforeEach(() => {
+  detectVersion.mockReset();
+  detectVersion.mockResolvedValue(undefined);
+});
+
 // ---- mock McpFactory：记录 create 入参（含 args/env）+ 可控行为 ----
 interface MockState {
   createCalls: { command: string; args: string[]; env?: Record<string, string> }[];
@@ -41,6 +48,8 @@ interface MockState {
   connectShouldFail?: Error;
   callToolCalls: { name: string; arguments?: Record<string, unknown> }[];
   callToolResult: McpCallToolResult;
+  /** [v0.0.334 B7] mock transport 携带的 MCP 子进程 pid（attach 台账锚点） */
+  transportPid?: number;
 }
 
 function makeMockFactory(state: MockState): McpFactory {
@@ -55,7 +64,10 @@ function makeMockFactory(state: MockState): McpFactory {
         },
         close: async () => {},
       };
-      const transport: McpTransport = { close: async () => {} };
+      const transport: McpTransport = {
+        close: async () => {},
+        ...(state.transportPid !== undefined ? { pid: state.transportPid } : {}),
+      };
       return { client, transport };
     },
     async connect(_client, _transport) {
@@ -65,56 +77,25 @@ function makeMockFactory(state: MockState): McpFactory {
 }
 
 describe('buildChromeMcpArgs（v0.0.29 BUG-003：只返回 flags，不含 -y/包名前缀）', () => {
-  it('[v0.0.34.1 HOTFIX] 无 browserUrl → --autoConnect（chrome 144+ inspect 远调模式唯一可用）', () => {
+  it('[v0.0.334] 恒 --autoConnect（无 browserUrl/wsEndpoint 分支，chrome 144+ inspect 远调模式唯一可用）', () => {
     const args = buildChromeMcpArgs({ profileName: 'p1' });
     // v0.0.34 一度默认改为 --browserUrl loopback 试图禁止自启，但 chrome 144+ chrome://inspect 模式
     // 不暴露 /json/version (404)，--browserUrl 必失败 'Failed to fetch ... HTTP Not Found'。
     // 回退到 --autoConnect 默认；autoConnect "自启空 chrome" 副作用由 connect() probe isError 兜住。
     expect(args).toContain('--autoConnect');
     expect(args).not.toContain('--browserUrl');
+    expect(args).not.toContain('--wsEndpoint');
     expect(args).toContain('--experimentalStructuredContent');
     expect(args).toContain('--experimental-page-id-routing');
     expect(args).not.toContain('-y');
     expect(args.some((a) => a.startsWith('chrome-devtools-mcp'))).toBe(false);
   });
 
-  it('[v0.0.34.1] autoConnect:true 显式与默认等价 → --autoConnect（兼容旧 opt-in 入参）', () => {
-    const args = buildChromeMcpArgs({ profileName: 'p1', autoConnect: true });
-    expect(args).toContain('--autoConnect');
-    expect(args).not.toContain('--browserUrl');
-    expect(args).toContain('--experimentalStructuredContent');
-  });
-
-  it('[v0.0.34.1] 显式 browserUrl 优先（用户自负 chrome 端点契约）→ --browserUrl', () => {
-    const args = buildChromeMcpArgs({ browserUrl: 'http://127.0.0.1:9333', autoConnect: true });
-    expect(args).toContain('--browserUrl');
-    expect(args).toContain('http://127.0.0.1:9333');
-    expect(args).not.toContain('--autoConnect');
-  });
-
-  it('cdpUrl http → --browserUrl fallback（不带 autoConnect）', () => {
-    const args = buildChromeMcpArgs({
-      browserUrl: 'http://127.0.0.1:9222',
-    });
-    expect(args).toContain('--browserUrl');
-    expect(args).toContain('http://127.0.0.1:9222');
-    expect(args).not.toContain('--autoConnect');
-    expect(args).not.toContain('-y');
-  });
-
-  it('cdpUrl ws(s) → --wsEndpoint', () => {
-    const args = buildChromeMcpArgs({
-      browserUrl: 'ws://127.0.0.1:9222/devtools/browser/abc',
-    });
-    expect(args).toContain('--wsEndpoint');
-    expect(args.some((a) => a.startsWith('ws://'))).toBe(true);
-    expect(args).not.toContain('--autoConnect');
-  });
-
   it('userDataDir 透传 --userDataDir', () => {
     const args = buildChromeMcpArgs({
       userDataDir: '/tmp/brave-profile',
     });
+    expect(args).toContain('--autoConnect');
     expect(args).toContain('--userDataDir');
     expect(args).toContain('/tmp/brave-profile');
   });
@@ -246,6 +227,76 @@ describe('ChromeMcpDriver.connect：handshake', () => {
     expect(state.callToolCalls).toEqual([{ name: 'list_pages', arguments: {} }]);
   });
 
+  it('[v0.0.334 A15] probe isError + 本机 Chrome <144 → 消息含「请升级 Chrome」', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text: 'Could not connect to Chrome...' }],
+      },
+    };
+    detectVersion.mockResolvedValueOnce(130);
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), detectVersion });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({
+      kind: 'attach_failed',
+      message: expect.stringContaining('检测到 Chrome v130（<144）'),
+    });
+  });
+
+  it('[v0.0.334 A15] probe isError + 本机 Chrome ≥144 → 现有引导（chrome://inspect + ≥144 + 同意 prompt）', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text: 'Could not connect to Chrome...' }],
+      },
+    };
+    detectVersion.mockResolvedValueOnce(144);
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), detectVersion });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({
+      kind: 'attach_failed',
+      message: expect.stringContaining('chrome://inspect/#remote-debugging'),
+    });
+  });
+
+  it('[v0.0.334 A15] probe isError + 版本探测失败（undefined）→ 现有引导不阻断（kind 仍 attach_failed）', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text: 'Could not connect to Chrome...' }],
+      },
+    };
+    detectVersion.mockResolvedValueOnce(undefined);
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), detectVersion });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({
+      kind: 'attach_failed',
+      message: expect.stringContaining('chrome://inspect/#remote-debugging'),
+    });
+  });
+
+  it('[v0.0.334 A15] catch 分支（handshake ECONNREFUSED）+ 本机 Chrome <144 → 消息含「请升级 Chrome」', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      connectShouldFail: new Error('Could not connect to Chrome: ECONNREFUSED 127.0.0.1:9222'),
+      callToolCalls: [],
+      callToolResult: { content: [] },
+    };
+    detectVersion.mockResolvedValueOnce(100);
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), detectVersion });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({
+      kind: 'attach_failed',
+      message: expect.stringContaining('检测到 Chrome v100（<144）'),
+    });
+  });
+
   it('[v0.0.34] probe callTool 自身 reject → attach_failed（catch 兜底）', async () => {
     const factory: McpFactory = {
       create() {
@@ -321,6 +372,190 @@ describe('ChromeMcpDriver.connect：handshake', () => {
       kind: 'attach_failed',
     });
   });
+
+  // ---- v0.0.337 H1/H2：connect 失败清理升级（kill 进程组 + watchdog，killDeps DI） ----
+  it('[v0.0.337 H1/H2] probe isError → killProcessGroup(transport.pid) + execPkill(--parent-pid=<pid>) 被调（失败清理顺序：graceful close → kill 组 → watchdog）', async () => {
+    const killProcessGroupSpy = vi.fn((_pid: number) => {});
+    const execPkillSpy = vi.fn((_cmd: string) => {});
+    const killDeps = {
+      isPidAlive: vi.fn(() => true),
+      killProcessGroup: killProcessGroupSpy,
+      execPkill: execPkillSpy,
+    };
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text: 'Could not connect to Chrome...' }],
+      },
+      transportPid: 4242,
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), killDeps });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({ kind: 'attach_failed' });
+    // H2 ①：kill mcp 主进程组（pid 存活时，SIGKILL）
+    expect(killDeps.isPidAlive).toHaveBeenCalledWith(4242);
+    expect(killProcessGroupSpy).toHaveBeenCalledWith(4242);
+    // H2 ②：kill detached watchdog（--parent-pid=<mcpPid> 精确锚定）
+    expect(execPkillSpy).toHaveBeenCalledTimes(1);
+    const cmd = execPkillSpy.mock.calls[0]![0] as string;
+    expect(cmd).toContain('pkill -9 -f');
+    expect(cmd).toContain('chrome-devtools-mcp');
+    expect(cmd).toContain('--parent-pid=4242');
+  });
+
+  it('[v0.0.337 H2] handshake 失败（无 transport.pid）→ killProcessGroup/pkill 跳过不阻断（退化为 graceful close）', async () => {
+    const killProcessGroupSpy = vi.fn((_pid: number) => {});
+    const execPkillSpy = vi.fn((_cmd: string) => {});
+    const killDeps = {
+      isPidAlive: vi.fn(() => true),
+      killProcessGroup: killProcessGroupSpy,
+      execPkill: execPkillSpy,
+    };
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      connectShouldFail: new Error('Could not connect to Chrome: ECONNREFUSED 127.0.0.1:9222'),
+      callToolCalls: [],
+      callToolResult: { content: [] },
+      // 无 transportPid
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), killDeps });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({ kind: 'attach_failed' });
+    expect(killProcessGroupSpy).not.toHaveBeenCalled(); // 无 pid 跳过 kill 组
+    expect(execPkillSpy).not.toHaveBeenCalled(); // 无 pid 跳过 watchdog pkill
+  });
+
+  it('[v0.0.337 H2] pid 已死 → killProcessGroup 不调（isPidAlive=false，避免杀错进程）', async () => {
+    const killProcessGroupSpy = vi.fn((_pid: number) => {});
+    const killDeps = {
+      isPidAlive: vi.fn(() => false),
+      killProcessGroup: killProcessGroupSpy,
+      execPkill: vi.fn(),
+    };
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text: 'Could not connect to Chrome...' }],
+      },
+      transportPid: 4242,
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), killDeps });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({ kind: 'attach_failed' });
+    expect(killProcessGroupSpy).not.toHaveBeenCalled();
+  });
+
+  it('[v0.0.337 H2] win32 跳过 watchdog pkill（kill 组照常；pkill 仅 unix）', async () => {
+    const killProcessGroupSpy = vi.fn((_pid: number) => {});
+    const execPkillSpy = vi.fn((_cmd: string) => {});
+    const killDeps = {
+      isPidAlive: vi.fn(() => true),
+      killProcessGroup: killProcessGroupSpy,
+      execPkill: execPkillSpy,
+    };
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text: 'Could not connect to Chrome...' }],
+      },
+      transportPid: 4242,
+    };
+    const origPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), killDeps });
+      await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({ kind: 'attach_failed' });
+      expect(killProcessGroupSpy).toHaveBeenCalledWith(4242); // kill 组照常
+      expect(execPkillSpy).not.toHaveBeenCalled(); // win32 跳过 watchdog
+    } finally {
+      Object.defineProperty(process, 'platform', origPlatform);
+    }
+  });
+
+  // ---- v0.0.337 H3：signal abort 感知（abort → attach_failed → 走 catch → H2 清理） ----
+  it('[v0.0.337 H3] handshake 挂起 + signal abort → 抛 attach_failed + killDeps 清理被调（abort 触发 catch 清理）', async () => {
+    const killProcessGroupSpy = vi.fn((_pid: number) => {});
+    const killDeps = {
+      isPidAlive: vi.fn(() => true),
+      killProcessGroup: killProcessGroupSpy,
+      execPkill: vi.fn(),
+    };
+    const factory: McpFactory = {
+      create() {
+        const client: McpClient = {
+          listTools: async () => ({ tools: [{ name: 'list_pages' }] }),
+          callTool: async () => ({ content: [] }),
+          close: async () => {},
+        };
+        const transport: McpTransport = { close: async () => {}, pid: 4242 };
+        return { client, transport };
+      },
+      // handshake 永不 settle（模拟超时挂起）——abort 是唯一出路
+      async connect() { return new Promise<void>(() => {}); },
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: factory, killDeps });
+    const ac = new AbortController();
+    const p = driver.connect({ profileName: 'p1' }, ac.signal);
+    ac.abort();
+    await expect(p).rejects.toMatchObject({ kind: 'attach_failed' });
+    // abort → withAbort 抛 attach_failed → catch → H2 清理（kill 组 + watchdog）
+    expect(killProcessGroupSpy).toHaveBeenCalledWith(4242);
+  });
+
+  it('[v0.0.337 H3] signal 已 aborted → 立即抛 attach_failed（不进入连接流程）', async () => {
+    const killDeps = { isPidAlive: vi.fn(), killProcessGroup: vi.fn(), execPkill: vi.fn() };
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: { content: [] },
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state), killDeps });
+    const ac = new AbortController();
+    ac.abort();
+    await expect(driver.connect({ profileName: 'p1' }, ac.signal)).rejects.toMatchObject({
+      kind: 'attach_failed',
+    });
+  });
+
+  // ---- v0.0.337 H5：lastSpawnPid（spawn 即记，失败也可读；disconnect 清） ----
+  it('[v0.0.337 H5] connect 失败（probe isError）→ getLastSpawnPid() 返回 transport.pid（失败也可读，供 H9 入台账兜底）', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text: 'Could not connect to Chrome...' }],
+      },
+      transportPid: 4242,
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
+    await expect(driver.connect({ profileName: 'p1' })).rejects.toMatchObject({ kind: 'attach_failed' });
+    expect(driver.getLastSpawnPid()).toBe(4242); // 失败也记（spawn 即记）
+  });
+
+  it('[v0.0.337 H5] connect 成功 → getLastSpawnPid() 返回 pid；disconnect 清 undefined（与 lastMcpPid 同步清）', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: { content: [] },
+      transportPid: 4242,
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
+    await driver.connect({ profileName: 'p1' });
+    expect(driver.getLastSpawnPid()).toBe(4242);
+    await driver.disconnect({ profileName: 'p1' });
+    expect(driver.getLastSpawnPid()).toBeUndefined();
+  });
 });
 
 describe('ChromeMcpDriver：session 缓存', () => {
@@ -350,7 +585,7 @@ describe('ChromeMcpDriver：session 缓存', () => {
     expect(state.createCalls).toHaveLength(2);
   });
 
-  it('cdpUrl 不同 → 缓存 key 不同（--browserUrl 差异）', async () => {
+  it('[v0.0.334] 缓存 key=[profileName,userDataDir] 二元组：同 profile 同 userDataDir 复用，不同 userDataDir 新连', async () => {
     const state: MockState = {
       createCalls: [],
       listToolsNames: ['list_pages'],
@@ -358,10 +593,54 @@ describe('ChromeMcpDriver：session 缓存', () => {
       callToolResult: { content: [] },
     };
     const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
-    await driver.connect({ cdpUrl: 'http://127.0.0.1:9222' });
-    await driver.connect({ cdpUrl: 'http://127.0.0.1:9223' });
+    await driver.connect({ profileName: 'p1' });
+    await driver.connect({ profileName: 'p1' });
+    await driver.connect({ profileName: 'p1', userDataDir: '/tmp/brave' });
     expect(state.createCalls).toHaveLength(2);
-    expect(state.createCalls[0]!.args).toContain('http://127.0.0.1:9222');
+    // 恒 autoConnect（无 cdpUrl/browserUrl 维度）
+    expect(state.createCalls[0]!.args).toContain('--autoConnect');
+    expect(state.createCalls[1]!.args).toContain('--userDataDir');
+    expect(state.createCalls[1]!.args).toContain('/tmp/brave');
+  });
+
+  it('[v0.0.334 B7] connect 成功且 transport.pid 存在 → getLastMcpPid() 返回该 pid（attach 台账锚点）', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: { content: [] },
+      transportPid: 4242,
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
+    await driver.connect({ profileName: 'p1' });
+    expect(driver.getLastMcpPid()).toBe(4242);
+  });
+
+  it('[v0.0.334 B7] transport 无 pid → getLastMcpPid() undefined（不阻塞 attach）', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: { content: [] },
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
+    await driver.connect({ profileName: 'p1' });
+    expect(driver.getLastMcpPid()).toBeUndefined();
+  });
+
+  it('[v0.0.334 B7] disconnect 命中带 pid 的缓存 → getLastMcpPid() 清空（防 stale 台账锚点）', async () => {
+    const state: MockState = {
+      createCalls: [],
+      listToolsNames: ['list_pages'],
+      callToolCalls: [],
+      callToolResult: { content: [] },
+      transportPid: 4242,
+    };
+    const driver = new ChromeMcpDriver({ mcpFactory: makeMockFactory(state) });
+    await driver.connect({ profileName: 'p1' });
+    expect(driver.getLastMcpPid()).toBe(4242);
+    await driver.disconnect({ profileName: 'p1' });
+    expect(driver.getLastMcpPid()).toBeUndefined();
   });
 });
 

@@ -354,7 +354,8 @@
     "noMatch": "No matches",
     "student": {
       "label": "Students"
-    }
+    },
+    "searchTooMany": "Over 100 results, please refine your input"
   },
   "origin": {
     "from": "from {{name}}"

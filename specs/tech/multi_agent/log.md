@@ -1,10 +1,25 @@
 ---
 type: log
 title: Multi-Agent KB 变更记录
-updated: 2026-08-07
+updated: 2026-08-12
 ---
 
 # Multi-Agent KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-12 · v0.0.340（成员名读单一源 — 信封/sender/selfName 反查 memberStore + 写时全同步）
+
+- **`[P1]a2a_protocol.md §2`**：AgentRef.name 派生表补 [v0.0.340 决策 1]——squad 成员（session.squadId+memberId 且注入 memberStore）→ `memberStore.getMember` **实时成员名**（成员名权威源 = memberStore，不再把 session.title 当成员名读；in 信封 sender 名与 roster 永远一致，改名后显示新名）；反查失败静默 fallback title；subagent 分支优先（templateType 语义不变）；standalone/squad chat/non-squad-member → title 不变。§2 新增「单一权威源（读）」注记（注入面 + 写路径配套）。
+- **`[P1]subagent_derivation.md §5`**：send_message 工具文档补 targetName 语义——`resolveTargetDisplayName` 优先级 = ① AgentRef.name → ② memberStore 反查实时名（target session 有 squadId+memberId 且 rtc.memberStore）→ ③ session.title（non-squad-member fallback）→ ④ undefined；改名后信封显示新名、与 roster 永远一致；不改路由（名字不参与寻址）。
+- **`[P1]a2a_protocol.md §3`**：enableGroupChat 门控描述补 [v0.0.340] 新建团队默认 false=关（存量 `?? true` 兜底不动）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `send-message-tool.ts resolveTargetDisplayName` 优先级② memberStore 反查 + 失败静默 fallback ✅；② `inbox-enrich.ts deriveAgentRefName` 改 async + EnrichSessionLookup.memberStore? + subagent 分支优先 ✅；③ `agent-manager.ts` AgentManagerOptions.memberStore? + managerDeliverTo lookup 带 memberStore ✅；④ `bootstrap-agent-phase.ts` AgentManagerImpl 补 `new MemberStore({root:dataDir})` + deriveMemberName（selfName/parentName）✅；⑤ `member-mutations.ts` patchMemberService 改名同步 title（CAS/titled 保护）✅。
+- 详情：`specs/tech/version_logs/v0.0.340-squad-defaults-and-rename/change_plan.md` + `change_log.md`
+
+## 2026-08-12 · v0.0.331（send_message content 容错契约 — normalizeContentBlocks 语义唯一来源 + 落库前 normalize）
+
+- **`[P1]subagent_derivation.md §5.1`**：send_message 工具签名 content 补 `[v0.0.331]` 容错契约——`normalizeContentBlocks(rawContent)`（语义唯一来源 = `app/server/src/agent/tools/send-message-tool.ts`）四形态收敛（array 缺 type 补 `type:'text'` / string→包数组 / object `.item ?? obj` 解包 / 其他→error）；工具 desc 补字面示例 + Each block MUST include the "type" field（防再生）；**落库前同样 normalize**（agent-loop-stream `closeActive()` + replay-collector `reconstitute()` 对 send_message 且非 `_raw` 调同一函数，`_rawTruncated` 半截路径不补 content）。
+- **根因**：v0.0.311 out 信封 bodyText 切到 LLM 原始 arguments 后只兼容 `array + type==='text'`，真实 LLM（glm/deepseek 17-20%）缺 type → 前端全滤 → 展开空白。方案 P0（前端 extractSendMessageBody 容错）+ P1（落库前 normalize）+ P1'（_rawTruncated 可见化）+ P2（desc 防再生）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `send-message-tool.ts` normalizeContentBlocks 导出 + normalizeSendMessageInput 复用（行为零变化）✅；② `agent-loop-stream.ts` closeActive + `replay-collector.ts` reconstitute 落库前 normalize（仅 send_message 且无 `_raw`）✅；③ 两处 safeParseArgs parse 失败返 `{_raw, _rawTruncated:true}` ✅；④ 前端 `extractSendMessageBody` 四形态容错（不读 type 过滤）✅。
+- 详情：`specs/tech/version_logs/v0.0.331/change_plan.md` + `change_log.md`
 
 ## 2026-08-07 · v0.0.273（squad_agents_status 统一全员状态块取代 reachable_agents + squad_team_status）
 

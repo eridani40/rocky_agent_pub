@@ -3,7 +3,7 @@ type: spec
 title: File Op Tools（read/write/edit/glob/grep）
 priority: P0
 status: active
-updated: 2026-07-24
+updated: 2026-08-13
 since: v0.0.8
 ---
 
@@ -129,11 +129,19 @@ interface GrepInput {
 
 **错误**：无匹配 → 空（非错误）；非法正则 → error。
 
-## 7. 边界
+## 7. 工具层 fs 操作标准（v0.0.345 起生效）
+
+- **IO 调用一律 `node:fs/promises` + `await`**：read/write/edit/glob/grep 五工具的 fs 操作全部真异步（libuv 线程池），不阻塞 event loop。工具在主线程串行执行（v0.0.345 已撤 worker pool，无线程池分流）。
+- **persistence 层存量 sync 路径用 fs-yield 兜底**（`acquireFsSlot`/`trackFsTime`），不在本规范强制范围——persistence 层继续现状，不迁移。
+- **禁止在工具层新增 sync fs 调用**（`readFileSync`/`statSync`/`mkdirSync`/`existsSync` 等）；例外仅限子进程类执行（如 grep 的 `spawnSync('rg')`——子进程执行、非本线程 native fs、带 timeout 强杀）。
+- **write/edit 落盘走 `atomicWriteAsync`**（`persistence/fs-io.ts`，tmp→fsync→rename 崩溃原子，异常清理 tmp），与 `atomicWriteSync`（persistence 层存量调用）并存。
+
+## 8. 边界
 
 | 零件 | 归属 |
 |---|---|
 | read/write/edit/glob/grep 协议（input + 行为 + 错误） | 本文 ✅ |
+| 工具层 fs 操作标准（fs.promises 真异步 / 禁新增 sync fs） | 本文 §7 ✅ |
 | 通用类型 + 跨工具共性约定 | `index.md` |
 | 执行（调度/超时/HITL 钩子/截断） + sharedReadSet 跨工具 read 跟踪 | `tool_execution_engine.md` / `../context/` |
 

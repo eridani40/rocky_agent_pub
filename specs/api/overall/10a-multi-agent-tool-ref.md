@@ -105,7 +105,7 @@ agent.spawn 执行后，HTTP 层通过现有端点可观测（这些是 AT 验�
 - **核心概念**：Studio 角色复用 a2a `send_message`，同 squad 内 squad/leader/mate 互通，subagent 仍只回 parent。
 - **设计思路**：把拓扑校验放工具层而非 prompt，避免 LLM 幻觉跨 squad 目标或绕过 user 不可达规则。
 - **代码路径**：`app/server/src/agent/tools/runtime-context.ts.resolveAgentRef() → app/server/src/agent/tools/send-message-tool.ts.run() → app/server/src/agent/agent-manager.ts.deliverTo()`。
-- **接口签名**：`send_message({ target: AgentRef|string, content: ContentBlock[], needReply: boolean, inReplyTo?: string }): { messageId: string }` —— target 允许 sessionId、`parent`、`squadchat`、`leader`、同 squad member.name；跨 squad返回 tool error。
+- **接口签名**：`send_message({ target: AgentRef|string, content: ContentBlock[], needReply: boolean, inReplyTo?: string }): { messageId: string }` —— target 允许 sessionId、`parent`、`squadchat`、`leader`、同 squad member.name；跨 squad返回 tool error。content 权威形态 = array of `{type:"text", text:string}`；LLM 异常形态（缺 type block / string / object.item 包裹）由 `normalizeContentBlocks` 容错收敛（`[v0.0.331]`，语义唯一来源见 `multi_agent/[P1]subagent_derivation.md §5.1`；落库前同函数 normalize，半截 arguments 带 `_rawTruncated` 标记）。out 信封的 `targetName` 显示名语义见 `multi_agent/[P1]a2a_protocol.md §2`（`[v0.0.340]` member 走 memberStore 实时名，改名后信封即时新名）。
 - **版本演进**：`[v0.0.33.2]` AT 已覆盖 squad group/collab/spawn/identity/eos；BUG-001 是 LLM 未必主动终答回路由，不是工具契约失败。
 
 ### 3a.2 `team` 工具 v2 只读

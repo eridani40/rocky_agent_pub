@@ -9,7 +9,7 @@
 
 ## 职责
 
-squad 群聊可见性开关：开（默认）→ agents 注入 SquadChat（squad_agents_status）+ UI 群聊入口可见；关 → squad_agents_status SquadChat 行不渲染（system prompt + system_reminder 两头无 SquadChat）+ SeatCard 群聊按钮隐藏 + `send_message('squadchat')` 报错（全私聊语义）。**squad 实体/session 恒存在，仅控可见性**。
+squad 群聊可见性开关：开 → agents 注入 SquadChat（squad_agents_status）+ UI 群聊入口可见；关 → squad_agents_status SquadChat 行不渲染（system prompt + system_reminder 两头无 SquadChat）+ SeatCard 群聊按钮隐藏 + `send_message('squadchat')` 报错（全私聊语义）。**[v0.0.340] 新建团队默认关**（建队 enableGroupChat=false）；存量 squad 无字段读 `?? true`=开。**squad 实体/session 恒存在，仅控可见性**。
 
 > **[v0.0.316] 受控化**：从「自管 PATCH + pending/error」改为「受控 + onChange 上报」。不再自管 PATCH（父级 ManageTab 统一 save），toggle 点击仅 `onChange(!enableGroupChat)`。去掉 error banner / pending 态（保存失败由 tab 级统一处理）。
 

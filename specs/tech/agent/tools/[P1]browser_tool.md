@@ -3,7 +3,7 @@ type: spec
 title: Browser Tool（chrome 自动化三 mode）
 priority: P1
 status: active
-updated: 2026-08-07
+updated: 2026-08-13
 since: v0.0.23
 ---
 
@@ -31,7 +31,7 @@ mode③ BrowserSession.listPages / selectPage / navigate / snapshot(a11y+ref) / 
 |---|---|---|---|---|
 | ① headless | NodeWorkerDriver（ephemeral userDataDir，`headless=true`） | Playwright/CDP（**node 子进程**） | 装了即可 | 低 |
 | ② managed-profile | NodeWorkerDriver（持久 userDataDir） | Playwright/CDP（**node 子进程**） | 装了即可 | 低 |
-| ③ attach | ChromeMcpDriver（默认 `--autoConnect`，显式 cdpUrl 走 `--browserUrl`/`--wsEndpoint`） | chrome-devtools-mcp | **144+** + 用户开 remote debugging | 高（真实已登录 session） |
+| ③ attach | ChromeMcpDriver（固定 `--autoConnect`，`[v0.0.334]` 删 cdpUrl，仅自动连接） | chrome-devtools-mcp | **144+** + 用户开 remote debugging | 高（真实已登录 session） |
 
 > ①② 同一 driver（NodeWorkerDriver），区别仅在 userDataDir 是否持久命名 + headless 开关。③ 独立 driver（MCP）。
 > ①② 之所以走 node 子进程而非 bun 主进程直接调 playwright：Bun 运行时下 `playwright.chromium.connectOverCDP()` 永久 hang/timeout（oven-sh/bun#9357，driver stdio pipe 兼容缺陷），Node 下正常。详见 §3。
@@ -76,10 +76,10 @@ interface BrowserSession {
 interface BrowserConnectOptions {
   profileName?: string;        // mode ②③：profile 名（持久目录 / attach 定位）
   headless?: boolean;          // mode ①②（与 profile 正交）
-  cdpUrl?: string;             // mode ③ fallback（用户已手动 --remote-debugging-port）
   executablePath?: string;     // mode ①② chrome 路径（覆盖自动发现）
 }
 ```
+> `[v0.0.334]` 删 `cdpUrl?: string`——attach 只支持 autoConnect（自动连接），无任何 URL 输入。
 
 **关键约束**：
 - `snapshot` 是统一入口——无论底层 Playwright 还是 chrome-devtools-mcp，都返回同形 `{ snapshot, refs }`（a11y tree + ref）。这是「驱动模型统一」的落点（见 §6）。
@@ -102,7 +102,7 @@ interface BrowserConnectOptions {
 
 ```
 bun（BrowserInstanceManager）                    ← 见 [P1]browser_instance_manager.md
-  ├─ instances: Map<key, BrowserInstance>（key = sessionId:mode[:profileName]，每 session 每类型最多一个）
+  ├─ instances: Map<key, BrowserInstance>（key = sessionId:mode，`[v0.0.330]` 三模式统一；每 session 每 mode 最多一个）
   ├─ launch(sessionId, {mode, profileName}) → spawn 持久 worker（loop:true + persistent 按模式）
   ├─ execute(sessionId, opts, action, params, signal) → 前置校验（instance 存在+ready+owner+idle）→ worker.send
   ├─ close / releaseSession / releaseAll → 泄漏防护三要素清理（killProcessGroup + headless rmSync + usedPorts.delete）
@@ -154,9 +154,9 @@ bun（NodeWorkerDriver.executeOnce）
 |---|---|---|
 | `app/server/src/tools/browser/worker-entry.ts` | **node 侧**：任务解析 + chrome 连接/清理 + 入口编排（v0.0.264 起单次/常驻双形态） | `readTaskFromStdin()`（5s 超时防挂起）→ `launchChromeAndConnect()`；**`main()` 按 `task.loop === true` 分流**：`runPersistent`（常驻循环：emit launched 确认帧 → 循环读 stdin 行 → close/stdin-end → kill chrome → exit；`persistent` 字段仅作连接模式标记传 launchChromeAndConnect，managed-profile 才 ensureProfileFree）vs `runOnce`（单次：dispatch 一个 action → kill → emit → exit，web_fetch 用）；三流分离；模块级 `void main()` 有副作用（读 stdin/exit，UT 不能直接 import）；只依赖 chrome-launcher/worker-actions/types（可被 `bun build --target=node` 打包） |
 | `app/server/src/tools/browser/worker-actions.ts` | **node 侧**：`dispatchAction` 纯函数模块（从 worker-entry.ts 拆出，无副作用可 UT） | action 集：navigate/snapshot/click/type/listPages/selectPage/evaluate/screenshot/**render**；`render` = `page.goto(url,{waitUntil:'domcontentloaded'})` → `page.content()` 返回渲染后 HTML（web_fetch headless 子分支专用——直调 `executeOnce`，不经 browser Tool inputSchema 的 action 枚举）。**v0.0.264**：签名增 `state: WorkerSessionState` 参数，`lastRefs` 由函数内新建改为 `state.lastRefs`（常驻循环下跨 action 保持——snapshot 的 ref 后续 click/type 有效）；单次调用传新建 state（行为等价旧实现） |
-| `app/server/src/tools/browser/browser-worker.cjs` | **编译产物**（dev 用 bundle） | `bun build worker-entry.ts --target=node --format=cjs --external=playwright`（`bun run build:worker`）生成；避免运行时 build 依赖；node 从 cjs 位置向上找 `node_modules/playwright`。**packaged 下无此文件**（tsc 不拷 .cjs 进 dist）——packaged 由 resolveWorkerPath 命中 dist 同目录 `worker-entry.js`（见下行） |
+| `app/server/src/tools/browser/browser-worker.cjs` | **编译产物**（dev 用 bundle） | `bun build worker-entry.ts --target=node --format=cjs --external=playwright`（`bun run build:worker`）生成；避免运行时 build 依赖；node 从 cjs 位置向上找 `node_modules/playwright`。**packaged 下无此文件**（tsc 不拷 .cjs 进 dist）——packaged 由 resolveWorkerPath 命中 dist 同目录 `worker-entry.js`（见下行）。**`[v0.0.330]` D-E/D-F**：产物已 gitignore（`app/server/src/tools/browser/browser-worker.cjs` 出库，`git rm --cached` 保留磁盘文件——旧 bundle 缺 loop/chromePid 协议误导）；`scripts/run-dev.sh` + `tests/api/env_start.sh` 启动前 `bun run build:worker`（幂等 ~1s）保证每次 dev/ET/AT 前协议最新 |
 | `app/server/src/tools/browser/node-worker-driver.ts` | **bun 侧**：`executeOnce(opts, action, params, signal)`（v0.0.264 起仅服务 web_fetch；browser tool 改走 InstanceManager） | `resolveUserDataDir`/`allocateCdpPort`/`mkdtempSync` 解析连接参数 → `defaultSpawn(resolveWorkerPath())`（cwd=worktree 根，detached 进程组；spawn binary 按 dev/packaged 分支，dev=`spawn('node')` / packaged=`spawn(process.execPath,{env:{ELECTRON_RUN_AS_NODE:'1'}})`，见 §3.1「packaged spawn 护栏」）→ stdin 写任务 JSON（**不传 loop** → worker 走单次路径）→ 读 stdout 第一行结果 → 超时/abort/exit 非 0 全捕获转 `{ok:false,error}` → finally `killProcessGroup`；`connect()` 不实现（抛错，headless/managed-profile 不走长 session）。**`resolveWorkerPath()` 双路径 existsSync 探测**：优先同目录 `worker-entry.js`（tsc 编译产物，packaged dist/ 真实命中，其 `require('./chrome-launcher'/'./worker-actions'/'./snapshot-ref'/'playwright')` 在 dist 均可解析）；不存在则退回 `browser-worker.cjs`（dev bundle，`__dirname`=src 时命中）。两者同源（worker-entry.ts），通信协议一致。v0.0.264：spawn 逻辑抽 `spawnWorker` 公共 helper 供 InstanceManager 复用 |
-| `app/server/src/tools/browser/instance-manager.ts` | **bun 侧（v0.0.264 新增）**：`BrowserInstanceManager` 平台级实例管理器 | `instances: Map<key, BrowserInstance>`（key=`sessionId:mode[:profileName]`）；`launch`（幂等：ready 复用 / spawn 持久 worker + launchConfirm 20s → state=ready + persistInstance）/ `execute`（前置校验 instance 存在+ready + idle lazy check + abort 竞速）/ `close`（close 帧 → 等 exit 3s → killProcessGroup 兜底 → 三要素清理）/ `releaseSession` / `releaseAll`；构造时开机自检（读 browser-instances.json 清孤儿）+ shutdown hook（beforeExit + SIGTERM/SIGINT → releaseAll，模块级标记位幂等）。泄漏防护四要素全路径必达：killProcessGroup / headless rmSync / usedPorts.delete / unpersistInstance。详见 `[P1]browser_instance_manager.md` |
+| `app/server/src/tools/browser/instance-manager.ts` | **bun 侧（v0.0.264 新增）**：`BrowserInstanceManager` 平台级实例管理器 | `instances: Map<key, BrowserInstance>`（key=`sessionId:mode`，`[v0.0.330]` 三模式统一）；`launch`（幂等：ready 复用 / spawn 持久 worker + launchConfirm 20s → state=ready + persistInstance）/ `execute`（前置校验 instance 存在+ready + idle lazy check + abort 竞速）/ `close`（无实例报错 `no_browser_instance`；close 帧 → 等 exit 3s → killProcessGroup 兜底 → 三要素清理；impl.close 提示文本透传至 text）/ `releaseSession` / `releaseAll`；构造时开机自检（读 browser-instances.json 清孤儿）+ shutdown hook（beforeExit + SIGTERM/SIGINT → releaseAll，模块级标记位幂等）。泄漏防护四要素全路径必达：killProcessGroup / headless rmSync / usedPorts.delete / unpersistInstance。详见 `[P1]browser_instance_manager.md` |
 | `app/server/src/tools/browser/persistent-worker.ts` | **bun 侧（v0.0.264 新增）**：持久 worker 封装 | `createPersistentWorker` + `spawnPersistentWorker` + `launchConfirm`（launch 确认帧 resolve）+ `waitExit`（close 帧后等 worker exit）；stdout 行解析按 requestId 路由 pending；worker exit reject 全部 pending；`withAbort(signal, sendPromise, onAbort)`（abort → kill instance + 取消错误） |
 | `app/server/src/tools/browser/instance-record.ts` | **bun 侧（v0.0.264 新增）**：`browser-instances.json` 持久化记录 | `readPersistedInstances()` / `persistInstance(rec)` / `unpersistInstance(key)` / `isPidAlive(pid)`（process.kill(pid,0) catch ESRCH）——同步 writeFileSync + catch 吞错（best-effort，不阻塞 launch/close） |
 | `app/server/src/tools/browser/pick-driver.ts` | `InMemoryDriverRegistry` 注入 `NodeWorkerDriver`（headless/managed-profile 共用同一实例） | `InMemoryDriverRegistry({headless: nodeWorker, chromeMcp?})`；mode①② 共用同一 NodeWorkerDriver 实例（mode 在 executeOnce 时按 opts.profileName 推断）。**v0.0.264**：browser tool 不再经 driverRegistry 选 driver（改走 InstanceManager）；pick-driver 仍供 web_fetch headless render 用 |
@@ -199,9 +199,9 @@ bun（NodeWorkerDriver.executeOnce）
 
 ## 4. ChromeMcpDriver（mode ③ attach，无需手动端口）
 
-> **前置门禁（`[v0.0.46]` lazy connect + 门禁分层 → `[v0.0.266]` 纳入 InstanceManager → T3 registry 重构）**：attach 模式的**连接建立/释放全部由 BrowserInstanceManager 管理**（`launch(mode='attach', cdpUrl?)` = ChromeMcpDriver.connect，key=`sessionId:attach` 幂等复用；`close(mode='attach')` = attachDriver.disconnect 不杀用户 chrome）。用户须先在「连接器 → 浏览器」开启开关（`switch=on`），bootstrap 把共享 attachDriver 单例 + `isAttachEnabled`（读 switch）注入 InstanceManager（经 ModeImplEnv 透传 AttachModeImpl）。操作类 action 统一走 `execute`（registry 路由 AttachModeImpl，impl 内 dispatchAction + screenshot 经 ctx.snapshot 落盘）；CDP 断线失活 → impl 内文本检测 `isAttachConnectionLost` → 置 handle.state=dead + 返回 `attach_lost` → manager 收尾 close（disconnect + 删条目）→ 下次 `no_browser_instance` 引导重新 launch。`switch=off` → `not_enabled` 引导错误；连接失败 → `attach_failed`（沿用 `[v0.0.34]` 失败即停）。ConnectorManager 瘦身为「switch 门禁 + UI 状态」（enable/disable/bootstrap/getState/getAll/isReady），不再持有 attach session/owner。详见 `specs/tech/config/[P1]connectors.md` §5/§6 + `specs/tech/agent/tools/[P1]browser_instance_manager.md` §3.3/§4。
+> **前置门禁（`[v0.0.46]` lazy connect + 门禁分层 → `[v0.0.266]` 纳入 InstanceManager → T3 registry 重构 → `[v0.0.330]` close 残留检测 → `[v0.0.334]` 删 cdpUrl）**：attach 模式的**连接建立/释放全部由 BrowserInstanceManager 管理**（`launch(mode='attach')` = ChromeMcpDriver.connect（仅 autoConnect），key=`sessionId:attach` 幂等复用；`close(mode='attach')` = 断 MCP 连接 + 检测调试态残留并返回引导提示，不杀用户 chrome）。用户须先在「连接器 → 浏览器」开启开关（`switch=on`），bootstrap 把共享 attachDriver 单例 + `isAttachEnabled`（读 switch）注入 InstanceManager（经 ModeImplEnv 透传 AttachModeImpl）。操作类 action 统一走 `execute`（registry 路由 AttachModeImpl，impl 内 dispatchAction + screenshot 经 ctx.snapshot 落盘）；CDP 断线失活 → impl 内文本检测 `isAttachConnectionLost` → 置 handle.state=dead + 返回 `attach_lost` → manager 收尾 close（断 MCP + 删条目）→ 下次 `no_browser_instance` 引导重新 launch。`switch=off` → `not_enabled` 引导错误；连接失败 → `attach_failed`（沿用 `[v0.0.34]` 失败即停）。ConnectorManager 瘦身为「switch 门禁 + UI 状态」（enable/disable/bootstrap/getState/getAll/isReady），不再持有 attach session/owner。详见 `specs/tech/config/[P1]connectors.md` §5/§6 + `specs/tech/agent/tools/[P1]browser_instance_manager.md` §3.3/§4。
 
-**机制（复刻 openclaw + 治理 + ）**：spawn 官方 npm 包 `chrome-devtools-mcp` 作 stdio MCP server，**attach 默认走 `--autoConnect`**（chrome 144+ chrome://inspect 远调模式唯一可用——该模式不暴露 `/json/version`，`--browserUrl` 在主路径必失败）。用户显式给 cdpUrl 时走 `--browserUrl`/`--wsEndpoint`（用户自负 chrome 端点契约）。不扫端口、不用 native messaging、不用扩展。
+**机制（复刻 openclaw + 治理 + `[v0.0.334]` 固定 autoConnect）**：spawn 官方 npm 包 `chrome-devtools-mcp` 作 stdio MCP server，**attach 恒走 `--autoConnect`**（chrome 144+ chrome://inspect 远调模式唯一可用——该模式不暴露 `/json/version`，`--browserUrl` 在主路径必失败）。`[v0.0.334]` 删 cdpUrl 参数/`--browserUrl`/`--wsEndpoint` 分支，无任何 URL 输入。不扫端口、不用 native messaging、不用扩展。
 ```
 node <chrome-devtools-mcp bin 绝对路径> --autoConnect [--userDataDir <dir>]
   --experimentalStructuredContent --experimental-page-id-routing
@@ -219,27 +219,38 @@ node <chrome-devtools-mcp bin 绝对路径> --autoConnect [--userDataDir <dir>]
 
 **治理动作**：
 1. **判据真实化**：`connect()` listTools 校验后**真跑一次 `client.callTool({name:'list_pages',arguments:{}})`**——`result.isError` 为真（chrome-devtools-mcp 连不上返 `{isError:true, content:[{text:'Could not connect to Chrome...'}]}`，**不抛**，故须查 isError）→ 抛 `attach_failed`。两道判据递进：listTools=快速失败，list_pages round-trip=真实性确认（对齐 openclaw `pageReady`）。
-2. **失败清理**：connect 失败（含 probe 失败）catch 抽 helper `closeMcpClientThenTransport`——先 `client.close()`（graceful 释放 CDP attach）再 `transport.close()`（kill MCP 进程兜底），对齐 disconnect（BUG-007），不留 orphan。
-3. **默认 `--autoConnect` **：`buildChromeMcpArgs` 默认 push `--autoConnect`（chrome 144+ inspect 模式唯一可用）。`DEFAULT_ATTACH_CDP_URL` 常量及 `autoConnect:boolean` 入参保留以兼容 UT + 未来若 chrome 重新暴露 `/json/version` 可切换。用户显式 cdpUrl（http→`--browserUrl` / ws→`--wsEndpoint`）行为不变（用户自负 chrome 端点契约：必须能提供 `/json/version` 或 WS endpoint）。
+2. **失败清理（`[v0.0.337]` 升级三层一致）**：connect 失败（含 probe 失败）catch 抽 helper `closeMcpClientThenTransport`——先 `client.close()`（graceful 释放 CDP attach）再 `transport.close()`（kill MCP 进程兜底），对齐 disconnect（BUG-007），不留 orphan。`[v0.0.337]` H2 升级：其后补 **killProcessGroup(transport.pid)**（杀 mcp 主进程组，isPidAlive 守卫 + best-effort）+ **killOrphanMcpWatchdog(pid)**（`pkill -9 -f "chrome-devtools-mcp.*--parent-pid=${pid}"`，win32 跳过 + best-effort）——对齐 336 close 三层清理（transport.close 只杀主进程本身，进程组子进程 + detached watchdog 需组杀 + `--parent-pid` 精确 pkill 兜底）。清理顺序：graceful close → kill 组 → watchdog。失败不阻断 attach_failed 上报。
+3. **默认 `--autoConnect` **：`buildChromeMcpArgs` 恒 push `--autoConnect`（chrome 144+ inspect 模式唯一可用）。`[v0.0.334]` 删 cdpUrl 参数与 `--browserUrl`/`--wsEndpoint` 分支——attach 只支持自动连接，无任何 URL 输入（SSRF 面消失）。
+
+> **[v0.0.334] 无法 attach 明确报错（调查结论）**：chrome-devtools-mcp 1.4.0 对「无法 attach」统一报 `Could not connect to Chrome. Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging.`（源码 `build/src/browser.js` L109：autoConnect 分支 catch puppeteer.connect 失败；未开调试态 = DevToolsActivePort 缺失 → puppeteer 抛 `Could not find DevToolsActivePort` 被包装；版本 <144 无独立检测，与未开调试态同落一个错）。**缺口**：版本不足（<144）无针对性提示。**实现**：connect 失败（probe isError / 连接 catch）时主动探测本机 Chrome 版本（复用 chrome-discover 发现二进制 → `--version` 解析，新增 `chrome-version.ts`）——版本 <144 → 错误消息明确「检测到 Chrome v<v>（<144），attach 需 Chrome ≥144，请升级 Chrome」；≥144 或探测失败 → 引导「chrome://inspect/#remote-debugging → Enable remote debugging + 批准同意 prompt」。不 patch 上游包。
 
 > **设计教训**：改 attach 连接方式前必须用最小脚本测真 chrome 主路径（用户已开 + remote debugging on）；不能只测反面场景（没开 chrome 时不自启）而漏测主路径——曾因此让用户挂掉。证据：`states/v0.0.29/diag-attach.mjs`（早已证 chrome 144+ /json/version 返 404 正常，应早被参考）。
 
 **BrowserSession 实现 = MCP tool 映射**：`listPages`→`list_pages`、`selectPage`→`select_page`、`navigate`→`navigate_page`、`snapshot`→`snapshot`、`click`→`click`、`type`→`type`、`evaluate`→`evaluate_script`。
 
-**用户操作（chrome 144+ remote debugging）**：① 打开 `chrome://inspect/#remote-debugging`（Brave/Edge 对应 brave/edge）；② Enable remote debugging；③ chrome **144+**；④ 批准 attach 同意 prompt。 rocky 默认走 `--autoConnect`（chrome 144+ inspect 模式不暴露 `/json/version`，无法用 `--browserUrl`）；若 chrome 启动时显式 `--remote-debugging-port=9222` 并暴露 `/json/version`，可经 `cdpUrl` 显式指定走 `--browserUrl`。连不上 chrome-devtools-mcp 抛 "Could not connect to Chrome. Check if Chrome is running and remote debugging is enabled..." 引导用户。
+**用户操作（chrome 144+ remote debugging）**：① 打开 `chrome://inspect/#remote-debugging`（Brave/Edge 对应 brave/edge）；② Enable remote debugging；③ chrome **144+**；④ 批准 attach 同意 prompt。 rocky 恒走 `--autoConnect`（chrome 144+ inspect 模式不暴露 `/json/version`，无法用 `--browserUrl`；`[v0.0.334]` 删 cdpUrl，仅自动连接）。连不上 chrome-devtools-mcp 报「Could not connect to Chrome...」+ 版本探测差异化引导（<144 提示升级 Chrome / ≥144 提示开启批准 remote debugging）。
 
-**target 解析（ 默认 autoConnect，cdpUrl 为显式覆盖）**：`opts.cdpUrl` 缺省 → `--autoConnect`（chrome 144+ inspect 模式唯一可用）；显式 cdpUrl（http→`--browserUrl` / ws→`--wsEndpoint`）覆盖默认。**userDataDir 透传**：attach Brave/Edge 等非默认 profile 时必需。**session 缓存** key=`[profileName,userDataDir,cdpUrl]`（两次缺省 connect 同 key，复用同一 loopback session）。**触发方（`[v0.0.266]`）**：`launch(mode='attach')` 经 InstanceManager 注入的 attachDriver 调 `connectAttachSession`（attach-instance.ts），不再由 ConnectorManager lazy connect。**错误归类**：匹配 "Could not connect / DevToolsActivePort / ECONNREFUSED / Failed to connect" → `attach_failed`（**不自动重连**，失败收敛见 `connectors.md` §3.3）；handshake ~30s。**close**：`close(mode='attach')` → `disconnectAttachSession`（attachDriver.disconnect），只清 MCP 连接不杀用户浏览器。
+**target 解析（`[v0.0.334]` 仅 autoConnect）**：attach 无连接端点参数——driver 恒 `--autoConnect`（chrome 144+ inspect 模式唯一可用）。**userDataDir 透传**：attach Brave/Edge 等非默认 profile 时必需。**默认 userDataDir 候选注入（`[v0.0.334.fix]` Bug1 根治：attach 连不上回归）**：`connectAttachSession` 调 `driver.connect` 前经 `resolveDefaultChromeUserDataDir()` 注入默认 userDataDir——遍历 `defaultChromeUserDataDirCandidates(homedir())`（**复用 `devToolsActivePortCandidates` 各路径 dirname 派生**，darwin=`~/Library/Application Support/Google/Chrome` / linux=`~/.config/google-chrome`+`~/.config/chromium` / win32=`%LOCALAPPDATA%/Google/Chrome/User Data`），返回**首个 existsSync 存在**的 dir；**无候选存在 → 传 undefined**（不传 `--userDataDir`，走 chrome-devtools-mcp else 分支由 driver 错误引导兜底，不发明目录）。仅 attach 路径注入（MUST NOT 改 `buildChromeMcpArgs`/`driver.connect` 通用语义，避免污染 headless/managed-profile）。注入后 autoConnect 走「读 DevToolsActivePort 文件」正确路径（`ensureBrowserConnected` 的 userDataDir 非空前提）。**session 缓存** key=`[profileName,userDataDir]`（`[v0.0.334]` 删 cdpUrl 维度；两次缺省 connect 同 key，复用同一 loopback session）。**触发方（`[v0.0.266]`）**：`launch(mode='attach')` 经 InstanceManager 注入的 attachDriver 调 `connectAttachSession`（attach-instance.ts），不再由 ConnectorManager lazy connect。**错误归类**：匹配 "Could not connect / DevToolsActivePort / ECONNREFUSED / Failed to connect" → `attach_failed`（**不自动重连**，失败收敛见 `connectors.md` §3.3）+ `[v0.0.334]` 版本探测差异化引导（`chrome-version.ts`）；handshake ~30s。**cache key 对称（`[v0.0.336]` G1/G2）**：`disconnectAttachSession` 与 `connectAttachSession` 用**同一 `resolveDefaultChromeUserDataDir` 解析**（模块级复用）传 userDataDir——connect/disconnect cacheKey 一致，disconnect 正常清 cache，从根上消除「cache miss 永不清 → 下次 connect cache hit 复用死 session → launch 谎报」链路（G3 探活已砍，见 change_plan 决策记录）。**launch 失败/超时清理（`[v0.0.337]` H1-H9）**：`driver.connect(opts, signal?)` 支持**第二参 signal**（`[v0.0.337]` H3，非 options 字段）；signal 沿 `manager.launch(sessionId, opts, ctx?:{signal?})`（H7）→ `impl.launch(..., signal?)`（H6）→ `connectAttachSession(driver, deps, signal?)`（H4）→ `driver.connect` 透传；**tool.ts 仅 launch 分支透传 ctx.signal，close 不透传**（H8，close 是清理动作必须完整执行，被 abort 反而三层分裂）。signal abort → withAbort 抛 `attach_failed` → 走 connect catch → H2 清理（graceful close → kill 进程组 → watchdog，best-effort）。**spawn 锚点（`[v0.0.337]` H5）**：driver `lastSpawnPid` **spawn 即记**（成功失败都记，`getLastSpawnPid()` 失败也可读；disconnect 清）与 `lastMcpPid`（仅 connect 成功 set）语义区分——spawn 锚点供失败入台账兜底，成功锚点供 launch 结果透传。**close（`[v0.0.266]` 断连 → `[v0.0.330]` 残留检测 → `[v0.0.334]` 恒检测 → `[v0.0.336]` 三层一致）**：`close(mode='attach')` → `disconnectAttachSession`（attachDriver.disconnect 传 userDataDir）断 MCP 连接 + `killProcessGroupByPid(mcpPid)` 杀 mcp 主进程组 + `killOrphanMcpWatchdog(mcpPid)` 兜底杀 detached watchdog + 台账硬删，不杀用户浏览器；随后 `detectChromeDebugResidual()` 只读检测调试态残留（见 §4.2），残留 → close 返回引导提示文本（chrome://inspect 取消 Allow remote debugging / 重启 Chrome）——`[v0.0.334]` 删「显式 cdpUrl 不检测不提示」分支（autoConnect-only 恒检测）。任一步清理失败收集进 CloseResult.ok=false（kind='close_incomplete'）诚实上报，manager 不删表可重试。
+
+### 4.2 attach close 调试态残留检测（`[v0.0.330]` Delta 3）
+
+**能力边界（实证）**：对用户已打开的 Chrome（autoConnect / 显式 cdpUrl），关闭其调试态（9222 监听 + DevToolsActivePort + 提示条）**编程层面不可行**——chrome-devtools-mcp 无 browser-management 工具（connected 模式 `closeBrowser()` 只 `b.disconnect()` 不恢复调试态）；CDP 无「关闭调试端口」命令（`Browser.close` 杀整浏览器违反 attach 语义）；调试态是用户 chrome://inspect 授权后的 Chrome 侧状态（持久于 user data dir Preferences）。因此 attach close 只能：**回收我们开的资源**（MCP 进程/连接/session 缓存）+ **检测残留 + 返回引导提示**（用户取消勾选 / 重启 Chrome）。
+
+**检测模块 `attach-debug-state.ts`（`[v0.0.330]` 新增）**：
+- `detectChromeDebugResidual(env, ah, deps)` → `{ residual: boolean; detail: string }`；只读检测（不 kill/不写/不重启）。
+- **判据（保守，不误报，`[v0.0.334]` autoConnect-only 恒检测）**：读用户 Chrome user data dir `DevToolsActivePort`（darwin `~/Library/Application Support/Google/Chrome/DevToolsActivePort`；linux `~/.config/{google-chrome,chromium}/`；win `%LOCALAPPDATA%\Google\Chrome\User Data\`）→ TCP 探测端口可连 = 残留（detail 含端口 + 文件路径）；文件缺失/探测失败/端口不可连 → 无残留（不误报）。`[v0.0.334]` 删「显式 cdpUrl → 直接无残留」分支（attach 仅 autoConnect，恒检测）。
+- **边界（Minor，`[v0.0.330]` 注明）**：仅覆盖**默认 user data dir**——非默认目录 Chrome（--user-data-dir 自定义）漏报（保守方向，不误报优先）。
+- **降级**：检测异常（探测抛错）不阻断 close（无提示，manager 输出 'closed'）。
+- **接入**：`AttachModeImpl.close`（attach-mode-impl.ts）断 MCP 后调 detect → 残留 → 返回引导提示文本 → `ModeImpl.close` 返回类型 `Promise<void>` → `Promise<string | void>`（`[v0.0.330]` D3-A）→ `Promise<CloseResult>`（`[v0.0.336]`，`{ok:true,text?}` / `{ok:false,error}`）→ `closeInstance` 透传至 `BrowserExecuteResult.text`（D3-D，releaseSession/releaseAll 同路径不丢提示）；`[v0.0.336]` 任一清理步骤失败 → ok=false（kind='close_incomplete'）→ manager 不删表可重试。
+- **一次性清理脚本 `scripts/cleanup-chrome-debug.sh`（`[v0.0.330]` 新增）**：只读检测 9222 监听（lsof）+ DevToolsActivePort 位置 → 输出清理指引（chrome://inspect 取消 Allow remote debugging → Chrome 重启回非调试模式 / 重启 Chrome）；**不自动 kill 用户 Chrome**。
+
+**desc 契约（tool.ts，LLM 可照抄，`[v0.0.334]` 简化重写）**：attach = **自动连接用户已打开的 Chrome（chrome://inspect 远调模式，无需指定地址/URL）** + 前置条件（Chrome ≥144 + chrome://inspect/#remote-debugging → Enable remote debugging）+ 同意流程（launch 触发用户 Chrome 同意 prompt，需用户批准）+ 失败引导（连不上提示开启/批准/升级 Chrome）+ **共享浏览器安全警告**（attach 操作的是用户真实浏览器，谨慎操作）；close = 断连接 + 检测 Chrome 调试态残留并提示；**不杀用户浏览器**；用户 Chrome 调试态（9222 监听/提示条）由 chrome://inspect 授权，需用户取消勾选 Allow remote debugging 或重启 Chrome 恢复。**模式路由**：「我的 chrome→attach / 登录态→managed-profile / 默认→headless」。
 
 ## 5. 生命周期 / 安全
 
 - **生命周期**：跟踪每 session 开的 tab，session 结束按 sessionKey 关 agent 开的 tab（attach 模式不杀浏览器）。配 idle 扫描清僵尸 tab（参考 openclaw `browser-lifecycle-cleanup.ts` + `browser.tabCleanup`）。
-- **孤儿 chrome 对账回收（`[v0.0.272]`，mode①② worker-based）**：chrome 泄漏（崩溃/强杀/异常路径残留）由 `BrowserInstanceManager.reconcileOrphans` 结构性收敛——marker 白名单识别 rocky chrome（`rocky-browser-worker-`/`rocky-browser-instance-`/`et<digits>-prof`/CDP 18800-18899 段，绝不用进程名匹配）+ 双段扫描（all 全量进程表 + candidates marker chrome）+ 三层判定（pid∈活跃 chromePidSet / ppid∈活跃 workerPidSet / ppid cmdline 含 worker-entry → 活跃，否则孤儿）+ 回收（kill 组 + 删 rocky userDataDir + unpersist + warn）。触发 = 启动 fire-and-forget + 10min 周期 setInterval unref + close 后 isPidAlive 校验补 kill。**用户主 Chrome 零接触**（attach 模式 close=disconnect 不杀浏览器，对账只认 rocky marker）。详 `browser_instance_manager.md §4.9` + `orphan-scan.ts`。
-- **SSRF（attach cdp，两层语义 ）**：参考 openclaw `cdp-reachability-policy.ts` 注释原文「The browser SSRF policy protects page/network navigation, not ... local CDP control plane」——CDP 控制面 ≠ 页面导航 SSRF。
-  - **本地 loopback 豁免**：`cdpUrl` host = `127.x`（127/8 全段）/ `::1` / `localhost` → **不做** SSRF（attach 本机 chrome 是正常用法，不该自我拦截）。对应 openclaw `resolveCdpReachabilityPolicy`：`cdpIsLoopback && !isRemote → return undefined`。
-  - **非 loopback 仍 fail-closed**：远程私网（10.x / 192.168.x / 172.16-31.x）、link-local 云元数据（169.254.169.254）、`file://` → 走 `assertSsrfSafe` 拒绝（防内网穿透 + 云元数据 SSRF）。
-  - **实现**：`app/server/src/tools/web-fetch/ssrf.ts` 新增 `isLoopbackIp(ip)` / `isLoopbackHost(url)`（127/8 + ::1 + hostname=localhost；**纯字面量比对，不 DNS 解析**——防 DNS rebinding 把公网域名解析到 127/8 绕过）；`app/server/src/tools/browser/tool.ts:106-115` 门禁 `!isLoopbackHost(cdpUrl)` 才 `assertSsrfSafe`。
-  - **根因（BUG-001）**：旧实现把 web-fetch 的 blanket `assertSsrfSafe`（IP 私网黑名单）套到 attach cdpUrl，127.0.0.1 被当私网拒。loopback CDP 不消费页面导航，本就不在 SSRF 边界内。
-  - **附带 follow-up（BUG-002，pre-existing）**：`isPrivateIp`/`isLoopbackIp` 用 regex `::ffff:([0-9.]+)$` 只认 IPv4-mapped **点分形式**，hex 压缩形（URL 规范化后 `::ffff:a00:5`）不匹配 → 非 loopback 私网可绕过。`isLoopbackIp` 的同款 gap 零影响（hex/点分殊途同归到「放行」）。根因修（统一 IPv6 normalize）见 BUG-002，非本版范围。
+- **孤儿 chrome 对账回收（`[v0.0.272]`，mode①② worker-based）**：chrome 泄漏（崩溃/强杀/异常路径残留）由 `BrowserInstanceManager.reconcileOrphans` 结构性收敛——marker 白名单识别 rocky chrome（`rocky-browser-worker-`/`rocky-browser-instance-`/`et<digits>-prof`/CDP 18800-18899 段，绝不用进程名匹配）+ 双段扫描（all 全量进程表 + candidates marker chrome）+ 三层判定（pid∈活跃 chromePidSet / ppid∈活跃 workerPidSet / ppid cmdline 含 worker-entry → 活跃，否则孤儿）+ 回收（kill 组 + 删 rocky userDataDir + unpersist + warn）。触发 = 启动 fire-and-forget + 10min 周期 setInterval unref + close 后 isPidAlive 校验补 kill。**用户主 Chrome 零接触**（attach 模式 close=断 MCP + 检测残留提示，不杀浏览器，对账只认 rocky marker）。详 `browser_instance_manager.md §4.9` + `orphan-scan.ts`。
+- **SSRF（`[v0.0.334]` 已删——attach 无 URL 输入）**：`[v0.0.334]` 删 cdpUrl 参数后，browser 工具**不再接受任何 URL 输入**（attach 仅 autoConnect 自动连接本机 chrome）——SSRF 攻击面消失，tool.ts SSRF 门禁段删除。`web-fetch/ssrf.ts` 本体保留（web_fetch 仍用 assertSsrfSafe；isLoopbackIp/isLoopbackHost 仅 web-fetch 侧引用）。历史（v0.0.29-333）：CDP 控制面 ≠ 页面导航 SSRF，本地 loopback cdpUrl 豁免、非 loopback fail-closed。
 - **attach 鉴权**：单机本地单用户场景**不做** token 鉴权（control server 不强制 auth）；多用户/远程场景后续再加。
 - **反检测**：**不做**（hermes camofox 路线复杂易失效，openclaw 也不做）。
 
@@ -257,8 +268,9 @@ const browserTool: Tool = {
     inputSchema: { type:'object', required:['mode','action'],
       properties: { mode:{enum:['headless','managed-profile','attach']},
         action:{ enum:['launch','navigate','snapshot','click','type','listPages','selectPage',
-                       'evaluate','screenshot','close'] },   // [v0.0.266] -disconnect（统一 close：attach close = 断 MCP 连接不杀 chrome）
-        profileName:{type:'string'}, url:{type:'string'}, ref:{type:'string'}, text:{type:'string'}, /* ... */ } } },
+                       'evaluate','screenshot','close'] },   // [v0.0.266] -disconnect（统一 close：attach close = 断 MCP + 检测调试态残留，不杀 chrome）[v0.0.330]
+        profileName:{type:'string'}, url:{type:'string'}, ref:{type:'string'}, text:{type:'string'} },   // [v0.0.334] -cdpUrl（attach 仅 autoConnect）
+        // [v0.0.334] desc 简化：attach = 自动连接用户已开 Chrome（无需指定地址）+ 前置条件（Chrome ≥144 + chrome://inspect Enable）+ 同意流程（launch 触发 prompt 需批准）+ 失败引导（开启/批准/升级）+ 共享浏览器安全警告 + 模式路由（我的 chrome→attach / 登录态→managed-profile / 默认→headless）
   needsApproval(input, ctx) { return input.mode === 'attach'; },   // attach 操作真实浏览器 → HITL
 
   async run(input, ctx) {
@@ -266,13 +278,13 @@ const browserTool: Tool = {
     if (!im) {
       return errorResult('browser: browser instance manager 未注册（三模式均不可用）');
     }
-    const launchOpts = toLaunchOptions(input, input.mode);   // { mode, profileName?, cdpUrl? }
+    const launchOpts = toLaunchOptions(input, input.mode);   // { mode, profileName? }（[v0.0.334] -cdpUrl）
     if (input.action === 'launch') {
       // 三模式统一：headless/managed-profile spawn worker；attach = ChromeMcpDriver.connect（幂等复用）
       return toToolResult(await im.launch(ctx.config.sessionId, launchOpts));
     }
     if (input.action === 'close') {
-      // 三模式统一 close：mode①② 三要素清理；attach = disconnectAttachSession（不杀用户 chrome）
+      // 三模式统一 close：mode①② 三要素清理；attach = 断 MCP + 残留检测提示（不杀用户 chrome）[v0.0.330]
       return toToolResult(await im.close(ctx.config.sessionId, launchOpts));
     }
     // [v0.0.266 T3] 操作类 action 三模式统一走 execute（registry 路由 impl，零 mode 分叉）。
@@ -289,7 +301,7 @@ const browserTool: Tool = {
 ```
 > `[v0.0.46]` `ctx.config.sessionId` 由 session-config 构造期注入（已存在字段，见 `tools/types.ts` `ToolSessionConfigLike.sessionId`）。[v0.0.266 T3] attach 实例建立/断开/失活清理下沉 AttachModeImpl（attach-instance.ts 纯 helper）；browser tool 层只做「launch/close/execute 三入口 + SnapshotSink ctx 构造」——零 attach 分叉。
 >
-> **[v0.0.264 + v0.0.266 + T3] 工具调用前置校验（用户铁律「工具调用前必须当前 session 有 chrome instance」）**：非 launch/close 的所有 action（navigate/snapshot/click/type/listPages/selectPage/evaluate/screenshot），执行前必须经 InstanceManager 前置校验——instance 存在 + ready（assertReadyInstance，三模式共用）。无 instance → `{ok:false, error:{kind:'no_browser_instance'}, text:'当前会话没有 {mode} 浏览器实例，请先调用 browser(action="launch")'}`（attach 不再隐式 lazy connect；T3 起 attach 与 headless/managed-profile 统一走 execute）。instance 匹配 = session+mode[:profileName] 自动匹配（key 含 sessionId，owner 天然隔离，跨 session 不可复用）。
+> **[v0.0.264 + v0.0.266 + T3 + v0.0.330 + v0.0.334] 工具调用前置校验（用户铁律「工具调用前必须当前 session 有 chrome instance」）**：非 launch/close 的所有 action（navigate/snapshot/click/type/listPages/selectPage/evaluate/screenshot），执行前必须经 InstanceManager 前置校验——instance 存在 + ready（assertReadyInstance，三模式共用）。无 instance → `{ok:false, error:{kind:'no_browser_instance'}, text:'当前会话没有 {mode} 浏览器实例，请先调用 browser(action="launch")'}`（attach 不再隐式 lazy connect；T3 起 attach 与 headless/managed-profile 统一走 execute）。instance 匹配 = session+mode 自动匹配（`[v0.0.330]` 三模式统一 key=`sessionId:mode`，profileName 由 handle 承载（`[v0.0.334]` -cdpUrl）；key 含 sessionId，owner 天然隔离，跨 session 不可复用）。
 >
 > **[v0.0.157 + T3] 截图落盘（下沉 impl）**：screenshot 落盘统一经 `ExecuteCtx.snapshot: SnapshotSink`——tool.ts 构造闭包（绑 `ctx.workdir` + `ctx.toolCallId`，调 `saveSnapshot`），impl 内落盘：worker（`r.text` JSON parse → decode base64 → `ctx.snapshot.save`）、attach（`session.screenshot()` Buffer 直交）。impl 返回路径文本（`formatSnapshotText({relPath, source:'browser'})`），tool.ts 只透传。`ctx.workdir` + `ctx.toolCallId` 必透传（落盘命名用）。
 
@@ -303,7 +315,7 @@ const browserTool: Tool = {
 | profile 占用冲突 | 报错+提示，不抢锁/排队 |
 | 多 profile 上限 / 端口段 | 100 / 18800-18899 |
 | attach 鉴权 | 单机本地不做 |
-| 远程 chrome attach | 支持 cdpUrl fallback + SSRF 校验（本地 loopback cdpUrl 豁免 SSRF——CDP 控制面 ≠ 页面导航；仅非 loopback 远程/私网 fail-closed） |
+| 远程 chrome attach | `[v0.0.334]` **不做**（删 cdpUrl，attach 仅 autoConnect 本机；SSRF 面消失） |
 | chrome-devtools-mcp 版本 | `@latest`（跟官方，openclaw 默认） |
 
 > 其余实现细节（chrome 发现各平台具体路径、SingletonLock 恢复算法、CDP 就绪轮询参数）在编码阶段按调研报告 `v0.0.23-browser-use.md` 关键代码索引实现。
@@ -318,7 +330,7 @@ const browserTool: Tool = {
 |---|---|
 | BrowserDriver/BrowserSession 协议抽象（含 executeOnce）+ 三 mode driver 设计 + a11y/ref 模型 + 已锁决策 | 本文 ✅ |
 | **BrowserInstanceManager**（v0.0.264 常驻实例管理：launch/execute/close/releaseSession/releaseAll + 泄漏防护 + 开机自检 + shutdown hook） | `[P1]browser_instance_manager.md` ✅ |
-| NodeWorkerDriver（mode①②，node worker 子进程 + worker-entry.ts（v0.0.264 双形态：常驻循环 loop:true / 单次）+ worker-actions.ts（dispatchAction 含 render，v0.0.264 增 state 参数）+ persistent-worker.ts + instance-record.ts + browser-worker.cjs + resolveWorkerPath 双路径探测）+ ChromeMcpDriver（mode③ 默认 `--autoConnect` + list_pages 判据，§4.1）实现 | 编码阶段（已落地） |
+| NodeWorkerDriver（mode①②，node worker 子进程 + worker-entry.ts（v0.0.264 双形态：常驻循环 loop:true / 单次）+ worker-actions.ts（dispatchAction 含 render，v0.0.264 增 state 参数）+ persistent-worker.ts + instance-record.ts + browser-worker.cjs（`[v0.0.330]` gitignore + 启动 build:worker 重建）+ resolveWorkerPath 双路径探测）+ ChromeMcpDriver（mode③ 默认 `--autoConnect` + list_pages 判据，§4.1）+ attach-debug-state.ts（`[v0.0.330]` attach close 调试态残留检测，§4.2）+ scripts/cleanup-chrome-debug.sh（`[v0.0.330]` 只读检测 + 清理指引）实现 | 编码阶段（已落地） |
 | 共性约定（代理/截断/审批/超时） | `[P1]web_tools.md` §2 |
 | 串行执行 + ToolResultBlock + 审批 | `tool_execution_engine.md` |
 

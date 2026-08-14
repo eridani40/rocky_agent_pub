@@ -41,6 +41,48 @@ import { chatDebug } from '../../lib/chat-debug-log';
 
 /** [CHAT-DEBUG] 渲染计数序号（跨 render 递增，看 render 风暴用） */
 let renderSeq = 0;
+
+/**
+ * [v0.0.331 P0] 提取 send_message arguments.content 的正文文本（渲染侧容错，与后端 normalize 等价）。
+ * 根因：v0.0.311 起 out 信封 bodyText 从后端已 normalize 的 tool_result 切到 LLM 原始 arguments，
+ * 但只兼容 `array + block.type==='text'` 一种形态；真实 LLM（glm/deepseek 17-20%）传
+ * `[{"text":"..."}]`（block 缺 type）→ 后端容错发送成功，前端 filter(c=>c.type==='text') 全滤 → 展开空白。
+ * 本函数只认 text 字段、不读 type 做过滤（与后端 normalizeContentBlocks 对齐），历史脏数据兜底。
+ * 形态：
+ *   ① string → 直接当正文
+ *   ② array  → 每块 object 且 text 为 string → join('\n')（缺 type 按默认 text，不要求 type==='text'）
+ *   ③ object → 取 `.item ?? obj` 解包：payload 为 string 直接用、payload.text 为 string 用 text、
+ *               payload 为 array 递归提取（对齐后端「单 block 包数组」语义）
+ *   ④ 其他   → ''
+ */
+export function extractSendMessageBody(argContent: unknown): string {
+  // ① string → 直接当正文
+  if (typeof argContent === 'string') return argContent;
+  // ② array → 每块取 text（不要求 type==='text'，与后端 normalize 对齐）
+  if (Array.isArray(argContent)) {
+    return argContent
+      .filter(
+        (c): c is { text: string } =>
+          typeof c === 'object' && c !== null && typeof (c as Record<string, unknown>).text === 'string',
+      )
+      .map((c) => c.text)
+      .join('\n');
+  }
+  // ③ object → 取 .item ?? obj 解包（LLM 实测形态）
+  if (argContent !== null && typeof argContent === 'object') {
+    const obj = argContent as Record<string, unknown>;
+    const payload: unknown = obj.item ?? obj;
+    if (typeof payload === 'string') return payload;
+    if (payload !== null && typeof payload === 'object') {
+      if (Array.isArray(payload)) return extractSendMessageBody(payload); // item 是数组 → 递归
+      if (typeof (payload as Record<string, unknown>).text === 'string') {
+        return (payload as { text: string }).text;
+      }
+    }
+  }
+  // ④ 其他（null/undefined/number/bool）→ ''
+  return '';
+}
 /** actor 解析返回：头像节点 + 名字 + 是否把名字渲为气泡上方前缀行（群聊 a2a 用） */
 export interface ActorInfo {
   avatar: ReactNode;
@@ -301,21 +343,20 @@ export function ComponentMessageStream({
                   (() => {
                     const envRow = row as Extract<RenderRow, { type: 'send-message-envelope' }>;
                     // [v0.0.311] done 态展开正文从 arguments.content[].text 提取（发送的消息内容）
+                    // [v0.0.331 P0] 改调 extractSendMessageBody 容错提取（array 缺 type / string / object.item 解包，
+                    //   与后端 normalizeContentBlocks 对齐；历史脏数据兜底，修复展开空白）
                     const argContent = envRow.arguments['content'];
-                    const bodyText =
-                      Array.isArray(argContent)
-                        ? argContent
-                            .filter((c) => typeof c === 'object' && c !== null && (c as Record<string, unknown>).type === 'text')
-                            .map((c) => (c as { text: string }).text)
-                            .join('\n') ?? ''
-                        : '';
+                    const bodyText = extractSendMessageBody(argContent);
                     // error 态仍从 result 提取失败原因（不是发送内容）
+                    // [v0.0.331 P1'] _rawTruncated（参数截断）时明确提示「发送失败（参数截断）」，优先于 result 提取
                     const errText =
                       envRow.status === 'error'
-                        ? envRow.result?.content
-                            ?.filter((c) => c.type === 'text')
-                            .map((c) => (c as { type: 'text'; text: string }).text)
-                            .join('\n') ?? '发送失败'
+                        ? envRow.arguments?._rawTruncated === true
+                          ? '发送失败（参数截断）'
+                          : envRow.result?.content
+                              ?.filter((c) => c.type === 'text')
+                              .map((c) => (c as { type: 'text'; text: string }).text)
+                              .join('\n') ?? '发送失败'
                         : undefined;
                     return (
                       <ComponentA2aEnvelope

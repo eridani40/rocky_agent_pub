@@ -94,7 +94,7 @@ web tools 让 agent 能访问网络：**web_search**（检索）/ **web_fetch**�
 
 - **mode ① headless**（NodeWorkerDriver，ephemeral profile）：`browser({mode:'headless', action:'navigate', url})` → `action:'snapshot'` → tool run 调 `driver.executeOnce`（**[v0.0.23.1] 改走 node worker 子进程**，绕开 Bun playwright connectOverCDP bug）→ worker 内启动无头 chrome（`--headless=new`）→ connectOverCDP → dispatch action → kill chrome → stdout 返 `{snapshot, refs}`；Linux 无 DISPLAY 强制 headless；run 结束 worker 退出自动清 chrome。
 - **mode ② managed-profile**（NodeWorkerDriver，持久 `~/.rocky_agent/browser/<profileName>/user-data`）：同 ① 走 node worker；首次建 profile 目录 + 分配 CDP 端口（18800-18899，持久化进 config）+ SingletonLock；同名 profile 复用登录态；**占用冲突**报错「profile X in use」+ 提示（不抢锁不排队）；僵尸锁可清后重试；profile 命名 `/^[a-z0-9][a-z0-9-]*$/` ≤64；chrome 二进制发现：用户 `executablePath` → 系统默认 → 硬编码候选 + Playwright 缓存。
-- **mode ③ attach**（ChromeMcpDriver，**前置门禁分层，见 §7.2.4**）：`[v0.0.46]` 起 **connect 时机 = tool.run 首次 lazy 触发**（不再由 bootstrap/toggle 触发）——LLM 首次调 `browser({mode:'attach', action:X})` 时 tool 层调用 `connectorManager.connectForToolRun` 触发 spawn `chrome-devtools-mcp@latest --autoConnect`（stdio MCP server；`[v0.0.34.1]` 曾试 `--browserUrl` loopback 因 chrome 144+ inspect 模式不暴露 `/json/version` 撤回，仍用 `--autoConnect` + list_pages round-trip 判据真实化）；`BrowserSession` = MCP tool 映射。**新增 action `disconnect`**（`[v0.0.46]`）：LLM 主动 `browser({mode:'attach', action:'disconnect'})` 释放 attach session（graceful close + kill MCP 进程，不杀 chrome），idempotent。**用户操作**：① 打开 `chrome://inspect/#remote-debugging` ② Enable remote debugging ③ chrome **144+** ④ 批准 attach prompt。**自定义 target**：profile 配 `cdpUrl` → 覆盖默认 autoConnect；远程 cdpUrl 非 loopback 私网 fail-closed（SSRF）；session 结束/agent DELETE 兜底自动 disconnect。`needsApproval=true`（HITL）。
+- **mode ③ attach**（ChromeMcpDriver，**前置门禁分层，见 §7.2.4**）：`[v0.0.46]` 起 **connect 时机 = tool.run 首次 lazy 触发**（不再由 bootstrap/toggle 触发）——LLM 首次调 `browser({mode:'attach', action:X})` 时 tool 层调用 `connectorManager.connectForToolRun` 触发 spawn `chrome-devtools-mcp@latest --autoConnect`（stdio MCP server；`[v0.0.34.1]` 曾试 `--browserUrl` loopback 因 chrome 144+ inspect 模式不暴露 `/json/version` 撤回，仍用 `--autoConnect` + list_pages round-trip 判据真实化）；`BrowserSession` = MCP tool 映射。**新增 action `disconnect`**（`[v0.0.46]`）：LLM 主动 `browser({mode:'attach', action:'disconnect'})` 释放 attach session（graceful close + kill MCP 进程，不杀 chrome），idempotent。**用户操作**：① 打开 `chrome://inspect/#remote-debugging` ② Enable remote debugging ③ chrome **144+** ④ 批准 attach prompt。**`[v0.0.334]` 删 cdpUrl**：attach **仅 autoConnect 自动连接**（无任何 URL 输入），删除自定义 target（profile `cdpUrl` 覆盖）与 SSRF 门禁（无 URL 输入，SSRF 面消失）；connect 失败时探测本机 Chrome 版本差异化引导（<144 → 明确提示升级 Chrome；≥144 或探测失败 → 引导开启/批准 remote debugging）；attach MCP 子进程入 sqlite 台账（`browser_instances` 表），app 启动按台账清理孤儿 MCP 代理。session 结束/agent DELETE 兜底自动 disconnect。`needsApproval=true`（HITL）。
 
 **统一抽象产品意义**：用户/agent 视角只见 `browser` + `mode`，三 mode 操作集一致；底层 Playwright/MCP 分裂封装在 driver 内。
 
@@ -172,7 +172,7 @@ return dispatch(r.session, input);
 | **E** | 首次 `browser({mode:'managed-profile', profileName:'X', action:'navigate', <login url>})` 登录 → close → 同 profile 再 navigate 同站 | 第二次登录态保留（cookie/会话仍在） | API |
 | **E2** | 两进程同时 `browser({mode:'managed-profile', profileName:'X'})` | 后者报错「profile X in use」+ 提示，不抢锁 | API |
 | **F** | 连接器 connected（路径 H 成功后）+ 用户 chrome 开 remote debugging（144+）→ agent `browser({mode:'attach', action:'listPages'})` → HITL 审批 → navigate/snapshot | 列出用户真实 tab；操作生效；session 结束**不杀用户浏览器** | API（需 HITL） |
-| **G** | agent `browser({mode:'attach', cdpUrl:'<内网/远程私网>'})` | SSRF fail-closed 拒绝 | API |
+| **G** | ~~agent `browser({mode:'attach', cdpUrl:'<内网/远程私网>'})`~~ `[v0.0.334]` **cdpUrl 已删，路径取消**——attach 仅 autoConnect（无 URL 输入，SSRF 面消失） | ~~SSRF fail-closed 拒绝~~ → 无此输入 | API |
 | **H** | 用户进连接器页 → 点浏览器 toggle on `[v0.0.46]` | intent=on 持久化；UI toggle 显 on；status 文本显「已启用（未连接）」；**不唤起 chrome、不进 connecting、不 spawn chrome-devtools-mcp**（对比 v0.0.34：立即 connecting） | E2E + API |
 | **I** | switch=on 但 chrome 未开 remote debugging → LLM 调 `browser({mode:'attach', action:X})` lazy connect 失败 `[v0.0.46]` | connection=**error** + errorDetail 记原因；owner 未写入；返回 ToolError 引导用户；**不重试循环**（沿用 [v0.0.34] 失败即停） | API |
 | **J** | 持久化 switch intent=on → 重启 app → ConnectorManager bootstrap `[v0.0.46]` | 启动 switch=**on** + connection=**disconnected**（不 connect、不 spawn chrome-devtools-mcp、不弹「有应用要调试」prompt）；LLM 首次用 attach 时才连 | API |
@@ -180,7 +180,7 @@ return dispatch(r.session, input);
 | **P4** | session A 已 attach（owner=A）→ session B 调 `browser({mode:'attach', action:'listPages'})` `[v0.0.46]` | session B 收到 ToolError「browser attach 已被其他会话占用，请先在该会话调用 disconnect」；不影响 A；**不产生 UI 通知** | API |
 | **P8** | switch=on 已 connected → LLM 调 `browser({mode:'attach', action:'disconnect'})` `[v0.0.46]` | driver 断开（graceful close + kill MCP，**不杀 chrome**）→ connection=disconnected；owner 清空；switch=on 保持；返回 `isError:false` | API |
 
-**路径数**：18 条（A/A0/A2/B/B0/B2/C/C2/D/E/E2/F/G + H/I/J/K + P4/P8），覆盖 web_search Zhipu 主路径+降级、web_fetch 并行 race（key 有/无）/local headless 子分支/SSRF/重定向剥凭证、browser 三 mode + 占用冲突、连接器 toggle 成功/失败/重启、`[v0.0.46]` lazy connect + disconnect action + occupancy conflict、attach 门禁分层。每条至少 1 个 API case；连接器 toggle/HITL 可补 E2E。
+**路径数**：17 条（A/A0/A2/B/B0/B2/C/C2/D/E/E2/F/H/I/J/K + P4/P8，`[v0.0.334]` 路径 G 取消——cdpUrl 已删，attach 仅 autoConnect 无 SSRF 输入），覆盖 web_search Zhipu 主路径+降级、web_fetch 并行 race（key 有/无）/local headless 子分支/SSRF/重定向剥凭证、browser 三 mode + 占用冲突、连接器 toggle 成功/失败/重启、`[v0.0.46]` lazy connect + disconnect action + occupancy conflict、attach 门禁分层。每条至少 1 个 API case；连接器 toggle/HITL 可补 E2E。
 
 ---
 
@@ -238,7 +238,7 @@ web 抓回的正文 / search snippet / answer 一律 untrusted 包装，防 prom
 | web_fetch | 路径 B/B0/B2/C/C2 PASS（真服务）：ContentFetcher 并行 race + local headless 子分支 + SSRF 拒绝 + 重定向剥凭证；代理感知 |
 | browser headless | 路径 D PASS：navigate + snapshot 返回 a11y + refs |
 | browser profile | 路径 E PASS：登录态跨 session 保留；路径 E2 PASS：占用冲突报错 |
-| browser attach | 路径 F PASS（真实 chrome 144+ + HITL + 连接器 connected）；路径 G PASS：远程私网 cdpUrl SSRF 拒绝 |
+| browser attach | 路径 F PASS（真实 chrome 144+ + HITL + 连接器 connected）；`[v0.0.334]` 路径 G 取消（cdpUrl 已删，attach 仅 autoConnect 无 SSRF 输入） |
 | 连接器 toggle on `[v0.0.46]` | 路径 H PASS：toggle on → intent 持久化 + switch UI=on + connection=disconnected；**不 spawn chrome-devtools-mcp** |
 | 连接器 lazy connect 失败 `[v0.0.46]` | 路径 I PASS：LLM 调 attach → connection=error + errorDetail + owner 未写入；不重试 |
 | 连接器重启不 connect `[v0.0.46]` | 路径 J PASS：持久化 intent=on → 重启 switch=on/connection=disconnected；**不弹「有应用要调试」prompt** |
@@ -253,6 +253,7 @@ web 抓回的正文 / search snippet / answer 一律 untrusted 包装，防 prom
 
 ---
 
+version: 1.6 `[v0.0.334 modified]`（v1.5 → v1.6：**browser 删 cdpUrl + attach 仅 autoConnect + 资源生命周期 sqlite 台账** —— §7.2.3 mode③ attach 删自定义 target（cdpUrl 覆盖）与 SSRF 门禁（无 URL 输入）；connect 失败探测本机 Chrome 版本差异化引导（<144 提示升级 / ≥144 引导开启批准 remote debugging）；attach MCP 子进程入 sqlite 台账（`browser_instances` 表），app 启动按台账清孤儿；§7.3 路径 G 取消（17 条）+ §7.6 验收口径同步。行为变化：attach 不再接受任何 URL 输入。技术契约详见 `specs/tech/version_logs/v0.0.334/change_log.md`）。
 version: 1.5 `[v0.0.121 modified]`（v1.4 → v1.5：**jina key 配置事实补账** —— §5 概念权威源 / §7.1.2 能力表配置行 / §7.1.3 核心价值 4 / §7.2.4.1 web group / §7.5.3 配置归属：jina web group 从「dev_config」更正为「`app_config` web group」（`[v0.0.89]` 已迁，此前 PRD 未跟上）+ 补 `[v0.0.121]` jinaApiKey UI 入口事实（应用设置 → 工具 tab → 网络抓取 section）。行为无变更，仅 spec 补账对齐代码。详见 `specs/ui/overall/03-config-center.md §2.3b` + `specs/tech/config/[P0]app_config.md §280`）。
 version: 1.4 `[v0.0.72 modified]`（v1.3 → v1.4：**web_search 协议重构** —— §7.2.1 EP cardinality 由 `exclusive` 改 `list`（多 provider 共存）+ tool 按 `app_config.web_search.type` 单点路由；协议 `search`/`isAvailable` 加 `cfg` 入参；凭证从 ext impl `configSchema` 迁到 `app_config.web_search` group（删 `plugin.json` configSchema.apiKey + 删 env 回退）；§7.5.1/§7.5.3 设计决策对齐。详见 `specs/prd/version_logs/v0.0.72.md` §2 + `specs/tech/agent/tools/[P1]web_search_tool.md` v0.0.72 修订）。
 version: 1.3 `[v0.0.46.connector_opt]`（v1.2 → v1.3：**连接器 lazy connect 时机重构** —— §7.2.3 attach action 增加 `disconnect`；§7.2.4.2 状态迁移表全表更新（lazy trigger + disconnect action + occupancy conflict + bootstrap 不 connect + switch/connection 完全解耦）；§7.3 路径表 H/I/J/K 语义调整 + 新增 P4/P8；§7.5.4 双状态设计决策升级为「完全解耦 + lazy on tool.run」；§7.6 验收表按 v0.0.46 语义重排，声明测试范围仅 UT。详见 `specs/prd/version_logs/v0.0.46.connector_opt/change_log.md`）。

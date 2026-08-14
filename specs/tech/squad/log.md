@@ -1,10 +1,24 @@
 ---
 type: log
 title: Squad KB 变更记录
-updated: 2026-08-09
+updated: 2026-08-13
 ---
 
 # Squad KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-13 · v0.0.319（团队同步服务层 spec 补建 — [P1]team_sync.md）
+
+- **新增 `[P1]team_sync.md`**：v0.0.319 团队同步服务层 spec（此前仅存在于 change_plan + change_log，本次补建）——导出链路（buildManifest + exportSquadToZip 白名单 + restoreAgentFileName/stripMemberIdSuffix + symlink skip + RFC 5987 下载头）；导入链路（preview/execute 两阶段 + validateZipEntries 路径安全 + ImportKeyStore 5min TTL take 原子消费 + best-effort hire + finally 清理）；modelDefault 继承（x-session-id → session squad → 系统 fallback）；边界（workspace 不导出/明文 zip/成员名保留/进程内存）。
+- **`index.md` 导航**：补「团队同步 / 模板」分组 + team_sync.md 行。
+- 详情：`specs/tech/version_logs/v0.0.319/change_log.md` + `specs/prd/v0.0.319-team-sync.md`
+
+## 2026-08-12 · v0.0.340（新团队默认关群聊 + 成员改名信封旧名修复 — 写时全同步 + 读单一源）
+
+- **`[P1]data_model.md §1.1`**：`enableGroupChat` 默认值语义更新——**[v0.0.340] 新建团队默认 false=关**（建队 `squad-service.ts createSquadService` 显式写 false）；存量 squad 无字段读 `?? true`=开（兜底不动，存量不受影响）；管理面板 toggle 可手动开。schema `required:false` + 读取 `?? true` 兜底不变。
+- **`[P1]squad_tools.md §2`**：`team.edit` 补 [v0.0.340] 改名写时全同步——`patchMemberService` putMember 成功后同步关联 session.title（判据：改名发生 || title !== patch.name；仅 `titled !== true` 不覆盖自定义名；updateSession 只传 title 不传 titled 保 CAS；失败抛错透传；team.edit 经 `rtc.store` 注入 sessionStore，与 HTTP PATCH 同一 service 单源）。
+- **`[P1]prompt_sections.md` + `[P1]squad_reminder_providers.md`**：270 enableGroupChat 门控描述补 [v0.0.340] 新建团队默认 false=关（存量 `!== false` 语义不变）。
+- **代码↔spec 核实（doc-modifier 阶段 5）**：① `squad-service.ts:214` `enableGroupChat: false` + 注释同步 ✅；② handlers/squad.ts 存量兜底 `?? true` 未动 ✅；③ `member-mutations.ts` MemberMutationDeps 加 sessionStore（必填）+ patchMemberService 同步块（putMember 成功 → getSession → titled!==true → updateSession(title)）✅；④ 两调用方（handlers/member.ts deps.sessionStore / team-write-actions.ts rtc.store）透传 ✅。
+- 详情：`specs/tech/version_logs/v0.0.340-squad-defaults-and-rename/change_plan.md` + `change_log.md`
 
 ## 2026-08-09 · v0.0.305（squad 聚合视图 + squad_meta SSE — 团队列表 UI 升级后端）
 

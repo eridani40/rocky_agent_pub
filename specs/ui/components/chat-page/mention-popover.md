@@ -28,6 +28,19 @@
 ### Search Input
 - **focus**：面板弹出后自动 focus 到 search input。
 
+## 超限提示（v0.0.346）
+- **数据源**：服务端响应 `truncated: true`（命中集合 files+dirs 合计 ≥ 100 早停截断，仅 true 时输出）→ `SearchState.truncated`。
+- **渲染条件**：`state.truncated && state.items.length > 0` → 结果列表底部渲染提示（`data-action-key="chat.mention.search-too-many"`），**不阻塞「加载更多」滚动翻页**——翻页 append 时 truncated 保留透传（`data.truncated === true || (append ? s.truncated : false)`）。
+- **i18n key**：`mention.searchTooMany`
+  - zh-CN：「结果超过 100 条，请细化输入」（老板钦定逐字）
+  - en：「Over 100 results, please refine your input」
+  - 与 `workspace.preview.searchTooMany` 不同 key（互不误动）。
+
+## icon + 路径展示（v0.0.346-2，问题 4）
+- **icon 渲染（仅 file provider）**：`item.type === 'file'` 才渲染上排 icon——目录（`item.isDir === true` 严格比较）`FolderIcon`（gold `text-gold`）/ 文件 `FileIcon`（muted `text-muted`），size 13，复用 `./icons`（icons.tsx，对齐工作区搜索 ws-tree-item ws-ico 样式）；`data-testid="mention-item-icon-{dir|file}"`。
+- **下排路径始终展示（file provider）**：`(item.type === 'file' || item.listView.subtitle)` —— file 条目无条件渲染 subtitle（provider 保证根路径 `'/'` 或 dirname 非空，无空 div）；非 file provider 有 subtitle 才渲染（保持现状）。
+- **非 file provider 兜底**：skill/member/workitem 无 `isDir`——不渲染 icon、不崩溃，保持纯文本现状。
+
 ## 视觉基线
 无设计稿（本版本无视觉契约设计稿）。coder 实现时设计基础样式后回填此章节。
 预期基线方向：

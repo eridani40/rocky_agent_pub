@@ -119,8 +119,8 @@ enrichForInbox(message, store):
 
   // 反查补全 type（按发送方 session.type；顶层 standalone type=undefined → 'session'）
   expectedType = mapSessionTypeToAgentRefType(senderSession.type)  // subagent→'subagent'; undefined→'session'; 'leader'/'mate'/'squad' 同名（[v0.0.33.1] member→mate）
-  // 反查补全 name（req2.md §5 name 规则）
-  expectedName = deriveAgentRefName(senderSession)                 // subagent→subAgentTemplateType; parent/顶层→session.title || 'parent'
+  // 反查补全 name（req2.md §5 name 规则；[v0.0.340] async + memberStore 反查，见 §2.5.3）
+  expectedName = await deriveAgentRefName(senderSession, lookup)   // subagent→subAgentTemplateType; squad 成员→memberStore 实时名; parent/顶层→session.title || 'parent'
 
   // ── 防幻觉契约：调用方传了 → 校验 warn 不一致；没传 → 反查补全 ──
   finalType = ref.type
@@ -165,10 +165,13 @@ enrichForInbox(message, store):
 
 ### 2.5.3 name 反查规则（deriveAgentRefName）
 
-| 发送方 session.type | name 取值 | 示例 |
+| 发送方 session 形态 | name 取值 | 示例 |
 |---------------------|----------|------|
-| `subagent` | `session.subAgentTemplateType`（如 "explorer"）；为空 → `"subagent"` | `"explorer"` |
+| `subagent`（derivation='subagent'） | `session.subAgentTemplateType`（如 "explorer"）；为空 → `"subagent"`（**subagent 分支优先于反查，templateType 语义不变**） | `"explorer"` |
+| **squad 成员**（`session.squadId` + `session.memberId` 且注入 `lookup.memberStore`） | **`memberStore.getMember(squadId, memberId)?.name`（实时成员名，[v0.0.340 决策 1] 成员名权威源）**；反查失败（member 已删/读失败）静默 fallback title | `"姚順雨"`（改名后新名） |
 | `undefined`（顶层 standalone parent）/ 其他 | `session.title`；无标题 → `"parent"` | `"探查代码任务"` / `"parent"` |
+
+> **[v0.0.340 决策 1] 单一权威源**：成员名权威源 = memberStore（squad 内唯一、人类可读寻址符），不再把 session.title 当成员名读——in 信封 sender 名反查实时 member 名（与 roster 永远一致），改名后信封显示新名。`EnrichSessionLookup` 加可选 `memberStore?: MemberStore`（缺省 undefined → 原行为，纯 helper/测试兼容）；`deriveAgentRefName` 改 async（enrichForInbox await 调用）。session.title 保留「会话标题」独立语义（titled=true 自定义名不覆盖）。
 
 **约束**：
 - name = 渲染用人类可读字段，**不参与路由**（路由只靠 sessionId）。

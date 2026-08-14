@@ -1,13 +1,19 @@
 ---
 type: log
 title: Start-Up KB 变更记录
-updated: 2026-07-16
+updated: 2026-08-12
 ---
 
 # Start-Up KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-12 · v0.0.340（bootstrap-agent-phase 装配 AgentManagerImpl 补 memberStore — inbox sender 名反查生产生效）
+
+- **`bootstrap-agent-phase.ts`（Phase 8）**：`new AgentManagerImpl` 补 `memberStore: new MemberStore({ root: dataDir })`（对齐 :439 setSquadReminderDeps 同款模式；dataDir 在 phase deps 解构可用）——[v0.0.340 决策 1] 成员名权威源 = memberStore 的注入面之一：agent-manager `this.memberStore` 非 undefined 后，`managerDeliverTo` 的 enrich lookup 才带 memberStore → `inbox-enrich.ts deriveAgentRefName` 对 squad 成员 sender 反查实时成员名（in 信封 sender 名与 roster 永远一致）。缺省未注入（测试/旁路场景）→ 原行为不变（读 session.title fallback）。装配级回归：`bootstrap-memberstore-injection.test.ts`（白盒断言 bs.agentManager.memberStore 非 undefined + MemberStore 契约方法齐全，C-1 bootstrap-todostore-injection 同款模式）。
+- 另：buildAgentToolContext 闭包内 `deriveMemberName`（session.memberId+squadId → memberStoreForCtx 反查）供 selfName/parentName（:328-329），反查失败静默 fallback `session?.title ?? 'session'`。
+- 详情：`specs/tech/version_logs/v0.0.340-squad-defaults-and-rename/change_plan.md` + `change_log.md`
 
 ## 2026-07-16 · v0.0.156（bootstrap 拆 7 phase + late-bound holder，装配顺序等价）
 

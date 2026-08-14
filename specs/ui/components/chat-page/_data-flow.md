@@ -74,8 +74,8 @@ chat 页看似「输入 → 出气泡」的简单循环，但实际是**双通�
 
 **管线阶段**（`message-flatten.ts`）：
 1. `messageFilter`（消息级白名单，群聊用 `isUser || isA2aInbox`）先筛
-2. `flattenMessages`（block 级过滤 `DEFAULT_BLOCK_FILTER` 滤 `isSystemReminder=true` text block）→ `ViewElement[]`（user-text / agent-answer / tool-call-item）
-3. `groupToolBatches` → 任意连续 tool-call-item 合并为一个 batch（跨消息边界、遇非 tool 元素断开）
+2. `flattenMessages`（block 级过滤 `DEFAULT_BLOCK_FILTER` 滤 `isSystemReminder=true` text block）→ `ViewElement[]`（**4 种**：user-text / agent-answer / tool-call-item / send-message-envelope——[v0.0.310] send_message 出站信封为第 4 kind，独立成行）
+3. `groupToolBatches` → 任意连续 tool-call-item 合并为一个 batch（跨消息边界、遇非 tool 元素断开）；**send-message-envelope 天然断裂 batch**（信封不进 tool-batch，前一 batch 到此终止、后一 batch 从其后 tool-call-item 重新起组，见 `build-render-rows.ts`）
 
 **part key 稳定性**：`${messageId}:u${text-index}` / `${messageId}:t${text-index}` / `${messageId}:c:${toolCallId}`——非数组 index，SSE 乱序/增量更新不抖动。
 

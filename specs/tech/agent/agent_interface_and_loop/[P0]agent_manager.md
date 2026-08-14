@@ -94,7 +94,7 @@ interface AgentManager {
    * ★ 统一投递入口（a2a / 外部给 session 发消息）。v0.0.31 正式去 config 重构 + enrich 落地。
    *
    * - 只需 sessionId + message（不碰 config——内部按 sessionId 获取 config，见 §3.1.1）
-   * - 内部链路：① enrichForInbox(message, store)（a2a 形态补全，见 [P0]agent_inbox_enqueue.md §2.5）
+   * - 内部链路：① enrichForInbox(message, store, { memberStore }))（a2a 形态补全，见 [P0]agent_inbox_enqueue.md §2.5；[v0.0.340] lookup 带 memberStore——sender 名反查实时成员名）
    *             ② enqueue(sessionId, [enriched])（写 inbox + emit message_enqueued）
    *             ③ activate(sessionId)（启动 loop）
    * - 同步等结果：`await (await deliverTo(sid, msg)).promise` → RunResult（复用 AgentRun.promise）
@@ -198,6 +198,8 @@ interface SessionConfig {
 class AgentManagerImpl:
   // bootstrap.ts:300 setResolveConfig 注入（v0.0.28 已铺路）
   resolveConfig?: (sessionId: string) => Promise<SessionConfig>
+  // [v0.0.340] 可选 memberStore（bootstrap-agent-phase 装配注入；缺省 undefined → enrich 不反查 sender 名，原行为）
+  memberStore?: MemberStore
 
   // 内部 helper：去 config 重构后所有需 config 的方法调本函数
   private async resolveConfigBySid(sessionId: string): Promise<SessionConfig>:
@@ -221,7 +223,7 @@ class AgentManagerImpl:
 
   // —— deliverTo（去 config + enrich）——
   deliverTo(sessionId, message):
-    enriched = await enrichForInbox(message, this.store)    // [P0]agent_inbox_enqueue.md §2.5
+    enriched = await enrichForInbox(message, this.store, { memberStore: this.memberStore })    // [P0]agent_inbox_enqueue.md §2.5；[v0.0.340] lookup 带 memberStore（sender 名反查实时成员名）
     await this.enqueue(sessionId, [enriched])
     return this.activate(sessionId)
 ```

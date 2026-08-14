@@ -1,0 +1,69 @@
+# squad_default_groupchat_tc1 — [v0.0.340] 新团队默认关闭群聊 + 存量兜底不受影响
+#
+# 覆盖契约（reqs/2026-08-12-squad-groupchat-default-off.md + change_plan D1/D3）：
+#   1. POST /squad 建新队 → enableGroupChat == false（默认关；v0.0.340 前是 true）
+#   2. GET /squad/:id 回读 → enableGroupChat == false（落盘持久）
+#   3. 存量 squad record 无 enableGroupChat 字段（v0.0.270 前建的）→ GET 读 ?? true 兜底=开，
+#      存量不受影响（决策 3 不迁移，读取兜底兼容）
+#
+# 纯 HTTP 事务 + files 原语，全确定性，不调 LLM（modelDefault=MiniMax-M3 仅过建队写入校验）。
+# teardown DELETE 清理新建 squad；legacy fixture 由 files 原语自动清理。
+case: squad_default_groupchat_tc1
+module: squad
+timeout: 60
+
+setup:
+  - name: 建新 squad（v0.0.340 语义：默认关闭群聊）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "default-groupchat-off-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "dg-off-leader"
+    save:
+      squad_id: .id
+    check:
+      - .id exists
+      - .enableGroupChat == false
+
+  - name: 构造存量 squad record（无 enableGroupChat 字段，模拟 v0.0.270 前遗留数据）
+    files:
+      - path: "squad/01KZZZZZZZZZZZZZZZZZZZZZZZX.json"
+        content:
+          id: "01KZZZZZZZZZZZZZZZZZZZZZZZX"
+          name: "legacy-groupchat-squad"
+          description: "legacy squad without enableGroupChat"
+          modelDefault: "MiniMax-M3"
+          leaderId: "01KZZZZZZZZZZZZZZZZZZZZZZZY"
+          memberIds: []
+          squadChatSessionId: "01KZZZZZZZZZZZZZZZZZZZZZZZZ"
+          enableHeartBeat: false
+          createdAt: "2026-01-01T00:00:00.000Z"
+          updatedAt: "2026-01-01T00:00:00.000Z"
+          version: 1
+
+steps:
+  - name: GET 回读新建 squad — enableGroupChat 落盘持久 false
+    requests:
+      - GET /squad/{squad_id}
+    check:
+      # check RHS 不插值（{squad_id} 是字面串）→ 用 exists 验字段落库（框架惯例）
+      - .id exists
+      - .enableGroupChat == false
+
+  - name: GET 存量 legacy squad — 无字段 → ?? true 兜底=开（存量不受影响）
+    requests:
+      - GET /squad/01KZZZZZZZZZZZZZZZZZZZZZZZX
+    check:
+      - .id == "01KZZZZZZZZZZZZZZZZZZZZZZZX"
+      - .enableGroupChat == true
+
+teardown:
+  - name: 解散新建 squad（清理；legacy fixture 由 files 原语自动清理）
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+    check:
+      - .deleted == true

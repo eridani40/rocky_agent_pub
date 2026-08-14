@@ -211,7 +211,7 @@ export async function createSquadService(
       squadChatSessionId,
       budget: null, // 占位 v4
       enableHeartBeat: false, // 占位 v4（默认 false）
-      enableGroupChat: true, // [v0.0.270] 群聊可见性默认开（squad schema required:false；建队显式写 true）
+      enableGroupChat: false, // [v0.0.340] 新团队默认关群聊（squad schema required:false；建队显式写 false；存量兜底 handlers/squad.ts ?? true 不受影响）
       // [v0.0.33.4 BUG-001 修] 默认 user local timezone（spec §13）。
       //   修前：entity 无 timezone → scheduler projectSquadSnapshot fallback 'UTC' →
       //   activeWindow（用户本地时区生成）按 UTC 判窗口错位 → multi-squad heartbeat 不 fire（单队因显式 PATCH tz 而漏检）。

@@ -1,10 +1,51 @@
 ---
 type: log
 title: Tools KB 变更记录
-updated: 2026-08-07
+updated: 2026-08-13
 ---
 
 # Tools KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-13 · v0.0.345（撤 worker pool + 工具层 fs.promises 真异步）
+
+- **`[P0]tool_execution_engine.md`**：§1 串行段删「单工具执行可经 worker pool 挪线程（白名单纯 IO 工具走 worker_threads 线程池）」改「工具一律在主线程执行（v0.0.345 撤 worker pool 后无线程池分流）；工具层 fs 操作一律 fs.promises 真异步（libuv 线程池），批内串行顺序不变」；§6「不并发执行」条同步；§7 零件表 worker 线程池行（含三路径探测 + readSet 跨 worker apply 描述）改为「工具在主线程串行执行 + fs.promises 真异步（历史 worker 线程池沿革见 v0.0.307/v0.0.345 change_log）」。
+- **`[P0]file_op_tools.md`**：新增 **§7 工具层 fs 操作标准**（v0.0.345 起生效：IO 调用一律 node:fs/promises + await；persistence 层存量 sync 路径用 fs-yield 兜底不强制迁移；禁止工具层新增 sync fs，例外仅子进程类 spawnSync('rg')；write/edit 落盘走 atomicWriteAsync 与 atomicWriteSync 并存）；原 §7 边界顺延 §8 并补标准归属行。
+- 详情：`specs/tech/version_logs/v0.0.345/change_log.md`（撤 worker pool + 五工具 fs.promises + atomicWriteAsync + 标准沉淀 + 实现偏差）
+
+## 2026-08-13 · v0.0.309（readSet 快照传入 spec 补同步）
+
+- **`[P0]tool_execution_engine.md` §7 零件表**：worker 行补「readSet 跨 worker apply」的快照传入机制——submit 端 `engine-worker-dispatch.ts` 传 `Array.from(ctx.readSet)` 序列化、worker 端 `worker-entry.ts` `new Set(req.readSet)` 初始化局部副本，增量经 `readSetAdditions` 回主线程统一 apply（D5 防跨 worker readSet 断裂）。v0.0.309 编码期实现此前未落 spec，本次补记。
+
+## 2026-08-12 · v0.0.337（attach launch 失败/超时 mcp+watchdog 残留修复 H1-H9）
+
+- **`[P1]browser_instance_manager.md`**：文件头补 `[v0.0.337]` 注记；§4.1 attach launch 补**失败路径三层一致**——H7 manager.launch `ctx?:{signal?}` 透传 + H4 connectAttachSession signal + H5 driver `lastSpawnPid`（spawn 即记，成功失败都记，disconnect 清；与 lastMcpPid 仅成功 set 语义区分）+ H3 signal abort → attach_failed 走 catch + H2 connect catch 补 kill 进程组 + watchdog（graceful close → kill 组 → watchdog，win32 跳过 best-effort）+ **H9 失败入台账**（`r.spawnPid !== undefined` → `ledger.insert({key, mode:'attach', workerPid: spawnPid, createdAt})`，**insert 不 delete** 留给启动自检 cleanupOrphan 回收；下次成功 INSERT OR REPLACE 覆盖；insert 失败 warn 不阻断）。
+- **`[P1]browser_tool.md`**：§4.1 治理动作 2「失败清理」升级三层一致（`[v0.0.337]` H2 补 killProcessGroup + killOrphanMcpWatchdog，顺序 graceful close → kill 组 → watchdog）；target 解析补 **launch 失败/超时清理**（signal 沿 manager.launch ctx → impl.launch → connectAttachSession → driver.connect 透传；**tool.ts 仅 launch 分支透传 ctx.signal，close 不透传**——清理动作必须完整执行）+ **spawn 锚点语义**（lastSpawnPid vs lastMcpPid）。
+- **`specs/api/overall/08-web-tools.md`**：§4.3 attach 连接失败行补失败清理说明（driver 内部清进程组+watchdog，失败入台账留给启动自检）；版本尾注 +1.8。
+- **`specs/tech/version_logs/v0.0.337.attach_launch_failure_leak/`**：change_log.md 新增（H1-H9 实现核对 + 偏离记录：H3 withAbort 替代 Promise.race + signal 为函数签名参数非 options 字段 + H2 watchdog 无 isPidAlive 守卫）。
+- 详情：`specs/tech/version_logs/v0.0.337.attach_launch_failure_leak/change_plan.md` + `change_log.md`
+
+## 2026-08-12 · v0.0.336（attach close 三层一致 + cache key 对称）
+
+- **`[P1]browser_instance_manager.md`**：文件头补 `[v0.0.336]` 注记；§4.3 close 契约重写——**CloseResult 结构化返回**（`{ok:true,text?}` / `{ok:false,error}`）+ **三层一致**（真实资源层 mcp 进程组 + watchdog / 记录层 driver cache + sqlite 台账 / 感知层不谎报，任一失败 ok=false 诚实上报）+ **closeInstance 失败不删表可重试** + execute/idle 收尾防御 catch；attach close 5 步流程（断 MCP（传 userDataDir 对称清 cache）→ killProcessGroup(mcpPid) → killOrphanMcpWatchdog（--parent-pid 精确 pkill）→ ledger.delete → 残留检测）+ AttachKillDeps DI；「清理失败不静默」从「记 warn 仍返回 ok」升级为「收集 failures 最终 ok=false」。
+- **`[P1]browser_tool.md`**：§4.1 target 解析补 cache key 对称（disconnect 与 connect 同一 `resolveDefaultChromeUserDataDir` 解析）+ close 链补 killProcessGroup + killOrphanMcpWatchdog + CloseResult；§4.2 接入段 close 返回类型 `Promise<string | void>` → `Promise<CloseResult>`。
+- **`specs/api/overall/08-web-tools.md`**：§4.2 close 行补 close_incomplete；§4.3 isError 分支新增「close 清理失败 `[v0.0.336]`」行（kind='close_incomplete'，不删表可重试）；生命周期语义补 mcp 进程组 + watchdog 回收 + cache key 对称；版本尾注 +1.7。
+- **`specs/tech/version_logs/v0.0.336.attach_close_process_leak/change_plan.md`**：G3 标注**已砍**（编码期裁决：G1/G2 修 key 对称后死连接复用路径已根除，cache hit 只剩本 run 合法幂等复用，加探活收益低开销高）+ 决策记录。
+- 详情：`specs/tech/version_logs/v0.0.336.attach_close_process_leak/change_log.md`（G1/G2/G4/G5/G6 实现核对 + G3 已砍 + CloseResult 三层一致偏离记录 + cache key 对称根因修正）
+
+## 2026-08-12 · v0.0.334（browser tool 简化 — 删 cdpUrl + 资源生命周期 sqlite 台账）
+
+- **`[P1]browser_tool.md`**：§1 三 mode 表 attach 行改「固定 `--autoConnect`，`[v0.0.334]` 删 cdpUrl，仅自动连接」；§2 BrowserConnectOptions 删 cdpUrl；§4 机制改「恒走 `--autoConnect`，删 cdpUrl 参数/`--browserUrl`/`--wsEndpoint` 分支」+ **新增「无法 attach 明确报错」调查结论**（chrome-devtools-mcp 1.4.0 源码实证：统一报 `Could not connect to Chrome...`，未开调试态=DevToolsActivePort 缺失、<144 无独立检测 → 实现 = connect 失败时探测本机 Chrome 版本差异化引导，新增 `chrome-version.ts`）；§4.1 target 解析改「仅 autoConnect」+ session 缓存 key 二元组 + close 恒检测残留（删显式 cdpUrl 跳过分支）；§4.2 判据改 autoConnect-only 恒检测；**§5 SSRF 段改「`[v0.0.334]` 已删——attach 无 URL 输入」**（web-fetch/ssrf.ts 本体保留）；§7 tool 层 schema 删 cdpUrl + desc 简化（自动连接 + 前置条件 + 同意流程 + 失败引导 + 共享浏览器安全警告 + 模式路由）；§8 锁定决策「远程 chrome attach 不做」；frontmatter updated。
+- **`[P1]browser_instance_manager.md`**：文件头 + §1 现状 + §2 概念（AttachHandle -cdpUrl +mcpPid）+ §3.2 AttachHandle 数据结构 + §3.3 attach 段落 + §4.1 attach launch（仅 autoConnect + mcpPid + ledger.insert）+ §4.3 close（台账硬删 + 恒检测残留）+ **§4.7 持久化改 sqlite 台账**（`browser.sqlite` + 表 `browser_instances` schema + launch insert / close 硬删 / 启动 clearAll）+ §4.9 对账回收 ledger.delete + §5.3 instance 匹配 -cdpUrl + §8 边界（台账替换记录文件）+ §9 文件清单（instance-ledger.ts 新增替换 instance-record.ts）+ §10 泄漏防护闭环（台账锚点）。
+- **`specs/api/overall/08-web-tools.md`**：§4.1 ToolDefinition 删 cdpUrl + §4.1 字段表删 cdpUrl 行（补 `[v0.0.334]` 说明）+ §4.3 isError 分支删 SSRF 两行 + attach 连接失败行补版本引导 + 生命周期语义段补 sqlite 台账；版本尾注 +1.6。
+- **`specs/tech/config/[P1]connectors.md`**：§6 attach launch 注释删 cdpUrl（仅 autoConnect）。
+- 详情：`specs/tech/version_logs/v0.0.334/change_plan.md` + `change_log.md`
+
+## 2026-08-12 · v0.0.330（browser attach 修复 — 缺省 autoConnect + instanceKey 收敛 + close 残留检测）
+
+- **`[P1]browser_tool.md`**：§4 前置门禁 + §4.1 治理动作（`DEFAULT_ATTACH_CDP_URL` 常量已删——attach 缺省 cdpUrl 原样传 undefined 走 `--autoConnect`，不再塞 127.0.0.1:9222）+ target 解析 close 语义；**新增 §4.2 attach close 调试态残留检测**（能力边界实证 + `attach-debug-state.ts` 检测模块 + `ModeImpl.close` 返回类型 `Promise<string|void>` + closeInstance 透传 + `scripts/cleanup-chrome-debug.sh` 一次性清理指引 + desc 契约）；§7 前置校验 instance 匹配改 `sessionId:mode` 统一 key；§3.3 browser-worker.cjs 行补 `[v0.0.330]` 构建机制（gitignore + run-dev.sh/env_start.sh 启动 build:worker）；§10 边界表加 attach-debug-state.ts + cleanup 脚本；frontmatter updated 2026-08-12。
+- **`[P1]browser_instance_manager.md`**：文件头 + §2 概念（BrowserHandle key=`sessionId:mode` 三模式统一，profileName/cdpUrl 不进 key；owner 门禁同步）+ §3.2 数据结构 key 注释；§4.1 attach launch 注释（缺省 undefined → autoConnect）+ mode①② key/reuse 文本（handle 存首次 profileName）+ 幂等语义（同 session 同 mode 重复 launch 复用不换 profile）；**§4.3 close 重写**（无实例 → `no_browser_instance` 报错提示先 launch；attach close = 断 MCP + 残留检测提示；impl.close 提示文本透传至 text；幂等语义更新）；§4.4 releaseSession attach 同路径；§5.1 close action 语义 + §5.3 instance 匹配（session+mode 自动匹配）。
+- **代码↔spec 偏离核实（3 项 Minor 边界，落 change_log）**：① releaseSession/releaseAll 的 close 提示文本无出口（API 为 void），仅 `close()` 有 text 出口——U8 测试已改名对齐；② `attach-debug-state.ts` 检测仅覆盖默认 user data dir（非默认目录 Chrome 漏报——保守方向，不误报优先）；③ instance-manager.ts 行数微超 300 推荐线（既有累积）。
+- 详情：`specs/tech/version_logs/v0.0.330/change_plan.md` + `change_log.md`
 
 ## 2026-08-07 · v0.0.272（Chrome 孤儿进程对账回收 — marker 白名单 + 三层判定 + 双段扫描）
 

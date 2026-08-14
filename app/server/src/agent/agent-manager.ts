@@ -22,6 +22,7 @@ import type { ToolExecutionEngine } from '../tools/engine';
 import type { ContextEngine } from './context-engine';
 import type { SessionConfig } from './context-types';
 import type { SessionStore } from './session-store';
+import type { MemberStore } from '../stores/squad-store';
 import type { InboxStore, InboxEntry } from './inbox';
 import type { AgentEvent, MessageEnqueuedEvent } from './agent-event-types';
 import type { EventBusEvent, ReplayableEventBus } from './event-bus';
@@ -78,6 +79,11 @@ export interface AgentManagerOptions {
    * 缺省 → sideRun 抛错（生产路径 bootstrap 必注；测试 mock 可省）。
    */
   sessionTypePolicy?: SessionTypePolicy;
+  /**
+   * [v0.0.340 决策 1] 可选 memberStore——enrich sender 名反查注入面（squad 成员 sender
+   *   反查实时名，不读 session.title 快照）。缺省 undefined → 行为不变（测试兼容）。
+   */
+  memberStore?: MemberStore;
 }
 
 /**
@@ -107,6 +113,8 @@ export class AgentManagerImpl {
   private buildToolCtxFn?: (sessionId: string, runId: string) => Promise<unknown>;
   /** SessionTypePolicy — sideRun 内部派生 allowedTools / maxIter 用 */
   private readonly sessionTypePolicy?: SessionTypePolicy;
+  /** [v0.0.340 决策 1] memberStore 注入面（enrich sender 名反查；缺省 undefined → 不反查） */
+  private readonly memberStore?: MemberStore;
 
   constructor(opts: AgentManagerOptions) {
     this.bus = opts.bus;
@@ -118,6 +126,7 @@ export class AgentManagerImpl {
     this.resolveConfigFn = opts.resolveConfig;
     this.buildToolCtxFn = opts.buildAgentToolContext;
     this.sessionTypePolicy = opts.sessionTypePolicy;
+    this.memberStore = opts.memberStore;
   }
 
   /**
@@ -366,6 +375,8 @@ export class AgentManagerImpl {
       },
       // enrichForInbox 反查发送方 session record（title/subAgentTemplateType 等）
       getFullSession: (sid) => this.store.getSession(sid),
+      // [v0.0.340 决策 1] memberStore 透传（sender 名反查实时名；缺省 undefined → 不反查）
+      ...(this.memberStore ? { memberStore: this.memberStore } : {}),
     };
   }
 

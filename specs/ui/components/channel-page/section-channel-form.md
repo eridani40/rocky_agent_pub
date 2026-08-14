@@ -9,6 +9,12 @@
 - 编辑：PUT /config/channels/:id（appSecret='***' 表示未改，后端 merge 原值）。
 边界：受控表单，提交后回调父级（父级 reload 取稳态 + 关表单）。
 
+## 保存模型（v0.0.317 SaveBar）
+
+- **[v0.0.317] dirty 判定**：`isEdit`（editing 有值）→ `implId/name/appId/appSecret` 各 `!==` editing baseline；`editing=null`（新建）→ 任一字段非空即 dirty。
+- **[v0.0.317] 底部 SaveBar 替换原提交/取消按钮**：`<SaveBar variant="detail" dirty={dirty} saving={submitting} onSave={...} onCancel={...} />`（`component-save-bar.tsx`）。handleSubmit 改为 SaveBar onSave 回调（组装 input + onSubmit + setErr 提交逻辑不变），从 inline form submit 改为函数调用。
+- **types 空态**下提交按钮禁用沿用（见下节）。
+
 ## Props
 - editing?: ChannelConfig | null;  // null/undefined=新建；有值=编辑（回显 name/appId/appSecret）
 - types: { implId: string; label: string }[];  // 渠道 impl 类型列表（label 已经父级 resolveI18nField 解析为本地文案）

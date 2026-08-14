@@ -46,6 +46,11 @@ echo "[run-dev.sh] APP_NAME=$APP_NAME env=$APP_ENV API_PORT=$API_PORT WEB_PORT=$
 echo "[run-dev.sh] 0a. generating app/server/app-version.json ..."
 bun run gen-version
 
+# 0a'. 构建 browser worker bundle（幂等，~1s）：headless/managed 常驻走 browser-worker.cjs，
+#   产物已 gitignore（D-F），每次 dev 启动前重建保证协议最新（loop/chromePid 等）。
+echo "[run-dev.sh] 0a'. building browser worker (bun run build:worker) ..."
+bun run build:worker
+
 # 0. 预清理残留端口（避免上次 Ctrl-C 残留进程占用 API_PORT/WEB_PORT → vite "Port already in use"）
 #    [v0.0.105] 含 computer use dev loopback 端口（空值 for 循环安全跳过）
 for p in "$API_PORT" "$WEB_PORT" "${ROCKY_DEV_COMPUTER_LOOPBACK_PORT:-}"; do

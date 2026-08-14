@@ -1,0 +1,94 @@
+# workspace_stat_tc4 — GET /session/:id/workspace/stat 端点（v0.0.339）
+#
+# 覆盖契约：
+#   - specs/tech/version_logs/v0.0.339-file-open-strategy/change_plan.md A1：
+#     GET /session/:id/workspace/stat?path=<rel> 复用 resolveWsFilePath 白名单安全链
+#     + statSync 返 { size }（只返 size 不读内容）
+#     - 正常文件 → 200 {size}
+#     - 目录/不存在 → 404
+#     - path 缺失/越界（traversal）→ 400
+#     - 非 GET → 405
+#     - session 不存在 → 404
+#
+# 设计说明：
+#   - setup 建 session（workspaceDir 自动建 <DATA_DIR>/workspaces/{sid}）
+#     + files 原语植入 data.md（正常文件）+ subdir/keep.txt（建目录 fixture）
+#   - step1 正常文件 stat → 200 {size}，size >= 1（内容非空）
+#   - step2 目录 stat → 404（stat 端点只服务文件大小判定，目录无 size 语义）
+#   - step3 越界 ../evil → 400（resolveWsFilePath traversal 拒绝）
+#   - step4 POST 非 GET → 405（GET only）
+#   - step5 不存在 session → 404（硬编码不存在 ULID）
+#
+# 注意：
+#   - check 比较操作符仅 >= <= == != ~= !~=（无 > <），size 断言用 >= 1
+#   - 不调 LLM：纯 HTTP + files 原语，全确定性。
+case: workspace_stat_tc4
+module: workspace
+timeout: 60
+
+setup:
+  - name: 建 session（workspaceDir 自动建 <DATA_DIR>/workspaces/{sid}）
+    requests:
+      - method: POST
+        path: /session
+        body:
+          title: "ws-stat-tc4"
+    save:
+      sid: .id
+    check:
+      - .id exists
+
+  - name: 植入 stat fixture（正常文件 + 目录）
+    files:
+      - path: "workspaces/{sid}/data.md"
+        content: { marker: "stat-content" }
+      - path: "workspaces/{sid}/subdir/keep.txt"
+        content: { marker: "keep" }
+
+steps:
+  - name: 正常文件 stat → 200 {size > 0}
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/stat?path=data.md
+    check:
+      - .size exists
+      - .size >= 1
+
+  - name: 目录 stat → 404（无 size 语义）
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/stat?path=subdir
+        status: [404]
+    check:
+      - .error exists
+
+  - name: 越界路径 ../evil → 400（traversal 拒绝）
+    requests:
+      - method: GET
+        path: /session/{sid}/workspace/stat?path=../evil
+        status: [400]
+    check:
+      - .error exists
+
+  - name: 非 GET（POST）→ 405
+    requests:
+      - method: POST
+        path: /session/{sid}/workspace/stat?path=data.md
+        status: [405]
+    check:
+      - .error exists
+
+  - name: session 不存在 → 404
+    requests:
+      - method: GET
+        path: /session/01KZZZZZZZZZZZZZZZZZZZZZZZZ/workspace/stat?path=data.md
+        status: [404]
+    check:
+      - .error exists
+
+teardown:
+  - name: 清理 session
+    requests:
+      - method: DELETE
+        path: /session/{sid}
+        status: [204, 404]

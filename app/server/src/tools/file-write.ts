@@ -13,12 +13,12 @@
  *   - 成功后写入 ctx.readSet（新内容已「读过」语义）
  *
  * 并发原子（spec §5）：
- *   - 写动作包进 withFileLock(filePath, async () => atomicWriteSync(...))，同 path 并发写 FIFO 串行。
- *   - atomicWriteSync 替换裸 writeFileSync，补崩溃原子（tmp→fsync→rename）。
+ *   - 写动作包进 withFileLock(filePath, async () => atomicWriteAsync(...))，同 path 并发写 FIFO 串行。
+ *   - atomicWriteAsync 替换裸 writeFile，补崩溃原子（tmp→fsync→rename，fs.promises 真异步）。
  */
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { mkdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute } from 'node:path';
-import { atomicWriteSync } from '../persistence/fs-io';
+import { atomicWriteAsync } from '../persistence/fs-io';
 import { withFileLock } from '../persistence/file-lock';
 import type { Tool, ToolCtx, ToolInput, ToolRunResult } from './types';
 import { errorResult, textResult, ToolErrorCode } from './types';
@@ -56,9 +56,14 @@ export const fileWriteTool: Tool = {
     }
 
     // 已存在校验：覆盖前须先 read
-    if (existsSync(filePath)) {
-      const isDir = statSync(filePath).isDirectory();
-      if (isDir) {
+    let existingStat: Awaited<ReturnType<typeof stat>> | undefined;
+    try {
+      existingStat = await stat(filePath);
+    } catch {
+      existingStat = undefined; // ENOENT → 视为不存在（新建路径）
+    }
+    if (existingStat) {
+      if (existingStat.isDirectory()) {
         return errorResult(`[${ToolErrorCode.INVALID_INPUT}] path is a directory: ${filePath}`);
       }
       // 不在 readSet → 防盲改
@@ -70,9 +75,12 @@ export const fileWriteTool: Tool = {
     } else {
       // 新建文件：父目录不存在 → 自动 mkdir -p（见顶部行为说明）
       const parent = dirname(filePath);
-      if (!existsSync(parent)) {
+      try {
+        await stat(parent);
+      } catch {
+        // 父目录不存在 → 递归建链
         try {
-          mkdirSync(parent, { recursive: true });
+          await mkdir(parent, { recursive: true });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           return errorResult(`[${ToolErrorCode.RUNTIME_ERROR}] failed to create parent dir ${parent}: ${msg}`);
@@ -83,7 +91,7 @@ export const fileWriteTool: Tool = {
     try {
       // 写动作入锁（同 path 并发 FIFO 串行）+ 原子写（崩溃原子）
       await withFileLock(filePath, async () => {
-        atomicWriteSync(filePath, content);
+        await atomicWriteAsync(filePath, content);
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

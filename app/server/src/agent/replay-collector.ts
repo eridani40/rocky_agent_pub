@@ -15,6 +15,7 @@ import type { ReplayableEventBus } from './event-bus';
 import type { EventBusEvent } from './event-bus';
 import type { AgentEvent } from './agent-event-types';
 import type { ContentBlock, ToolCallBlock } from '../message/types';
+import { normalizeContentBlocks } from './tools/send-message-tool';
 
 /** 重组出的 partial message（复用 message_start 的 messageId） */
 export interface PartialMessage {
@@ -175,7 +176,14 @@ export class ReplayCollector {
           // tool_call：用累积的 _argumentsBuf 容错解析出 arguments（完整或半截统一在此收尾）
           if (rest.type === 'tool_call') {
             const { _argumentsBuf, ...tc } = rest as ToolCallBlock & { _argumentsBuf: string };
-            return { block: { ...tc, arguments: safeParseArgs(_argumentsBuf) } as ContentBlock, order: _order };
+            const args = safeParseArgs(_argumentsBuf);
+            // [v0.0.331 P1] 落库前 normalize send_message 的 arguments.content（缺 type 补 'text'，
+            // 与 agent-loop-stream.ts closeActive 同语义）。仅 send_message 且非 _raw 半截路径生效。
+            const finalArgs =
+              tc.name === 'send_message' && args._raw === undefined
+                ? { ...args, content: normalizeContentBlocks(args.content) }
+                : args;
+            return { block: { ...tc, arguments: finalArgs } as ContentBlock, order: _order };
           }
           return { block: rest as ContentBlock, order: _order };
         })
@@ -198,5 +206,6 @@ function safeParseArgs(buf: string): Record<string, unknown> {
   } catch {
     // 解析失败：保留 raw（容错）
   }
-  return { _raw: buf };
+  // [v0.0.331 P1'] 加 _rawTruncated 标记：前端 D3 据此显示「发送失败（参数截断）」
+  return { _raw: buf, _rawTruncated: true };
 }

@@ -107,6 +107,46 @@ export async function handleWorkspaceFileRead(
 }
 
 /**
+ * GET /session/:id/workspace/stat —— workspace 文件 stat（v0.0.339：文件大小判定，供前端分流）。
+ * 流程：method 校验 → getSession → query path 校验 → realRoot → whitelistResolve → statSync → { size }。
+ * 只返 size **不读文件内容**（>5MB 大文件先读再判大小 = 本末倒置；轻量 statSync）。
+ * 错误：405 非 GET / 404 session+文件不存在 / 400 path 缺失或越界 / 500 workspace+realpath+stat 失败。
+ * 目录/不存在 → 404（对齐 file read：whitelistResolve not_found→404；目录 stat 成功但语义上文件打开需要文件——
+ *   resolveWsFilePath 白名单对目录 realpath 成功，此处 statSync 对目录也成功；按 change_plan「目录/不存在 404」：
+ *   目录 isDirectory → 404（stat 端点只服务文件大小判定）。
+ */
+export async function handleWorkspaceStat(
+  req: Request,
+  method: string,
+  id: string,
+  deps: SessionHandlerDeps,
+): Promise<Response> {
+  if (method !== 'GET') {
+    return json(405, { error: 'Method Not Allowed' }, 'GET');
+  }
+  const got = await deps.store.getSession(id);
+  if (!got) return json(404, { error: 'session not found' });
+
+  const url = new URL(req.url);
+  const pathParam = url.searchParams.get('path');
+  if (typeof pathParam !== 'string' || pathParam === '') {
+    return json(400, { error: 'path required' });
+  }
+
+  // 路径白名单 + realpath（与 file read 同一安全链；traversal→400 / not_found→404）
+  const resolved = resolveWsFilePath(got.workspaceDir, pathParam);
+  if (!resolved.ok) return resolved.response;
+
+  try {
+    const st = statSync(resolved.absPath);
+    if (st.isDirectory()) return json(404, { error: 'path not found' }); // 目录无 size 语义（文件打开判定用）
+    return json(200, { size: st.size });
+  } catch {
+    return json(404, { error: 'path not found' }); // stat 失败（不存在/无权限）→ 404（对齐 file read 语义）
+  }
+}
+
+/**
  * POST /session/:id/workspace/file/save —— 覆盖写 workspace 文本文件（v0.0.320 起带乐观锁冲突检测）。
  * 流程：method 校验 → getSession → body {path,content,expectedVersion?,force?} 校验 → realRoot →
  *   whitelistResolve → 版本校验（可选）→ writeFileSync 覆盖。

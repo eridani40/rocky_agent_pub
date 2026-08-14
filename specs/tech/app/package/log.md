@@ -1,13 +1,26 @@
 ---
 type: log
 title: Package KB 变更记录
-updated: 2026-08-04
+updated: 2026-08-12
 ---
 
 # Package KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-12 · v0.0.342（打包离线化 — build-dmg.sh 固定联网点根治）
+
+- **`[P0]packaging_toolchain.md §3.10`（新增）**：离线打包——electron-builder 默认链路两个固定联网点根治：① update-notifier（CLI 启动 `checkIsOutdated` 查 npm registry）→ `export NO_UPDATE_NOTIFIER=1`；② unpack 必经 `@electron/get` 下载 electron zip（即便本地 dist 已存在；对缓存 zip 仍每次下载 SHASUMS256.txt 校验 cacheMode: Bypass）→ 显式 `--config.electronDist=<本地已解压 dist>` 走 custom unpacked copyDir 分支完全跳过下载/校验。dist 缺失兜底：`electron install.js` 本地解压（幂等，读小写 `electron_config_cache` 命中 `~/Library/Caches/electron` 缓存 zip 零联网；`|| true` + 二次检查 exit 3 不静默失败）。断网/弱网前提 = 本地已有 dist 或缓存 zip；全新机器需先有网跑一次 `bun install`。
+- **`[P0]packaging_toolchain.md §4.2`（修改）**：流程示意 ⑤ 拆出 electron-dist 离线准备步，⑥ electron-builder 补 `--config.electronDist`。
+- **`[P0]packaging_toolchain.md §5`（修改）**：边界表归属补「离线打包 electronDist 本地化 + NO_UPDATE_NOTIFIER（§3.10）」。
+- **`../envs/[P0]scripts.md §3.3`（修改）**：build-dmg.sh 动作补离线准备 + electronDist。
+- **代码↔spec 偏离核实**：`scripts/build-dmg.sh`（顶部 NO_UPDATE_NOTIFIER + ③ 前 ELECTRON_DIST_DIR 检查 + install.js 兜底 `|| true` + 二次检查 exit 3 + `--config.electronDist`）与 §3.10 一致。**编号偏差**：code-reviewer 观察项说「§3.6」，但 §3.6 已被 runtime-config.json 占用（3.6~3.9 全存在），离线章节实际追加为 **§3.10**（不重排已有编号）。脚本注释里「§3.6 为 runtime-config.json」与现状一致，无需改。
+- 详情：`specs/tech/version_logs/v0.0.342-build-offline/change_log.md`
+
+## 2026-08-12 · v0.0.339（shell:stat IPC — workspace/absolute 文件大小判定）
+
+- **`[P0]package_structure.md §4.4`（修改）**：三 channel → 四 channel（+`shell:stat`）——`computeFileStat(absPath, fs)` 纯函数（`fs.stat` → `{ok:true, size}`；ENOENT→`not-found` / EACCES→`permission-denied` / stat 缺省→`stat-unavailable`；只 stat 不读内容）+ registerOpenExternalIpc 第六 channel `ipcMain.handle('shell:stat')`（computeResolveLocalPath 展开）+ preload `stat(path)` + `rocky-shell.d.ts` `RockyShellStatResult { ok; size?; reason? }`。消费方：`open-local-path.ts` 文本分支 stat 判定（absolute 源 >5MB 系统打开 / ≤5MB 内置）。详见 `specs/tech/version_logs/v0.0.339-file-open-strategy/change_log.md`。
 
 ## 2026-08-04 · v0.0.253（通用打开外部资源 IPC — shell:openExternal/openPath/readFileText）
 

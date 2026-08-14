@@ -1,27 +1,31 @@
 /**
- * FileProvider —— workspace 文件搜索 mention provider
+ * FileProvider —— workspace 文件搜索 mention provider（适配层）
  * 参考: specs/tech/mention/provider-interface.md §5
+ *       specs/tech/version_logs/v0.0.346/change_plan.md（file-provider 行）
  *
- * 在 ctx.workspaceDir 下递归遍历文件，按文件名/路径包含匹配搜索。
- * 排除 node_modules / .git / 隐藏文件（.* 开头）。
- * 5 秒超时兜底，返回当前已收集结果 + nextCursor。
+ * v0.0.346 起收敛为 workspace-search-core 的适配层：
+ *   - search() 调 searchWorkspace(ctx.workspaceDir, ctx.query)——与工作区搜索共用同一
+ *     遍历/排除/上限（IGNORED_NAMES 仅 node_modules/.git，单一源在 session-workspace.ts）
+ *   - 合并 files+dirs 按 relPath 排序 → 按 limit/cursor 切片分页 → toMentionItem 映射
+ *   - truncated 透传（files+dirs ≥ 100 早停）
+ *   - 目录命中返回 type='file' 条目（path=目录相对路径；display.icon 保持 'file'，
+ *     label/title=目录名，subtitle=dirname）——MentionItem 仅加 isDir 可选字段
+ *   - 追加问题 4（v0.0.346-2）：isDir 标记（目录 true / 文件缺省）+ listView.icon
+ *     folder/file 区分 + 根路径 subtitle='/' 始终展示
+ *   - 5s 超时移除（100 早停保障）；点开头目录/文件不再排除（仅 IGNORED_NAMES）
  */
-import { readdirSync, statSync } from 'node:fs';
-import { join, relative, basename, dirname, sep } from 'node:path';
+import { basename, dirname, sep } from 'node:path';
+import { searchWorkspace } from '../../search/workspace-search-core';
 import type { MentionProvider, SearchCtx, SearchResult, MentionItem } from '../types';
-
-/** 排除的目录/文件名（与 session-workspace.ts IGNORED_NAMES 一致 + 隐藏文件） */
-const IGNORED_NAMES = new Set(['node_modules', '.git']);
 
 /** 默认分页大小 */
 const DEFAULT_LIMIT = 20;
-/** 搜索超时（毫秒） */
-const SEARCH_TIMEOUT_MS = 5000;
 
 /**
- * 文件搜索 provider。
- * 搜索范围 = ctx.workspaceDir 下递归遍历（排除 node_modules/.git/隐藏文件）。
- * 搜索算法 = 文件名包含匹配（大小写不敏感）。无索引，实时遍历。
+ * 文件搜索 provider（适配层）。
+ * 搜索范围 = ctx.workspaceDir 下递归遍历（排除 node_modules/.git，点开头不再排除）。
+ * 搜索算法 = 与工作区搜索一致（basename 或完整相对路径包含匹配，大小写不敏感）。
+ * 命中集合 = 文件 + 目录；目录条目不递归其下层，type 仍 'file'（选中/插入/pill 走既有路径）。
  */
 export class FileProvider implements MentionProvider {
   readonly name = 'file';
@@ -29,16 +33,19 @@ export class FileProvider implements MentionProvider {
 
   async search(ctx: SearchCtx): Promise<SearchResult> {
     const limit = ctx.limit > 0 ? ctx.limit : DEFAULT_LIMIT;
-    const query = ctx.query.toLowerCase();
 
     // cursor = offset（base64 编码数字）
     const offset = ctx.cursor ? parseInt(atob(ctx.cursor), 10) || 0 : 0;
 
-    // 收集匹配文件（带 5 秒超时兜底）
-    const allMatches = await this.collectWithTimeout(ctx.workspaceDir, query);
+    // 适配层：与工作区搜索共用 searchWorkspace（同一遍历/排除/100 上限）
+    const { files, dirs, truncated } = searchWorkspace(ctx.workspaceDir, ctx.query);
 
-    // 排序保证稳定分页（跨请求 offset 一致）
-    allMatches.sort();
+    // 合并 files+dirs 按 relPath 排序（dirs 在前，排序稳定保证跨请求 offset 一致）；
+    // 保留 dir 标记（并行数组），排序/分页后逐条 toMentionItem(relPath, isDir)
+    const allMatches: Array<{ relPath: string; isDir: boolean }> = [
+      ...dirs.map((relPath) => ({ relPath, isDir: true })),
+      ...files.map((relPath) => ({ relPath, isDir: false })),
+    ].sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
 
     // 分页切片
     const sliced = allMatches.slice(offset, offset + limit);
@@ -48,108 +55,41 @@ export class FileProvider implements MentionProvider {
         : undefined;
 
     return {
-      items: sliced.map((relPath) => this.toMentionItem(relPath)),
+      items: sliced.map((m) => this.toMentionItem(m.relPath, m.isDir)),
       nextCursor,
+      // truncated 透传（仅 true 时携带；false/undefined 由 handler 缺省省略）
+      ...(truncated ? { truncated: true } : {}),
     };
   }
 
   /**
-   * 带超时的文件收集（5 秒后返回已收集结果）。
-   * 设计：race 一个文件遍历 Promise 和一个 setTimeout Promise，
-   * 超时返回空数组（遍历未完成的由下次 cursor 翻页补全）。
+   * 将文件/目录相对路径转换为 MentionItem。
+   * 目录条目：type='file'，isDir=true，display.icon='file'（pill 不区分），
+   * display.label=basename（目录名），listView.title=basename，subtitle=dirname，
+   * listView.icon='folder'；文件条目：isDir 缺省，listView.icon='file'。
+   * 根路径（dirname='.'）subtitle='/' 始终展示。
    */
-  private async collectWithTimeout(
-    workspaceDir: string,
-    query: string,
-  ): Promise<string[]> {
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-    }, SEARCH_TIMEOUT_MS);
-
-    const matches: string[] = [];
-    try {
-      this.collectFiles(workspaceDir, workspaceDir, query, matches, () => timedOut);
-    } finally {
-      clearTimeout(timer);
-    }
-    return matches;
-  }
-
-  /**
-   * 递归收集匹配文件（DFS）。
-   * @param dir 当前遍历目录绝对路径
-   * @param workspaceDir 根目录（计算相对路径用）
-   * @param query 搜索关键词（已小写化）
-   * @param matches 结果收集数组（写入相对路径）
-   * @param shouldStop 超时检测回调（返回 true 立即中止递归）
-   */
-  private collectFiles(
-    dir: string,
-    workspaceDir: string,
-    query: string,
-    matches: string[],
-    shouldStop: () => boolean,
-  ): void {
-    if (shouldStop()) return;
-
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return; // 目录不可读，静默跳过
-    }
-
-    for (const name of entries) {
-      if (shouldStop()) return;
-      if (this.shouldSkip(name)) continue;
-
-      const absPath = join(dir, name);
-      let isDir = false;
-      try {
-        isDir = statSync(absPath).isDirectory();
-      } catch {
-        continue; // stat 失败跳过
-      }
-
-      if (isDir) {
-        this.collectFiles(absPath, workspaceDir, query, matches, shouldStop);
-      } else if (name.toLowerCase().includes(query)) {
-        // 文件名包含匹配 → 记录相对路径
-        matches.push(relative(workspaceDir, absPath));
-      }
-    }
-  }
-
-  /**
-   * 判断是否跳过某文件/目录名。
-   * 排除：node_modules / .git / 隐藏文件（.* 开头）。
-   */
-  private shouldSkip(name: string): boolean {
-    return IGNORED_NAMES.has(name) || name.startsWith('.');
-  }
-
-  /**
-   * 将文件相对路径转换为 MentionItem。
-   * path = 相对路径（POSIX 分隔符）；display.label/listView.title = 文件名（同源）。
-   */
-  private toMentionItem(relPath: string): MentionItem {
+  private toMentionItem(relPath: string, isDir = false): MentionItem {
     // 统一为 POSIX 路径分隔符（跨平台一致）
     const posixPath = relPath.split(sep).join('/');
-    const fileName = basename(posixPath);
+    const name = basename(posixPath);
     const dirPart = dirname(posixPath);
 
     return {
       type: 'file',
       path: posixPath,
+      // 目录条目 isDir:true；文件条目缺省（向后兼容，member/skill/workitem 不设）
+      ...(isDir ? { isDir: true } : {}),
       display: {
         icon: 'file',
-        label: fileName,
+        label: name,
       },
       listView: {
-        title: fileName,
-        subtitle: dirPart === '.' ? undefined : dirPart,
-        icon: 'file',
+        title: name,
+        // 根路径 '/' 始终展示；非根 = dirname
+        subtitle: dirPart === '.' ? '/' : dirPart,
+        // 目录 folder / 文件 file（前端 popover 据此区分 icon）
+        icon: isDir ? 'folder' : 'file',
       },
     };
   }

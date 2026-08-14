@@ -140,7 +140,7 @@ interface PreviewTab {
 
 - **位置/显隐**：正文区（pv-content）最右侧偏上（`absolute right-3 top-4 z-[5]`）；**常驻显示**（v0.0.323 起不再 group-hover 显隐）。
 - **容器样式**：悬浮胶囊——`flex flex-col gap-1 rounded-xl border border-border bg-surface p-1 shadow-sm`（对齐 component-chat-float-menu 容器）。
-- **只读态（mode='view'）**：1 个「编辑」按钮（`pv-float-edit`，PencilIcon=feather edit-2）→ 进编辑态。
+- **只读态（mode='view'）**：2 个按钮——①「编辑」（`pv-float-edit`，PencilIcon=feather edit-2，常驻）→ 进编辑态；②「浏览器打开」（`pv-float-open-browser`，GlobeIcon，**仅 isHtml prop 为 true 时渲染**，[v0.0.325]）→ `onOpenInBrowser` 用系统浏览器打开当前 html 文件。
 - **编辑态（mode='edit'）**：按钮顺序 ①保存（`pv-float-save`，SaveIcon，primary 色 `bg-accent`，`saving` disabled + title=保存中…）→ ②撤销（`pv-float-undo`，UndoIcon，放弃修改回只读）→ ③格式化（`pv-float-format`，AlignIcon，仅 structured）→ ④校验（`pv-float-validate`，CheckSquareIcon=feather check-circle，仅 structured）。
 - **按钮样式**：容器内图标按钮（`h-8 w-8 rounded-lg text-muted hover:bg-bg-warm hover:text-fg`，对齐 chat-float-menu 按钮）；图标 size 统一 16；每按钮 `title` + `aria-label` tooltip（i18n `workspace.preview.*`）。
 - **回调来源**：`onEdit`/`onSave`/`onUndo`/`onFormat`/`onValidate` 由容器组装——save/format/validate 走 editor ref（`useImperativeHandle` 暴露）。
@@ -166,7 +166,7 @@ interface PreviewTab {
 
 **文件**：`preview-icons.tsx`（从 `icons.tsx` 抽离控行数）。
 
-feather stroke 风格（`strokeWidth=2, strokeLinecap='round'`），5 个图标供悬浮按钮使用：
+feather stroke 风格（`strokeWidth=2, strokeLinecap='round'`），6 个图标供悬浮按钮使用：
 
 | 图标组件 | 语义 | 悬浮按钮 | feather 原型 |
 |----------|------|----------|-------------|
@@ -175,6 +175,7 @@ feather stroke 风格（`strokeWidth=2, strokeLinecap='round'`），5 个图标�
 | `UndoIcon` | 撤销 | pv-float-undo | corner-up-left（回旋箭头） |
 | `AlignIcon` | 格式化 | pv-float-format | align-left |
 | `CheckSquareIcon` | 校验 | pv-float-validate | check-circle（圆勾，v0.0.323 起替换 check-square，组件名不改） |
+| `GlobeIcon` | 浏览器打开 | pv-float-open-browser | globe（[v0.0.325] 新增） |
 
 ## 6. 范式归属（老板铁律：逐控件过范式）
 
@@ -199,7 +200,7 @@ feather stroke 风格（`strokeWidth=2, strokeLinecap='round'`），5 个图标�
 
 ## 8. i18n
 
-`workspace.preview.*` 命名空间双语（zh-CN + en）：empty / edit / save / saving / cancel / **undo（[老板第三批] 撤销）** / closeTab / collapse / expand / tabLeft / tabRight / dirtyTitle / dirtyBody / dirtySaveSwitch / dirtyDiscard / dirtyCancel / conflictTitle / conflictBody / conflictReload / conflictOverwrite / loading / openFail / retry / saveFail / **format（格式化）/ validate（校验）/ formatFail / validateFail / validateFailLine / validateOk（[老板第三批] structured 格式化校验）** / searchPlaceholder / searchTooMany / searchNoResults / searchClear / resize.ariaLabel / resize.title / **doorLeft（文档区占满·门滑至左）/ doorRight（对话区占满·门滑至右）/ doorCenter（恢复分栏·门回居中）（[v0.0.329] 门三态 tooltip）**。
+`workspace.preview.*` 命名空间双语（zh-CN + en）：empty / edit / save / saving / cancel / **undo（[老板第三批] 撤销）** / closeTab / collapse / expand / tabLeft / tabRight / dirtyTitle / dirtyBody / dirtySaveSwitch / dirtyDiscard / dirtyCancel / conflictTitle / conflictBody / conflictReload / conflictOverwrite / loading / openFail / retry / saveFail / **format（格式化）/ validate（校验）/ formatFail / validateFail / validateFailLine / validateOk（[老板第三批] structured 格式化校验）** / searchPlaceholder / searchTooMany / searchNoResults / searchClear / resize.ariaLabel / resize.title / **openInBrowser（浏览器打开 / Open in Browser，[v0.0.325] html 预览态浏览器打开按钮）** / **doorLeft（文档区占满·门滑至左）/ doorRight（对话区占满·门滑至右）/ doorCenter（恢复分栏·门回居中）（[v0.0.329] 门三态 tooltip）**。
 
 ## 9. 视觉基线
 
@@ -216,5 +217,6 @@ feather stroke 风格（`strokeWidth=2, strokeLinecap='round'`），5 个图标�
 ## 10. 边界
 
 - **image 不进预览区**：6 格式图片仍走 `component-ws-image-viewer` 弹层（openLocalPath onImageViewer 分支，v0.0.269 语义保留）。
+- **[v0.0.339] csv/tsv 与 >5MB 文本不进预览区**：`openLocalPath` 分流升级——`csv`/`tsv` **无条件系统打开**（不 stat、不内置，任何大小）；其余内置文本（12 格式 + code）stat 大小判定（workspace→`GET /workspace/stat?path=` / absolute→`rockyShell.stat`，`TEXT_OVER_SIZE_BYTES = 5MB`，`>5MB` → 系统打开 / `≤5MB` → 内置 tab；stat 失败 undefined 降级内置）；**图片不 stat**（无大小限制）。系统打开复用 openWorkspaceItem/openPath（无新机制）。
 - **absolute IPC 源 v1 无冲突检测**（version=''，last-write-wins；IPC 层零改）。
 - **code 分类无高亮**：编程语言后缀 → 'code' → 行为 = plain（pre 渲染，无格式化/校验按钮）。

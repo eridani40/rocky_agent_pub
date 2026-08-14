@@ -43,14 +43,29 @@ beforeAll(async () => {
   const RangeProto = Range.prototype as unknown as { getClientRects?: unknown; getBoundingClientRect?: unknown };
   if (typeof RangeProto.getClientRects !== 'function') RangeProto.getClientRects = fakeRects;
   if (typeof RangeProto.getBoundingClientRect !== 'function') RangeProto.getBoundingClientRect = fakeRect;
+  // [v0.0.346] MentionPopover 挂载后 focusIndex 可见性 effect 调 scrollIntoView（jsdom 缺失）
+  if (typeof Element.prototype.scrollIntoView !== 'function') {
+    Element.prototype.scrollIntoView = () => {};
+  }
   await initI18n('zh-CN');
 });
-
-afterEach(() => cleanup());
 
 // [v0.0.267] 草稿集成用例隔离：每用例清空单例 drafts（ChatComposer 真实读写 useChatStore 单例）
 beforeEach(() => {
   useChatStore.setState({ drafts: {} });
+  // [v0.0.346] MentionPopover doSearch 走 fetch；mock 返回空结果（双层门控用例关注面板开关，不关注结果）
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [], nextCursor: null }),
+    }),
+  );
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('ChatComposer（v0.0.86 display 字段重构）', () => {
@@ -447,5 +462,228 @@ describe('ChatComposer（v0.0.267 输入草稿缓存）', () => {
     // prefill 注入触发 onUpdate → 实时写缓存（change_plan 风险点 4：内容等价保存，预期行为）
     // 用户切走再切回会恢复该 prefill 内容（= 草稿语义）
     expect(useChatStore.getState().drafts['s1']).toContain('接口联调');
+  });
+});
+
+/**
+ * v0.0.346 双层门控组件级测试。
+ * 输入模拟：.ProseMirror 元素上 Tiptap 挂 editor 属性，editor.view.dispatch(tr.insertText())
+ * 走真实 ProseMirror 输入路径（selection 自动跟随 → onUpdate → detectTrigger）。
+ * 参考: specs/tech/version_logs/v0.0.346/change_plan.md（触发修复机制：插入文本门控 + 面板状态门控）
+ */
+type TiptapEditorLike = {
+  view: {
+    dispatch: (tr: unknown) => void;
+    state: { tr: { insertText: (t: string) => unknown; scrollIntoView: () => unknown } };
+  };
+};
+
+/** 从 .ProseMirror 元素取 Tiptap editor 引用 */
+function getTiptapEditor(container: HTMLElement): TiptapEditorLike {
+  const el = container.querySelector<HTMLElement>('.ProseMirror');
+  expect(el).not.toBeNull();
+  const editor = (el as unknown as { editor?: TiptapEditorLike }).editor;
+  expect(editor).toBeTruthy();
+  return editor!;
+}
+
+/** 模拟真实输入：dispatch insertText（selection 自动跟随光标末尾） */
+function typeText(container: HTMLElement, text: string): void {
+  const editor = getTiptapEditor(container);
+  act(() => {
+    editor.view.dispatch((editor.view.state.tr.insertText(text) as unknown as { scrollIntoView: () => unknown }).scrollIntoView());
+  });
+}
+
+/** 读 popover search input 当前 query；面板未开 → null */
+function popoverQuery(container: HTMLElement): string | null {
+  const input = container.querySelector<HTMLInputElement>('[data-action-key="chat.mention.search"]');
+  return input ? input.value : null;
+}
+
+/** 等待 popover 出现/消失（轮询 3s 上限；debounce 200ms + React 渲染） */
+async function waitForPopover(container: HTMLElement, open: boolean): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const present = !!container.querySelector('[data-action-key="chat.mention.search"]');
+    if (present === open) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+describe('ChatComposer（v0.0.346 @ 触发双层门控）', () => {
+  it('UC-4：输入 @ → 面板弹出（query 空）；@ 后输 he → 面板保持 + query 实时更新', async () => {
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file', 'skill', 'workitem', 'member']}
+        onSend={() => {}}
+      />,
+    );
+    await waitForEditor(container);
+    // 输入 @ → 触发（插入文本含 @）
+    typeText(container, '@');
+    await waitForPopover(container, true);
+    expect(popoverQuery(container)).toBe('');
+    // @ 后输 he → 插入文本不含 @ 但面板开着 → 保留面板仅刷新 query（UC-4）
+    typeText(container, 'he');
+    await waitForPopover(container, true);
+    expect(popoverQuery(container)).toBe('he');
+    // 再输 w → query 继续实时更新
+    typeText(container, 'w');
+    await waitForPopover(container, true);
+    expect(popoverQuery(container)).toBe('hew');
+  });
+
+  it('UC-1/2：面板关着输非 @（123）→ 不弹（插入文本门控 null + 面板状态 null）', async () => {
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file', 'skill', 'workitem', 'member']}
+        onSend={() => {}}
+      />,
+    );
+    await waitForEditor(container);
+    // 无 @ 场景直接输 1/2/3 → 面板不弹（@123 正常显示）
+    typeText(container, '1');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(popoverQuery(container)).toBeNull();
+    typeText(container, '23');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(popoverQuery(container)).toBeNull();
+    expect(container.querySelector('.ProseMirror')?.textContent).toBe('123');
+  });
+
+  it('UC-3：取消（Esc）后输 123 不重弹；再输新 @ → 面板重弹', async () => {
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file', 'skill', 'workitem', 'member']}
+        onSend={() => {}}
+      />,
+    );
+    await waitForEditor(container);
+    // 输入 @ → 面板弹
+    typeText(container, '@');
+    await waitForPopover(container, true);
+    // Esc 取消（composer 根 handleKeyDown → handleClose → setTrigger(null)）
+    act(() => {
+      fireEvent.keyDown(container.firstChild as Element, { key: 'Escape' });
+    });
+    await waitForPopover(container, false);
+    // 取消后输 123 → 插入文本不含 @ + 面板已关 → 不重弹（@123 正常显示）
+    typeText(container, '123');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(popoverQuery(container)).toBeNull();
+    expect(container.querySelector('.ProseMirror')?.textContent).toBe('@123');
+    // 再输新 @ → 插入文本含 @ → 面板重弹（UC-3）
+    typeText(container, '@');
+    await waitForPopover(container, true);
+  });
+
+  it('UC-5：选中 pill 后输入非 @ → 面板不弹（与取消同语义）', async () => {
+    // 本用例需要 popover 有结果可选中：re-stub fetch 返回一个 member item
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              type: 'member',
+              id: 'm1',
+              display: { icon: 'member', label: '张三' },
+              listView: { title: '张三', subtitle: 'member' },
+            },
+          ],
+          nextCursor: null,
+        }),
+      }),
+    );
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file', 'skill', 'workitem', 'member']}
+        onSend={() => {}}
+      />,
+    );
+    await waitForEditor(container);
+    // 输入 @ → 面板弹
+    typeText(container, '@');
+    await waitForPopover(container, true);
+    // 等搜索完成（debounce 200ms + fetch）→ 出现可选中项
+    const deadline = Date.now() + 3000;
+    let selectBtn: Element | null = null;
+    while (Date.now() < deadline) {
+      selectBtn = container.querySelector('[data-action-key="chat.mention.select"]');
+      if (selectBtn) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(selectBtn).not.toBeNull();
+    // 点击选中 → handleSelect 插入 pill + setTrigger(null) → 面板关
+    act(() => {
+      fireEvent.click(selectBtn!);
+    });
+    await waitForPopover(container, false);
+    expect(container.querySelectorAll('[data-mention-icon]').length).toBe(1);
+    // 选中后输非 @ → 插入文本门控 null + 面板已关 null → 不弹（UC-5）
+    typeText(container, 'x');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(popoverQuery(container)).toBeNull();
+  });
+
+  it('超限提示：服务端 truncated:true 且 items>0 → 列表底部渲染 i18n 文案（不阻塞加载更多）', async () => {
+    // re-stub fetch：返回 truncated:true + 1 条 item（模拟 100 早停截断）
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              type: 'file',
+              path: 'src/a.ts',
+              display: { icon: 'file', label: 'a.ts' },
+              listView: { title: 'a.ts', subtitle: 'src' },
+            },
+          ],
+          nextCursor: 'cursor-2',
+          truncated: true,
+        }),
+      }),
+    );
+    const { container } = render(
+      <ChatComposer
+        biz="studio"
+        sessionRole="squad"
+        sessionId="s1"
+        enabledProviders={['file', 'skill', 'workitem', 'member']}
+        onSend={() => {}}
+      />,
+    );
+    await waitForEditor(container);
+    // 输入 @ → 面板弹 + 搜索（truncated:true）
+    typeText(container, '@');
+    await waitForPopover(container, true);
+    // 等搜索完成 → 超限提示出现（zh-CN 文案逐字）
+    const deadline = Date.now() + 3000;
+    let tooMany: Element | null = null;
+    while (Date.now() < deadline) {
+      tooMany = container.querySelector('[data-action-key="chat.mention.search-too-many"]');
+      if (tooMany) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(tooMany).not.toBeNull();
+    expect(tooMany!.textContent).toContain('结果超过 100 条，请细化输入');
+    // 结果项仍在（超限提示不阻塞结果渲染）
+    expect(container.querySelectorAll('[data-action-key="chat.mention.select"]').length).toBe(1);
   });
 });

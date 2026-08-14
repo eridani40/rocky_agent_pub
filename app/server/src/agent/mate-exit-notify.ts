@@ -96,7 +96,12 @@ export interface MateExitNotifyInput {
 export function formatMateExitNotify(input: MateExitNotifyInput): string {
   const lines: string[] = [];
   lines.push(`【mate 退出通知】${input.name}（${input.role}）run 已退出`);
-  lines.push(`退出原因: ${input.stopReason}`);
+  // v0.0.338 M1：interrupted 追加提示（由用户中断，老板钦定文案），其他 6 种 reason 输出逐字节不变
+  const reasonLine =
+    input.stopReason === 'interrupted'
+      ? `退出原因: ${input.stopReason}（由用户中断，如需要可向用户查证）`
+      : `退出原因: ${input.stopReason}`;
+  lines.push(reasonLine);
   lines.push(`耗时: ${input.durationSec}s`);
   if (input.lastContent && input.lastContent.length > 0) {
     lines.push('最后消息:');

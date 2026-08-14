@@ -97,10 +97,12 @@ export async function handleMentionSearch(
       cursor,
     });
 
-    // 5. 返回 200 + SearchResult
+    // 5. 返回 200 + SearchResult（truncated 仅 true 时输出，缺省省略——向后兼容，与 workspace
+    //    搜索响应风格一致）
     return json(200, {
       items: result.items,
       ...(result.nextCursor !== undefined ? { nextCursor: result.nextCursor } : {}),
+      ...(result.truncated === true ? { truncated: true } : {}),
     });
   } catch (e) {
     // 错误映射（按 service 层抛出的类型分流）

@@ -4,19 +4,19 @@
  *       specs/tech/version_logs/v0.0.264/change_plan.md 行 1-2/17-22
  *
  * 覆盖（change_plan 11 类）：
- *   ① launch 幂等（同 key 二次复用不重复 spawn）+ persistInstance 写记录
+ *   ① launch 幂等（同 key 二次复用不重复 spawn）+ ledger.insert 写台账
  *   ② execute 前置校验（无 instance → no_browser_instance）
  *   ③ owner 隔离（其他 session 同 profile → 不可复用）
- *   ④ close 幂等 + 发 close 帧 + headless rmSync + usedPorts.delete + unpersistInstance
+ *   ④ close 幂等 + 发 close 帧 + headless rmSync + usedPorts.delete + ledger.delete
  *   ⑤ releaseSession kill 全部 + 幂等 + 三要素清理
  *   ⑥ idle timeout（注入 now → 超时自动 close）
  *   ⑦ worker exit → pending reject + worker_crashed
  *   ⑧ launch 失败透传 profile_in_use + 失败路径端口/目录清理
  *   ⑨ releaseAll 清空全部 + 三要素
- *   ⑩ 开机自检：预置记录 → alive pid killProcessGroup / dead pid 跳过 + headless 目录删除 + 记录清空
+ *   ⑩ 开机自检：台账记录 → alive pid killProcessGroup / dead pid 跳过 + headless 目录删除 + 台账清空
  *   ⑪ shutdown hook 注册幂等（标记位）
  *
- * 说明：instance-record 走真实实现（临时 dataDir），persist/unpersist 断言读文件内容
+ * 说明：台账走真实 sqlite（临时 dataDir + BunSqlDriver），insert/delete 断言 ledger.listAll
  * （比 mock 更贴近 integration）；node:fs 仅覆写 mkdtempSync（固定 headless 路径）+ rmSync
  * （包装真实实现记录调用）。spawn 注入 FakeWorker（不真启 Chrome）。
  *
@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -48,8 +48,9 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-import { BrowserInstanceManager } from '../instance-manager';
-import { instanceRecordPath } from '../instance-record';
+import { BrowserInstanceManager, instanceKey } from '../instance-manager';
+import { BrowserInstanceLedger } from '../instance-ledger';
+import { BunSqlDriver } from '../../../persistence/search-sql-driver';
 import { InMemoryModeImplRegistry } from '../mode-impl';
 import { WorkerModeImpl } from '../worker-mode-impl';
 import { AttachModeImpl } from '../attach-mode-impl';
@@ -136,16 +137,21 @@ function makeFakeWorker(): FakeWorkerControl {
   };
 }
 
-/** 测试临时 dataDir（每个用例独立；instance-record 真实写文件） */
+/** 测试临时 dataDir + 真实 sqlite ledger（v0.0.334 B：台账替代 browser-instances.json） */
 let dataDir: string;
-beforeEach(() => {
+let ledger: BrowserInstanceLedger;
+let sqlDriver: BunSqlDriver;
+beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'im-ut-'));
+  sqlDriver = await BunSqlDriver.create(join(dataDir, 'browser.sqlite'));
+  ledger = new BrowserInstanceLedger(sqlDriver);
   rmSyncMock.mockClear();
   // 防真杀当前进程组（-pid 负组 kill）
   killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  sqlDriver.close();
   rmSync(dataDir, { recursive: true, force: true });
   // 清 shutdown hook（防污染其他用例：移除全局 handler + 重置标记位）
   process.removeAllListeners('SIGTERM');
@@ -180,6 +186,7 @@ function makeManager(opts: {
   const manager = new BrowserInstanceManager({
     dataDir,
     registry,
+    ledger,
     portBusy: async () => false,
     now: opts.now,
     idleTimeoutMs: opts.idleTimeoutMs,
@@ -211,11 +218,9 @@ async function launchOk(
   return { fake, r };
 }
 
-/** 读实例记录文件（断言 persist/unpersist） */
+/** 读台账记录（v0.0.334 B：listAll 替代 JSON 文件读） */
 function readRecords(): PersistedInstanceRecord[] {
-  const file = instanceRecordPath(dataDir);
-  if (!existsSync(file)) return [];
-  return JSON.parse(readFileSync(file, 'utf8')) as PersistedInstanceRecord[];
+  return ledger.listAll();
 }
 
 describe('launch 幂等 + persistInstance', () => {
@@ -261,6 +266,51 @@ describe('launch 幂等 + persistInstance', () => {
     expect(task.loop).toBe(true); // 常驻循环
     expect(task.persistent).toBe(true); // managed-profile → ensureProfileFree
     expect(task.headless).toBeUndefined(); // managed-profile 非 headless
+  });
+
+  it('[U1] instanceKey 三模式统一 sessionId:mode（profileName 不进 key）', () => {
+    expect(instanceKey('s1', { mode: 'managed-profile', profileName: 'p1' })).toBe('s1:managed-profile');
+    expect(instanceKey('s1', { mode: 'headless' })).toBe('s1:headless');
+    expect(instanceKey('s1', { mode: 'attach' })).toBe('s1:attach');
+  });
+
+  it('[U2] launch(p1) 后 execute 不带 profileName → ok（key 匹配，ET blocking 修复）', async () => {
+    const { manager, holder } = makeManager();
+    await launchOk(manager, holder, 's1', { mode: 'managed-profile', profileName: 'p1' });
+    const fake = holder.fake!;
+    // execute 不带 profileName（后续操作只需 mode）→ key=s1:managed-profile 匹配
+    const p = manager.execute('s1', { mode: 'managed-profile' }, 'navigate', { url: 'https://a.com' });
+    await new Promise((r) => setTimeout(r, 10));
+    const lines = fake.writtenTask().trim().split('\n');
+    const reqLine = JSON.parse(lines[lines.length - 1]!);
+    expect(reqLine.action).toBe('navigate');
+    expect(reqLine.params.url).toBe('https://a.com');
+    fake.emitStdout(JSON.stringify({ requestId: reqLine.requestId, ok: true, text: 'navigated' }) + '\n');
+    const r = await p;
+    expect(r.ok).toBe(true);
+  });
+
+  it('[U3] launch(p1) 后 launch(p2) → reuse 不换 profile（文本含首次 profile: p1）', async () => {
+    const { manager, holder } = makeManager();
+    await launchOk(manager, holder, 's1', { mode: 'managed-profile', profileName: 'p1' });
+    const spawnCount = holder.fake ? 1 : 0;
+    const r2 = await manager.launch('s1', { mode: 'managed-profile', profileName: 'p2' });
+    expect(r2.ok).toBe(true);
+    expect(r2.text).toContain('reuse');
+    expect(r2.text).toContain('profile: p1'); // 首次 profileName（handle 存），非 opts.p2
+    expect(holder.fake ? 1 : 0).toBe(spawnCount); // spawn 未再次发生
+    // 实例仍用 p1（record 无 p2 痕迹）
+    const records = readRecords();
+    expect(records[0]!.key).toBe('s1:managed-profile');
+  });
+
+  it('[U6] 持久化记录 key 新格式：managed-profile 无 :p1 后缀', async () => {
+    const { manager, holder } = makeManager();
+    await launchOk(manager, holder, 's1', { mode: 'managed-profile', profileName: 'p1' });
+    const records = readRecords();
+    expect(records.length).toBe(1);
+    expect(records[0]!.key).toBe('s1:managed-profile'); // 新格式 sid:mode
+    expect(records[0]!.mode).toBe('managed-profile');
   });
 });
 
@@ -377,11 +427,12 @@ describe('close 幂等 + 三要素清理', () => {
     expect(manager.size).toBe(0);
   });
 
-  it('close 幂等：无 instance → no instance（不报错）', async () => {
+  it('close 无实例 → 明确报错 no_browser_instance + 提示先 launch（不再静默 no-op）', async () => {
     const { manager } = makeManager();
     const r = await manager.close('s1', { mode: 'headless' });
-    expect(r.ok).toBe(true);
-    expect(r.text).toBe('no instance');
+    expect(r.ok).toBe(false);
+    expect(r.error?.kind).toBe('no_browser_instance');
+    expect(r.error?.message).toContain('请先调用 browser(action="launch")');
   });
 
   it('close 释放端口：再次 launch 复用同端口（usedPorts.delete 生效）', async () => {
@@ -503,9 +554,9 @@ describe('worker 崩溃 / launch 失败', () => {
 });
 
 describe('开机自检（残留清理）', () => {
-  /** 预置记录文件 */
+  /** 预置台账记录（v0.0.334 B：ledger.insert 替代 JSON 文件） */
   function seedRecords(recs: PersistedInstanceRecord[]): void {
-    writeFileSync(instanceRecordPath(dataDir), JSON.stringify(recs, null, 2), 'utf8');
+    for (const rec of recs) ledger.insert(rec);
   }
 
   it('构造时：alive pid → killProcessGroup + headless 目录删除 + 记录清空', async () => {
@@ -722,20 +773,16 @@ describe('reconcile 对账（孤儿 chrome 回收 + 不误杀）', () => {
     });
   });
 
-  it('孤儿回收 + 记录同步：孤儿 chrome 目录匹配记录 → unpersist', async () => {
-    writeFileSync(
-      instanceRecordPath(dataDir),
-      JSON.stringify([
-        {
-          key: 's1:headless',
-          mode: 'headless',
-          userDataDir: '/tmp/rocky-browser-instance-orphan3',
-          cdpPort: 18805,
-          workerPid: 12345,
-          createdAt: 0,
-        },
-      ]),
-    );
+  it('孤儿回收 + 记录同步：孤儿 chrome 目录匹配记录 → ledger.delete', async () => {
+    // seed 台账（v0.0.334 B：ledger.insert 替代 JSON 文件）
+    ledger.insert({
+      key: 's1:headless',
+      mode: 'headless',
+      userDataDir: '/tmp/rocky-browser-instance-orphan3',
+      cdpPort: 18805,
+      workerPid: 12345,
+      createdAt: 0,
+    });
     const { manager } = makeManager({
       scanProcesses: async () => mkScan([mkChrome(999, 1, '/tmp/rocky-browser-instance-orphan3')]),
     });
@@ -799,12 +846,14 @@ describe('attach 生命周期（v0.0.266 T3：registry 分发，execute 正确�
   function makeAttachManager(opts: {
     connectResult?: 'success' | 'fail';
     enabled?: boolean;
+    detectDeps?: import('../attach-debug-state').DetectDeps;
   } = {}) {
     const driver = makeAttachDriver(opts.connectResult ?? 'success');
-    const registry = new InMemoryModeImplRegistry([['attach', new AttachModeImpl()]]);
+    const registry = new InMemoryModeImplRegistry([['attach', new AttachModeImpl(opts.detectDeps ?? {})]]);
     const manager = new BrowserInstanceManager({
       dataDir,
       registry,
+      ledger,
       portBusy: async () => false,
       attachDriver: driver as unknown as ChromeMcpDriver,
       isAttachEnabled: () => opts.enabled ?? true,
@@ -823,6 +872,16 @@ describe('attach 生命周期（v0.0.266 T3：registry 分发，execute 正确�
     const er = await manager.execute('sA', { mode: 'attach' }, 'listPages', {}, {});
     expect(er.ok).toBe(true);
     expect(driver.fakeSession.listPages).toHaveBeenCalledTimes(1);
+  });
+
+  it('[v0.0.337 H7] manager.launch ctx.signal 透传 → driver.connect 收到 signal（attach 超时 abort 感知）', async () => {
+    const { manager, driver } = makeAttachManager();
+    const ac = new AbortController();
+    const r = await manager.launch('sA', { mode: 'attach' }, { signal: ac.signal });
+    expect(r.ok).toBe(true);
+    expect(driver.connect).toHaveBeenCalledTimes(1);
+    // H7：signal 经 manager.launch → impl.launch → connectAttachSession → driver.connect 第二参
+    expect(driver.connect).toHaveBeenCalledWith(expect.anything(), ac.signal);
   });
 
   it('launch attach 幂等：ready 复用，driver.connect 不再调', async () => {
@@ -851,6 +910,7 @@ describe('attach 生命周期（v0.0.266 T3：registry 分发，execute 正确�
     const manager = new BrowserInstanceManager({
       dataDir,
       registry,
+      ledger,
       portBusy: async () => false,
       // 不注入 attachDriver
       scanProcesses: async () => ({ all: [], candidates: [] }), // 测试环境 no-op（防真 ps EPERM 噪音）
@@ -910,13 +970,13 @@ describe('attach 生命周期（v0.0.266 T3：registry 分发，execute 正确�
     expect(readRecords().length).toBe(0); // 无记录可清
   });
 
-  it('close attach 幂等：重复 close → no instance，disconnect 不再调', async () => {
+  it('close attach 幂等：重复 close 无实例 → 明确报错，disconnect 不再调', async () => {
     const { manager, driver } = makeAttachManager();
     await manager.launch('sA', { mode: 'attach' });
     await manager.close('sA', { mode: 'attach' });
     const r2 = await manager.close('sA', { mode: 'attach' });
-    expect(r2.ok).toBe(true);
-    expect(r2.text).toContain('no instance');
+    expect(r2.ok).toBe(false);
+    expect(r2.error?.kind).toBe('no_browser_instance');
     expect(driver.disconnect).toHaveBeenCalledTimes(1);
   });
 
@@ -926,5 +986,126 @@ describe('attach 生命周期（v0.0.266 T3：registry 分发，execute 正确�
     await manager.releaseSession('sA');
     expect(driver.disconnect).toHaveBeenCalledTimes(1);
     expect(manager.size).toBe(0);
+  });
+
+  it('[U8] close 透传 impl 提示文本：残留检测 → close() text 含引导（不再丢提示）', async () => {
+    const { manager, driver } = makeAttachManager({
+      detectDeps: {
+        probePort: async () => true, // TCP 9222 可连 → 残留
+        readActivePort: async () => '9222',
+        home: '/Users/ut',
+        platform: 'darwin',
+      },
+    });
+    await manager.launch('sA', { mode: 'attach' });
+    const r = await manager.close('sA', { mode: 'attach' });
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain('调试态残留');
+    expect(r.text).toContain('chrome://inspect/#remote-debugging');
+    expect(driver.disconnect).toHaveBeenCalledTimes(1);
+    expect(manager.size).toBe(0);
+  });
+
+  it('[U8] release 路径走同一 closeInstance：检测执行+清理完整+提示丢弃因无出口', async () => {
+    const probePort = vi.fn(async () => true); // 残留（spy 断言检测执行）
+    const readActivePort = vi.fn(async () => '9222');
+    const { manager, driver } = makeAttachManager({
+      detectDeps: { probePort, readActivePort, home: '/Users/ut', platform: 'darwin' },
+    });
+    await manager.launch('sA', { mode: 'attach' });
+    await expect(manager.releaseSession('sA')).resolves.toBeUndefined(); // 不抛
+    expect(probePort).toHaveBeenCalled(); // 检测函数被调用（impl.close 走 detectChromeDebugResidual）
+    expect(readActivePort).toHaveBeenCalled();
+    expect(driver.disconnect).toHaveBeenCalledTimes(1); // 断 MCP 执行
+    expect(manager.size).toBe(0); // 清理完整（map 已删）
+    // 提示文本无处展示：releaseKeys API 为 void（仅 close() 有 text 出口），此处不断言 tip
+  });
+
+  it('[U9] impl.close 抛错 → closeInstance 诚实报失败：不删表（v0.0.336 三层一致：清理失败保留表项可重试）', async () => {
+    // 自定义 registry：close 抛错的 fake impl（模拟 worker close 异常）
+    const throwingImpl = {
+      launch: async () => ({ ok: true as const, handle: { key: 's1:headless', mode: 'headless' as const, state: 'ready' as const, createdAt: 0, lastUsedAt: 0 }, text: 'launched' }),
+      execute: async () => ({ ok: false, error: { message: 'n/a' } }),
+      close: async () => { throw new Error('close boom'); },
+    };
+    const registry = new InMemoryModeImplRegistry([['headless', throwingImpl as never]]);
+    const manager = new BrowserInstanceManager({
+      dataDir,
+      registry,
+      ledger,
+      portBusy: async () => false,
+      scanProcesses: async () => ({ all: [], candidates: [] }),
+    });
+    const lr = await manager.launch('s1', { mode: 'headless' });
+    expect(lr.ok).toBe(true);
+    expect(manager.size).toBe(1);
+    const r = await manager.close('s1', { mode: 'headless' });
+    // v0.0.336 三层一致（leader 约束 2）：close 清理失败 → 诚实返回 ok=false（非报成功），
+    // instances 保留表项（不删表，可重试 close），杜绝「close 没清干净却报成功」。
+    expect(r.ok).toBe(false);
+    expect(r.error?.kind).toBe('close_incomplete');
+    expect(r.error?.message).toContain('close boom');
+    expect(manager.size).toBe(1); // 清理失败保留表项（三层一致：未清干净 → map 不删）
+  });
+
+  it('[v0.0.336 补防] execute 失活收尾 closeInstance 抛错 → catch 不逃逸，返回原 attach_lost 文案（不降级 RUNTIME_ERROR）', async () => {
+    // fake impl：execute 置 dead（失活）+ close 抛错（清理失败）——模拟 attach 失活后收尾清理失败
+    const deadClosingImpl = {
+      launch: async () => ({ ok: true as const, handle: { key: 's1:headless', mode: 'headless' as const, state: 'ready' as const, createdAt: 0, lastUsedAt: 0 }, text: 'launched' }),
+      execute: async (handle: { state: string }) => {
+        handle.state = 'dead'; // 失活（attach_lost 语义）
+        return { ok: false as const, error: { kind: 'attach_lost', message: 'attach 浏览器连接已断开（Chrome 可能被关闭），请重新 launch' } };
+      },
+      close: async () => { throw new Error('close boom'); },
+    };
+    const registry = new InMemoryModeImplRegistry([['headless', deadClosingImpl as never]]);
+    const manager = new BrowserInstanceManager({
+      dataDir,
+      registry,
+      ledger,
+      portBusy: async () => false,
+      now: () => 0, // 时钟归零：lastUsedAt(0) - now(0) = 0 < idleTimeoutMs → 不触发 idle，走 execute 失活路径
+      scanProcesses: async () => ({ all: [], candidates: [] }),
+    });
+    const lr = await manager.launch('s1', { mode: 'headless' });
+    expect(lr.ok).toBe(true);
+    // execute 失活 → 收尾 closeInstance 抛错被 catch → 不逃逸，返回原预期 attach_lost 文案
+    const r = await manager.execute('s1', { mode: 'headless' }, 'listPages', {}, {});
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error?.kind).toBe('attach_lost');
+      expect(r.error?.message).toContain('连接已断开');
+    }
+    expect(manager.size).toBe(1); // closeInstance 失败保留表项（可重试 close）
+  });
+
+  it('[v0.0.336 补防] idle timeout 收尾 closeInstance 抛错 → catch 不逃逸，仍返回 idle_timeout 预期文案', async () => {
+    // fake impl：close 抛错（清理失败）——模拟 idle 超时自动 close 时清理失败
+    const throwingImpl = {
+      launch: async () => ({ ok: true as const, handle: { key: 's1:headless', mode: 'headless' as const, state: 'ready' as const, createdAt: 0, lastUsedAt: 0 }, text: 'launched' }),
+      execute: async () => ({ ok: false, error: { message: 'n/a' } }),
+      close: async () => { throw new Error('close boom'); },
+    };
+    const registry = new InMemoryModeImplRegistry([['headless', throwingImpl as never]]);
+    const manager = new BrowserInstanceManager({
+      dataDir,
+      registry,
+      ledger,
+      portBusy: async () => false,
+      now: () => 16_001, // 时钟推进：now - lastUsedAt(0) = 16001 > idleTimeoutMs 15000 → 超时
+      idleTimeoutMs: 15_000,
+      scanProcesses: async () => ({ all: [], candidates: [] }),
+    });
+    const lr = await manager.launch('s1', { mode: 'headless' });
+    expect(lr.ok).toBe(true);
+    expect(manager.size).toBe(1);
+    // idle 超时 → assertReadyInstance 自动 close（抛错被 catch）→ 仍返回 idle_timeout 预期文案
+    const r = await manager.execute('s1', { mode: 'headless' }, 'navigate', { url: 'x' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error?.kind).toBe('idle_timeout');
+      expect(r.error?.message).toContain('请重新 launch');
+    }
+    expect(manager.size).toBe(1); // closeInstance 失败保留表项（可重试 close）
   });
 });

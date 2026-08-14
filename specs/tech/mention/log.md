@@ -1,7 +1,7 @@
 ---
 type: log
 title: Mention KB 变更记录
-updated: 2026-07-19
+updated: 2026-08-14
 since: v0.0.45
 ---
 
@@ -9,6 +9,13 @@ since: v0.0.45
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-14 · v0.0.346（mention 交互修复 — 触发双层门控 + 文件搜索共用 workspace-search-core）
+
+- **`search-api.md §5 性能考量`**：FileProvider 段重写为「workspace-search-core 适配层」——`search()` 调 `searchWorkspace(ctx.workspaceDir, ctx.query)`（`app/server/src/search/workspace-search-core.ts`），与工作区搜索端点共用同一遍历/排除/上限核心（IGNORED_NAMES 单一源在 `session-workspace.ts`，排除仅 node_modules/.git）；目录命中不递归其下层；files+dirs ≥ 100 早停 truncated:true；5s 超时兜底移除；点开头不再排除。§6 未决事项 1（防抖）/4（缓存索引）标 v0.0.346 决策（不强制统一 / 不引入）。
+- **`provider-interface.md`**：§1 `SearchResult` 加 `truncated?: boolean`（仅 true 输出，缺省省略向后兼容）；§5 FileProvider 实现要点更新（共用 workspace-search-core、排除仅 IGNORED_NAMES、目录匹配/不递归、100 上限+truncated、目录条目 type='file' 零新增字段）。
+- **问题 4 增量（v0.0.346-2）**：`MentionItem` 加 `isDir?: boolean`（目录命中 true，缺省=文件）；FileProvider 目录条目 `isDir:true` + `listView.icon='folder'`（文件缺省 + 'file'）；subtitle 根路径 `'/'` 始终展示；`display.icon` 保持 'file'（pill 不区分）；popover 目录 FolderIcon gold / 文件 FileIcon muted，subtitle 始终渲染，非 file provider 兜底（provider-interface.md §3/§5 + search-api.md §5 + GET-search.md + mention-popover.md）。
+- 详情：`specs/tech/version_logs/v0.0.346/change_log.md`（T1-T3 实现核对 + 双层门控机制 + 2 条实现偏差：T2 死 import Minor / T3 面板 null 守卫偏离 + 知悉项；T4/T5 问题 4 实现核对）
 
 ## 2026-07-19 · v0.0.177.image_copy（粘贴图片 → file mention，零新增 type）
 

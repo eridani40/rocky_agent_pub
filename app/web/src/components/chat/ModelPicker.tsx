@@ -42,6 +42,8 @@ interface ModelPickerProps {
   onInherit?: () => void;
   /** data-action-key 透传到 trigger 按钮（ET 稳定定位锚点，命名规范见 specs/ui/components/_conventions.md §12） */
   actionKey?: string;
+  /** [v0.0.344] 消费方覆盖 trigger 宽度 className（如 w-full 跟随容器）；缺省保持 v0.0.72 UIFix2 的 w-[180px] */
+  triggerClassName?: string;
 }
 
 /**
@@ -55,6 +57,7 @@ export function ModelPicker({
   inheritLabel,
   onInherit,
   actionKey,
+  triggerClassName,
 }: ModelPickerProps) {
   const { providers, error } = useProviders();
   const [open, setOpen] = useState(false);
@@ -124,8 +127,11 @@ export function ModelPicker({
         actionKey={actionKey}
         title={modelTitle}
         ariaExpanded={open}
-        // v0.0.72 UIFix2 兼容：固定 w-[180px] + truncate（trigger 尺寸稳定，避免布局跳动）
-        className="w-[180px] whitespace-nowrap overflow-hidden text-ellipsis"
+        // v0.0.72 UIFix2 兼容：缺省固定 w-[180px] + truncate（trigger 尺寸稳定，避免布局跳动）；
+        // [v0.0.344] 消费方可经 triggerClassName 覆盖宽度（如 squad 管理页 w-full 跟随容器）
+        className={
+          triggerClassName ?? 'w-[180px] whitespace-nowrap overflow-hidden text-ellipsis'
+        }
       />
       {open && (
         // v0.0.9：向下展开（top-full）；panel testid 沿用 `${testid}-list` 保 back-compat

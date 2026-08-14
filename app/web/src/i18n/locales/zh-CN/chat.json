@@ -354,7 +354,8 @@
     "noMatch": "无匹配结果",
     "student": {
       "label": "学生"
-    }
+    },
+    "searchTooMany": "结果超过 100 条，请细化输入"
   },
   "origin": {
     "from": "来自 {{name}}"

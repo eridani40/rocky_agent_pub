@@ -2,7 +2,7 @@
 type: index
 title: Squad 子系统总起
 priority: P1
-updated: 2026-08-07
+updated: 2026-08-13
 ---
 
 # Squad 子系统总起
@@ -19,7 +19,7 @@ squad = **一个自主协作单元**——在 multi_agent 地基之上，加「�
 | **mate** | 执行者 member（接 leader 分配、自己推进自己汇报、有业务工具、可 spawn sub-agent） |
 | **todo** | mate/leader 的轻量任务清单（独立 TodoStore，session 级 todos.json，不耦合 squad entity） |
 | **SquadChat** | 哑路由 session（`type=squad`），reactive only，`<EOS>` 静默结束当前 run |
-| **enableGroupChat** | [v0.0.270] 群聊可见性开关（`squad.enableGroupChat: boolean`，默认 true=开）：false → squad_agents_status 不渲染 SquadChat 行 + UI 群聊入口隐藏 + `send_message('squadchat')` 门控返 null（全私聊语义）；squad 实体/session 恒存在，仅控可见性。schema `required:false` + 读取 `?? true` 兜底。权威 `data_model.md §1.1` + `../multi_agent/[P1]a2a_protocol.md §3` |
+| **enableGroupChat** | [v0.0.270] 群聊可见性开关（`squad.enableGroupChat: boolean`）：**[v0.0.340] 新建团队默认 false=关**；存量 squad 无字段读 `?? true`=开（不受影响）。false → squad_agents_status 不渲染 SquadChat 行 + UI 群聊入口隐藏 + `send_message('squadchat')` 门控返 null（全私聊语义）；squad 实体/session 恒存在，仅控可见性。schema `required:false` + 读取 `?? true` 兜底。权威 `data_model.md §1.1` + `../multi_agent/[P1]a2a_protocol.md §3` |
 | **reminder** | 动态上下文 provider（todo / squad_agents_status / squad_workspace / squad_task），`shouldProduce` 去重 + `lastWriteMessageId` 变化检测 |
 | **scheduler** | [v0.0.116] squad 级统一心跳——一 squad 一 job，到点整队按 scope 逐成员 `deliverTo` 固定心跳提示词（proactive）；配置 `squad.heartbeatConfig`（权威 `../scheduling/`） |
 | **presence** | [v0.0.116] 成员当前工作标记（`member.currentWork` 自由文本，`presence` 工具 set/clear）；squad_agents_status 统一块展示 running/idle + presence（[v0.0.273] 三合一，取代旧 leader-only team-status） |
@@ -101,5 +101,7 @@ squad = **一个自主协作单元**——在 multi_agent 地基之上，加「�
 | `panorama_builtin.md`（v0.0.243） | task 普通 entity + system 标记 + lazy migration（首个系统固定 entity + 自动依赖 hook + reminder） | [link]([P1]panorama_builtin.md) |
 | **聚合视图 / SSE** | | |
 | `squad_aggregate.md`（v0.0.305） | squad 聚合视图（onlineCount/inProgressCount/lastActiveAt）+ `squad_meta` SSE 广播（squad-aggregate-service + squad-meta-broadcaster + useSquadMeta） | [link]([P1]squad_aggregate.md) |
+| **团队同步 / 模板** | | |
+| `team_sync.md`（v0.0.319） | 团队同步服务层：导出 zip（buildManifest + exportSquadToZip）/ 两阶段导入（validateZipEntries 路径安全 + ImportKeyStore 5min TTL）/ modelDefault 继承 | [link]([P1]team_sync.md) |
 
 > 变更历史见 `log.md`；跨版本发布说明见 `specs/tech/version_logs/vX.Y/change_log.md`。

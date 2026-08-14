@@ -55,7 +55,7 @@ beforeEach(() => {
   squadStore = new SquadStore({ root: tmpRoot });
   memberStore = new MemberStore({ root: tmpRoot });
   squadDeps = { sessionStore, squadStore, memberStore, dataDir: tmpRoot };
-  mutationDeps = { memberStore };
+  mutationDeps = { memberStore, sessionStore };
 });
 
 afterEach(() => {
@@ -310,5 +310,86 @@ describe('patchMemberService', () => {
     const m = await addMate(squadId);
     const r = await patchMemberService(mutationDeps, squadId, m, { intro: '仅改介绍' });
     expect((r as unknown as { workStyle?: unknown }).workStyle).toBeUndefined();
+  });
+
+  // ============================================================
+  // [v0.0.340] 改名同步 session.title（方案 A 写时全同步；决策 2）
+  // ============================================================
+
+  it('[v0.0.340] 改名 → 同步 session.title（titled=false；只传 title 不传 titled）', async () => {
+    const { squadId } = await setup();
+    const m = await addMate(squadId, 'alice', '角色1');
+    // 建 member 时 session.title 快照为成员名（member-service.ts:224），titled=false
+    const before = await memberStore.getMember(squadId, m);
+    const sessionBefore = await sessionStore.getSession(before!.sessionId);
+    expect(sessionBefore!.title).toBe('alice');
+    expect(sessionBefore!.titled).toBe(false);
+
+    await patchMemberService(mutationDeps, squadId, m, { name: 'alice2' });
+
+    const sessionAfter = await sessionStore.getSession(before!.sessionId);
+    expect(sessionAfter!.title).toBe('alice2');
+    // titled 保持 false（updateSession 只传 title 不传 titled，保 CAS 语义）
+    expect(sessionAfter!.titled).toBe(false);
+  });
+
+  it('[v0.0.340] titled=true（AI 起名/用户自定义）→ 不覆盖 title', async () => {
+    const { squadId } = await setup();
+    const m = await addMate(squadId, 'alice', '角色1');
+    const before = await memberStore.getMember(squadId, m);
+    // 用户自定义标题：PUT body.title 同步置 titled=true
+    await sessionStore.updateSession(before!.sessionId, { title: '自定义标题', titled: true });
+
+    await patchMemberService(mutationDeps, squadId, m, { name: 'alice2' });
+
+    const sessionAfter = await sessionStore.getSession(before!.sessionId);
+    expect(sessionAfter!.title).toBe('自定义标题'); // 不被成员名覆盖
+    expect(sessionAfter!.titled).toBe(true);
+  });
+
+  it('[v0.0.340] 同名重试补同步：patch.name 同名但 session.title 不一致 → 仍同步（部分失败重试修复）', async () => {
+    const { squadId } = await setup();
+    const m = await addMate(squadId, 'alice', '角色1');
+    const before = await memberStore.getMember(squadId, m);
+    // 模拟上次部分失败：putMember 成功（member.name 已新）但 updateSession 抛错 → session.title 残留旧名
+    const failStore = {
+      getSession: async () => ({ id: before!.sessionId, title: 'alice', titled: false }),
+      updateSession: async () => {
+        throw new Error('session write failed');
+      },
+    } as unknown as SessionStore;
+    await expect(
+      patchMemberService({ memberStore, sessionStore: failStore }, squadId, m, { name: 'alice2' }),
+    ).rejects.toThrow(/session write failed/);
+    expect((await memberStore.getMember(squadId, m))!.name).toBe('alice2'); // 主操作已落盘（成员名已新）
+    expect((await sessionStore.getSession(before!.sessionId))!.title).toBe('alice'); // title 残留旧名（部分失败）
+
+    // 重试同名 patch（name 与 existing.name 相同 → no-op 不冲突，但 title 不一致 → 补同步）
+    await patchMemberService(mutationDeps, squadId, m, { name: 'alice2' });
+
+    const sessionAfter = await sessionStore.getSession(before!.sessionId);
+    expect(sessionAfter!.title).toBe('alice2'); // 补同步完成
+  });
+
+  it('[v0.0.340] 同步失败 → 抛错（部分失败可见，重试可修复）', async () => {
+    const { squadId } = await setup();
+    const m = await addMate(squadId, 'alice', '角色1');
+    const before = await memberStore.getMember(squadId, m);
+    // mock sessionStore：getSession 正常返 titled=false，updateSession reject（模拟写失败）
+    const updateSessionMock = vi.fn(async () => {
+      throw new Error('session write failed');
+    });
+    const mockStore = {
+      getSession: vi.fn(async () => ({ id: before!.sessionId, title: 'alice', titled: false })),
+      updateSession: updateSessionMock,
+    } as unknown as SessionStore;
+
+    await expect(
+      patchMemberService({ memberStore, sessionStore: mockStore }, squadId, m, { name: 'alice2' }),
+    ).rejects.toThrow(/session write failed/);
+    // 主操作已落盘（putMember 先成功），附属同步失败可见
+    const after = await memberStore.getMember(squadId, m);
+    expect(after!.name).toBe('alice2');
+    expect(updateSessionMock).toHaveBeenCalledWith(before!.sessionId, { title: 'alice2' });
   });
 });

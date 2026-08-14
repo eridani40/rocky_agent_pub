@@ -3,7 +3,7 @@ type: spec
 title: MentionProvider 接口 + Registry + 内置 Provider
 priority: P0
 status: active
-updated: 2026-07-07
+updated: 2026-08-14
 since: v0.0.45
 ---
 
@@ -32,6 +32,8 @@ interface MentionProvider {
 interface SearchResult {
   items: MentionItem[];
   nextCursor?: string;
+  /** [v0.0.346] 是否达搜索上限（files+dirs 合计 100）早停截断；handler 响应仅 true 时输出，缺省省略向后兼容 */
+  truncated?: boolean;
 }
 ```
 
@@ -66,6 +68,8 @@ interface SearchCtx {
 interface MentionItem {
   /** 类型标识（'file' | 'skill' | 'workitem' | 'member'，开放枚举） */
   type: string;
+  /** [v0.0.346-2] 是否为目录条目（file provider 目录命中 true；缺省 = 文件，向后兼容；member/skill/workitem 不设） */
+  isDir?: boolean;
 
   // ─── Address（语义/地址；按 type 不同字段不同） ───
   /**
@@ -110,6 +114,7 @@ interface MentionItem {
 | `path` | provider 构建 | file/skill 地址；workitem/member 不用 |
 | `kind`（新） | WorkItemProvider 构建 | workitem 地址（拆出，不再塞 path） |
 | `id`（新） | WorkItem/MemberProvider 构建 | workitem/member 地址 |
+| `isDir`（v0.0.346-2 新） | FileProvider 构建 | file provider 目录命中 true；缺省 = 文件（向后兼容） |
 
 **为什么 `display` 与 `listView` 并存**（v0.0.86 决策）：
 - `display` 是 pill 渲染权威源（写入 message tag 持久化；3 字段闭集合）
@@ -134,19 +139,21 @@ class MentionProviderRegistry {
 
 注册时机：`bootstrap-mention.ts` 启动时实例化 Registry 并注册 4 个内置 provider（File / Skill / WorkItem / Member）。
 
-## 5. FileProvider 实现要点
+## 5. FileProvider 实现要点（v0.0.346 收敛为 workspace-search-core 适配层）
 
 - **name** = `'file'` / **label** = `'Files'`
 - **搜索范围**：`ctx.workspaceDir` 下递归遍历（含子目录）
-- **排除规则**：`node_modules` + `.git` + 隐藏文件（`.*` 开头）
-- **搜索算法**：文件名包含匹配（大小写不敏感），无索引，实时遍历；5 秒超时兜底
-- **分页**：`limit` + `cursor`（cursor = base64 编码的 offset）
-- **MentionItem 构建**（`toMentionItem(relPath)`）：
-  - `type` = `'file'`
-  - `path` = 相对 workspaceDir 的 POSIX 路径（如 `src/utils/helper.ts`）
-  - `display.icon` = `'file'`
-  - `display.label` = basename（`helper.ts`）
-  - `listView.title` = basename；`listView.subtitle` = 相对目录（`src/utils/`）；`listView.icon` = `'file'`
+- **共用后端（v0.0.346）**：`search()` 调 `searchWorkspace(ctx.workspaceDir, ctx.query)`（`app/server/src/search/workspace-search-core.ts`）——与工作区搜索端点（`GET /session/:id/workspace/search`）**共用同一遍历/排除/上限核心**（纯函数，同步 DFS：readdirSync/statSync/lstatSync；IGNORED_NAMES 单一源在 `session-workspace.ts`；symlink 目录不递归防越权/循环）
+- **排除规则（v0.0.346 修订）**：仅 `IGNORED_NAMES`（`node_modules` + `.git`）；**点开头不再排除**（原隐藏文件 `.*` 排除移除，点开头目录/文件可命中）
+- **搜索算法**：与工作区搜索一致——q 含 `/` → 完整相对路径包含匹配（pathMode），否则 basename 包含匹配；大小写不敏感；**目录命中推入结果但不递归其下层**；无索引，实时遍历
+- **上限**：files+dirs 合计 ≥ **100** 早停 → `truncated: true`（v0.0.346 起，`SEARCH_LIMIT` 单一源在 workspace-search-core；原 5s 超时兜底移除）
+- **分页**：`limit` + `cursor`（cursor = base64 编码的 offset；合并 files+dirs 按 relPath 排序后切片，dirs 在前）
+- **MentionItem 构建**（`toMentionItem(relPath, isDir = false)`，目录条目复用 file 形态）：
+  - `type` = `'file'`（**目录条目同样 type='file'**，选中/插入/pill 走既有路径）
+  - **`isDir`**（v0.0.346-2 起）：目录命中 `isDir:true`；文件 isDir 缺省（向后兼容）
+  - `path` = 相对 workspaceDir 的 POSIX 路径（如 `src/utils/helper.ts`；目录如 `src/components`）
+  - `display.icon` = `'file'`（**目录同样 'file'，pill 不区分，防历史消息不一致**）；`display.label` = basename（文件或目录名）
+  - `listView.title` = basename；`listView.subtitle` = 相对目录（`src/utils/`；**根路径 dirname='.' → `'/'` 始终展示**，v0.0.346-2）；`listView.icon` = 目录 `'folder'` / 文件 `'file'`（v0.0.346-2）
 
 ## 6. SkillProvider 实现要点
 

@@ -17,6 +17,7 @@
  */
 import type { Message, MessageSender, AgentRef, MessageSenderAgent } from '../message/types';
 import type { Session } from './session-store-types';
+import type { MemberStore } from '../stores/squad-store';
 
 /**
  * enrichForInbox 反查发送方 session record 用到的 store 最小接口。
@@ -25,6 +26,12 @@ import type { Session } from './session-store-types';
 export interface EnrichSessionLookup {
   /** 按 sessionId 读 session record（enrich 反查发送方 type/name 用） */
   getSession(sessionId: string): Promise<Session | null>;
+  /**
+   * [v0.0.340 决策 1] 可选 memberStore——注入则 sender session 是 squad 成员时
+   *   反查实时名（成员名权威源 = memberStore，不再把 session.title 当成员名读）。
+   *   缺省 undefined → 行为不变（纯 helper/测试场景）。
+   */
+  memberStore?: MemberStore;
 }
 
 /**
@@ -51,23 +58,45 @@ export function mapSessionTypeToAgentRefType(
 }
 
 /**
- * 推导发送方 AgentRef.name（[P0]agent_inbox_enqueue.md §2.5.3 name 反查规则）。
+ * 推导发送方 AgentRef.name（[P0]agent_inbox_enqueue.md §2.5.3 name 反查规则 + [v0.0.340 决策 1]）。
  *
- * | session.type | name 取值 |
+ * | session 形态 | name 取值 |
  * |-------------|----------|
- * | 'subagent' | subAgentTemplateType（如 "explorer"）；为空 → "subagent" |
+ * | subagent | subAgentTemplateType（如 "explorer"）；为空 → "subagent" |
+ * | squad 成员（squadId+memberId 且注入 memberStore） | memberStore.getMember 实时名（非空覆盖 title；反查失败 fallback title） |
  * | undefined / 其他 | session.title；无标题 → "parent" |
  *
  * 约束：name 不参与路由、不要求唯一、**不取 sessionId 片段**（人类可读语义）。
+ * subagent 分支优先于反查（templateType 语义不变）。
  *
  * @param senderSession 反查到的发送方 session record
+ * @param lookup 反查 store 最小接口（memberStore 可选；缺省 → 原行为）
  */
-export function deriveAgentRefName(senderSession: Session): string {
-  // [v0.0.56] derivation 是 subagent 判定的权威源
+export async function deriveAgentRefName(
+  senderSession: Session,
+  lookup?: EnrichSessionLookup,
+): Promise<string> {
+  // [v0.0.56] derivation 是 subagent 判定的权威源（subagent 分支优先，templateType 语义不变）
   if (senderSession.derivation === 'subagent') {
     const templateType = senderSession.subAgentTemplateType;
     if (templateType && templateType.length > 0) return templateType;
     return 'subagent';
+  }
+  // [v0.0.340 决策 1] squad 成员 sender → memberStore 反查实时名（成员名权威源）
+  if (
+    senderSession.squadId !== undefined &&
+    senderSession.memberId !== undefined &&
+    lookup?.memberStore
+  ) {
+    try {
+      const member = await lookup.memberStore.getMember(
+        senderSession.squadId,
+        senderSession.memberId,
+      );
+      if (member?.name && member.name.length > 0) return member.name;
+    } catch {
+      // 反查失败（member 已删/读失败）静默 fallback title，不抛错
+    }
   }
   // 顶层 standalone / leader / mate / squad → title || 'parent'
   const title = senderSession.title;
@@ -121,8 +150,8 @@ export async function enrichForInbox(
 
   // [v0.0.56 hotfix] 反查补全 type：直接从 senderSession(role+derivation) 派生（无中间量）。
   const expectedType = mapSessionTypeToAgentRefType(senderSession);
-  // 反查补全 name（req2.md §5 name 规则）
-  const expectedName = deriveAgentRefName(senderSession);
+  // 反查补全 name（req2.md §5 name 规则；[v0.0.340] memberStore 注入时 squad 成员反查实时名）
+  const expectedName = await deriveAgentRefName(senderSession, lookup);
 
   // ── 防幻觉契约：caller 传了 → 校验 warn 不一致；没传 → 反查补全 ──
   // 注：ref.type / ref.name 在 AgentRef 中是必填（types.ts），但 LLM 入口或 caller 可能

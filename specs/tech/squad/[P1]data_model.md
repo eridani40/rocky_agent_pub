@@ -37,7 +37,7 @@ interface Squad {
   squadChatSessionId: string;// → session.id（建队回填）
   // ── 自主性 infra（v0.0.33.4 实跑；[v0.0.116] 心跳升级 squad 级统一调度）──
   enableHeartBeat: boolean;  // 总开关（默认 false；替代旧 autonomyEnabled）。off → 停调度、下面配置全收起（UI）
-  enableGroupChat: boolean;  // [v0.0.270 新增] 群聊可见性（默认 true=开）。schema `required:false`（容忍旧 record 无字段）+ 读取 `?? true` 兜底（缺省=开）；false → agents 注入 SquadChat（squad_agents_status 不渲染 SquadChat 行）+ UI 群聊入口隐藏 + send_message('squadchat') 门控返 null（全私聊语义）；squad 实体/session 恒存在，仅控可见性
+  enableGroupChat: boolean;  // [v0.0.270 新增] 群聊可见性。schema `required:false`（容忍旧 record 无字段）+ 读取 `?? true` 兜底（**存量 squad 无字段=开，不受影响**）；**[v0.0.340] 新建团队默认 false=关**（建队 `squad-service.ts createSquadService` 显式写 false；管理面板 toggle 可手动开）——true → agents 注入 SquadChat（squad_agents_status 渲染 SquadChat 行）+ UI 群聊入口可见；false → 不渲染 + UI 入口隐藏 + send_message('squadchat') 门控返 null（全私聊语义）；squad 实体/session 恒存在，仅控可见性
   budget: { limit: number; window: "daily"; scope: "team" } | null;
                              // 预算控制（[v0.0.116] off/on 语义显式化）：
                              //   null = **off = 不限量**（gate 放行；现有 null 语义天然对齐 req）

@@ -95,6 +95,22 @@ describe('formatMateExitNotify — block 过滤 + 渲染', () => {
     }
   });
 
+  it('[v0.0.338 M1] interrupted → 退出原因行追加「（由用户中断，如需要可向用户查证）」且原值保留', () => {
+    const result = formatMateExitNotify({ ...base, stopReason: 'interrupted' });
+    expect(result).toContain('退出原因: interrupted（由用户中断，如需要可向用户查证）');
+    expect(result).toContain('退出原因: interrupted'); // 原枚举值保留
+  });
+
+  it('[v0.0.338 M1] 其他 6 种 reason → 不含「由用户中断」提示（输出逐字节不变）', () => {
+    const others: StopReason[] = ['no_tool_call', 'no_new_messages', 'max_iterations', 'doom_loop', 'error', 'tool_pending'];
+    for (const reason of others) {
+      const result = formatMateExitNotify({ ...base, stopReason: reason });
+      expect(result).toContain(`退出原因: ${reason}`);
+      expect(result).not.toContain('由用户中断');
+      expect(result).not.toContain('（由用户中断');
+    }
+  });
+
   it('tool_pending → pendingToolCalls 摘要行', () => {
     const result = formatMateExitNotify({
       ...base,

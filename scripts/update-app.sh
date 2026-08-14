@@ -67,7 +67,12 @@ log "copied."
 hdiutil detach "$MOUNT" 2>/dev/null || true
 log "dmg detached."
 
-# ── 7. 重启 app ──
+# ── 7. 等待文件落盘（修复白屏：cp 290MB 后立即 open 会读到未写完的文件） ──
+log "waiting for files to settle (sync + 3s)..."
+sync
+sleep 3
+
+# ── 8. 重启 app ──
 log "launching ${APP_NAME}..."
 open "$APP_PATH"
 log "DONE. ${APP_NAME} updated and launched."

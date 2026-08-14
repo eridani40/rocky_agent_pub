@@ -25,6 +25,8 @@ import type { ComputerNativePort } from './platform/computer/native-port';
 import type { ChannelManager } from './channel/channel-manager';
 import type { DriverRegistry } from './tools/browser/pick-driver';
 import { BrowserInstanceManager } from './tools/browser/instance-manager';
+import { BrowserInstanceLedger } from './tools/browser/instance-ledger';
+import { createSqlDriver } from './persistence/search-sql-driver';
 import { InMemoryModeImplRegistry } from './tools/browser/mode-impl';
 import { WorkerModeImpl } from './tools/browser/worker-mode-impl';
 import { AttachModeImpl } from './tools/browser/attach-mode-impl';
@@ -45,6 +47,7 @@ import { InMemoryDriverRegistry } from './tools/browser/pick-driver';
 // AutoNamingService —— AI 起名
 import { invoke as llmCallerInvoke } from './llm/caller/llm_caller';
 import { AutoNamingService } from './agent/auto-naming-service';
+import { join } from 'node:path';
 
 /**
  * Phase 10 装配：ConnectorManager + ComputerNativePort + ChannelManager + BrowserDriverRegistry + AutoNaming。
@@ -117,8 +120,10 @@ export async function bootstrapConnectorsPhase(deps: {
   // 模块级标记位防重复挂载，对齐 channelManager/workspaceManager/squad-runtime 模式）。
   // v0.0.266 T3：ActionExecutor registry——headless/managed-profile 注册同一 WorkerModeImpl 两键，
   // attach 注册 AttachModeImpl（无参构造；attachDriver/isAttachEnabled 经 manager env 透传 impl）。
+  // v0.0.334 B11：装配 sqlite 台账（createSqlDriver(join(resolveDataDir(),'browser.sqlite')) → BrowserInstanceLedger），
+  //   manager deps 必填 ledger（启动自检/对账数据源）。路径走 resolveDataDir 绝对路径（PACKAGED-GUARD-2）。
   // 装配失败 → undefined（noop fallback，同 connectorManager 模式，不阻塞 server 启动）。
-  const browserInstanceManager: BrowserInstanceManager | undefined = (() => {
+  const browserInstanceManager: BrowserInstanceManager | undefined = await (async () => {
     try {
       const workerImpl = new WorkerModeImpl();
       const registry = new InMemoryModeImplRegistry([
@@ -126,9 +131,15 @@ export async function bootstrapConnectorsPhase(deps: {
         ['managed-profile', workerImpl],
         ['attach', new AttachModeImpl()],
       ]);
+      // sqlite 台账：dev=BunSqlDriver / packaged=Node/BetterSqlite3（createSqlDriver 按 runtime 选实现，async 工厂）
+      // browser.sqlite 与 search.sqlite/crud.sqlite 同目录（dataDir 已 resolveDataDir 展开为绝对路径）
+      const browserSqlitePath = join(dataDir, 'browser.sqlite');
+      const sqlDriver = await createSqlDriver(browserSqlitePath);
+      const ledger = new BrowserInstanceLedger(sqlDriver);
       return new BrowserInstanceManager({
         dataDir,
         registry,
+        ledger,
         attachDriver,
         isAttachEnabled: () => connectorManager.getState?.('browser')?.switch === 'on',
       });

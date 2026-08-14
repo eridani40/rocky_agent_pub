@@ -21,6 +21,7 @@ import {
   computeReadFileText,
   computeWriteFileText,
   computeReadFileBinary,
+  computeFileStat,
   type ShellLike,
   type FsLike,
 } from '../open-external-ipc';
@@ -317,5 +318,57 @@ describe('computeReadFileBinary — [v0.0.280] 读绝对路径二进制 → base
     const r = await computeReadFileBinary('/abs/no-stat.png', fs);
     expect(r.ok).toBe(true);
     expect(r.content).toBe(Buffer.from('small', 'utf8').toString('base64'));
+  });
+});
+
+describe('computeFileStat — [v0.0.339] stat 绝对路径文件 → { size }（文件大小判定，供打开分流）', () => {
+  it('成功 → ok=true + size', async () => {
+    const fs: FsLike = {
+      readFile: vi.fn(async () => '') as unknown as FsLike['readFile'],
+      writeFile: vi.fn(async () => {}) as FsLike['writeFile'],
+      stat: vi.fn(async () => ({ size: 1024 })),
+    };
+    const r = await computeFileStat('/abs/file.log', fs);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.size).toBe(1024);
+    expect(fs.stat).toHaveBeenCalledWith('/abs/file.log');
+    // 只 stat 不读内容
+    expect(fs.readFile).not.toHaveBeenCalled();
+  });
+
+  it('ENOENT → ok=false reason=not-found', async () => {
+    const fs: FsLike = {
+      readFile: vi.fn(async () => '') as unknown as FsLike['readFile'],
+      writeFile: vi.fn(async () => {}) as FsLike['writeFile'],
+      stat: vi.fn(async () => {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      }),
+    };
+    const r = await computeFileStat('/abs/missing.log', fs);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('not-found');
+  });
+
+  it('EACCES → ok=false reason=permission-denied', async () => {
+    const fs: FsLike = {
+      readFile: vi.fn(async () => '') as unknown as FsLike['readFile'],
+      writeFile: vi.fn(async () => {}) as FsLike['writeFile'],
+      stat: vi.fn(async () => {
+        throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      }),
+    };
+    const r = await computeFileStat('/abs/secret.log', fs);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('permission-denied');
+  });
+
+  it('fs.stat 缺省 → ok=false reason=stat-unavailable（防御，不抛）', async () => {
+    const fs: FsLike = {
+      readFile: vi.fn(async () => '') as unknown as FsLike['readFile'],
+      writeFile: vi.fn(async () => {}) as FsLike['writeFile'],
+    };
+    const r = await computeFileStat('/abs/no-stat.log', fs);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('stat-unavailable');
   });
 });

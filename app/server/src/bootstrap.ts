@@ -41,7 +41,7 @@ import type { ChannelManager } from './channel/channel-manager';
 import type { DriverRegistry } from './tools/browser/pick-driver';
 import type { ContextEngine } from './agent/context-engine';
 import type { AgentManagerImpl } from './agent/agent-manager';
-// [v0.0.307] ToolExecutionEngine 类型（BootstrapResult.toolEngine 字段声明用）
+// ToolExecutionEngine 类型（BootstrapResult.toolEngine 字段声明用）
 import type { ToolExecutionEngine } from './tools/engine';
 import type { SessionTypePolicy } from './agent/session-type-policy';
 import type { InboxStore } from './agent/inbox';
@@ -111,7 +111,7 @@ export interface BootstrapResult {
   store: SessionStore;
   /** session 级 agent 管理器（enqueue/activate/subscribe） */
   agentManager: AgentManagerImpl;
-  /** [v0.0.307] ToolExecutionEngine（UT 验证 workerPool 注入用；router 不直接消费） */
+  /** ToolExecutionEngine（router 不直接消费） */
   toolEngine: ToolExecutionEngine;
   /** SessionTypePolicy — profile yaml 单源驱动工具解析（router.sessionDeps 透传给 debug 端点等） */
   sessionTypePolicy: SessionTypePolicy;
@@ -492,7 +492,7 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
     bus,
     store,
     agentManager,
-    // [v0.0.307] ToolExecutionEngine（UT 验证 workerPool 注入用）
+    // ToolExecutionEngine（注入 BootstrapResult）
     toolEngine,
     sessionTypePolicy,
     contextEngine,

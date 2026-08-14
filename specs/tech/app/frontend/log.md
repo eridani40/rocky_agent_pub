@@ -1,14 +1,26 @@
 ---
 type: log
 title: Frontend KB 变更记录
-updated: 2026-08-11
+updated: 2026-08-12
 ---
 
 # Frontend KB 变更记录（ISO 倒序，最新在前）
 
+## 2026-08-12 · v0.0.339（文件打开分流 — CSV/TSV 无条件系统打开 + 文本 >5MB 系统打开）
+
+- **`index.md` ① 概念表 L42**：v0.0.339 openLocalPath 概念行升级——④ 文本分支三分流：① `csv`/`tsv` → **无条件系统打开**（不 stat、不内置，任何大小——表格文件交 Numbers/Excel）；② 其余文本 → `getSize` stat 大小判定（workspace→`GET /workspace/stat?path=`（A8 `statWorkspaceFile`）/ absolute→`rockyShell.stat`（A6 `shell:stat` IPC）；`statFile?` 注入优先（UT mock）；失败/无能力 undefined 降级内置）——**`size > TEXT_OVER_SIZE_BYTES`（= 5MB，导出常量）→ 系统打开**，`≤5MB` → `onEditor(format)` 内置；③ **图片分支不 stat**（无大小限制）。同步签名不变（消费方零改动：`section-workspace-panel.tsx` handleOpen + `component-message-stream.tsx` onLocalViewer 均零改动），系统打开复用 `openSystemWorkspace`/`openSystemAbsolute`。详见 `specs/tech/version_logs/v0.0.339-file-open-strategy/change_log.md` + `specs/prd/version_logs/v0.0.339-file-open-strategy.md`。
+
 ## 2026-08-11 · v0.0.329（门模型 — 2+3 三态 center/left/right，可横向滑动的门）
 
 - **`index.md` ① 概念表 L49**：v0.0.329 门模型概念行——`use-preview-collapsed.ts` 三态 hook 重写（`DoorState='center'|'left'|'right'` + `pv-door-<sid>` 持久化 + 旧 `pv-collapsed-<sid>` 迁移/桥接 + **sessionId 变化重读门态 blocking 修复**）+ `layout-width-engine.ts` 可选 `chatCollapsed?` 分支（缺省旧路径逐字段相等回归保护；door=left 先 4 槽完整换算再门态重分配）+ `use-three-col-layout.ts` chatCollapsed 透传 + chatRenderWidth + `section-preview-area.tsx` 三态渲染（right=现状收起路径原样 / left=门框左缘粗线 rail+▶贴右+aside 占满无 resizer / center=细线左◀+右▶双把手）+ `component-preview-collapse-toggle.tsx` 可选 `direction/tooltipKey/testid` prop + page-chat/studio-chat-router Row 读 door + chatCollapsed 条件不渲染。**视觉 3 轮老板验收**（rail bg-bg-warm+双 border / rail 6→7px+handle 7→8px / stickCls 偏移 7→8px 同步）。详见 `specs/tech/version_logs/v0.0.329/change_log.md` + `specs/prd/version_logs/v0.0.329-region23-door.md`。
+
+## 2026-08-11 · v0.0.328（纯文本打开 — 无扩展名/点文件白名单 + 搜索防抖 500ms）
+
+- **`index.md` ① 概念表 L50**：v0.0.328 概念并入 324 行——`getFileFormat` 白名单扩充：`KNOWN_TEXT_BASENAMES` 精确集（Dockerfile/Makefile/.gitignore 等 12 项，扩展名查表前先查，大小写不敏感）→ 'txt'；`KNOWN_TEXT_STEMS` 词干集（Dockerfile.dev → stem='dockerfile' 命中，扩展名查表未命中时 fallback）；搜索防抖 300→500ms + 回车立即搜（跳过防抖）。详见 `specs/prd/version_logs/v0.0.328-text-file-open.md`。
+
+## 2026-08-11 · v0.0.324（文件树搜索交互升级 — 裁剪式结果树）+ v0.0.327（搜索树可交互 — merge-expanded）
+
+- **`index.md` ① 概念表 L50**：v0.0.324 裁剪树概念行（与 328 合并）——`ws-filter-tree.ts` `buildFilterTree` 纯函数（路径拆解补祖先段 / 同路径合并去重 / 命中目录用真实子项替换 / `expandedPaths` 只含祖先路径）；`component-ws-search-box.tsx` 瘦身（删结果列表 JSX，`onResult` 上报）；FileTree 常驻、搜索态数据源切裁剪树（PathBar 仍隐藏）；`SEARCH_LIMIT` 200→100；超限 → 底部 `tooMany` 截断提示。**v0.0.327**：`merge-expanded` action——`filterResult.expandedPaths` 合并入 `state.expanded`（不覆盖用户手动展开）；命中目录本身不自动展开。详见 `specs/tech/version_logs/v0.0.324/change_log.md` + `specs/ui/components/chat-page/component-workspace-panel.md §4.6`。
 
 ## 2026-08-10 · v0.0.320（文件预览区 — 三栏 chat|预览|工作区 + 多 tab + 编辑 + 冲突检测 + 弹层退役）
 

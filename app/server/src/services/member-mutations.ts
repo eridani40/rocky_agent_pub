@@ -18,11 +18,14 @@
  */
 import type { MemberStore, MemberEntity } from '../stores/squad-store';
 import type { MemberSkillConfig } from '../agent/schema_defs/squad/member';
+import type { SessionStore } from '../agent/session-store';
 import { MemberNameConflictError } from './member-service';
 
 /** member mutation 共用最小依赖集（deploy/bench/patch 真实依赖；不重复 SquadServiceDeps 全集） */
 export interface MemberMutationDeps {
   memberStore: MemberStore;
+  /** [v0.0.340] 改名同步 session.title 用（方案 A 写时全同步；两调用方均持有：handler deps.sessionStore / team tool rtc.store） */
+  sessionStore: SessionStore;
 }
 
 /** PATCH member 业务字段（去 dead tools/heartbeat/model；对齐 data_model §1.2 + change_plan D3 + A4） */
@@ -183,5 +186,21 @@ export async function patchMemberService(
   const updated = await deps.memberStore.putMember(
     merged as Parameters<typeof deps.memberStore.putMember>[0],
   );
+
+  // [v0.0.340] 改名同步 session.title（方案 A 写时全同步）：
+  //   同步判据（change_plan 决策 2）：patch.name 提供且（改名发生 || 关联 session.title !== patch.name）——
+  //   既覆盖正常改名，也覆盖「上次部分失败后重试」（重试同名 patch 也能补同步）。
+  //   顺序：putMember（主操作）成功 → getSession → updateSession(title)（附属同步）。
+  //   保护：titled===true（AI 起名/用户自定义标题）不覆盖；updateSession 只传 title 不传 titled（保 CAS）。
+  //   失败：updateSession 抛错透传（部分失败可见，重试可修复——「改彻底 + 诚实上报」老板原则）。
+  if (patch.name !== undefined) {
+    const sid = existing.sessionId;
+    if (sid) {
+      const session = await deps.sessionStore.getSession(sid);
+      if (session && session.titled !== true && (patch.name !== existing.name || session.title !== patch.name)) {
+        await deps.sessionStore.updateSession(sid, { title: patch.name });
+      }
+    }
+  }
   return updated;
 }

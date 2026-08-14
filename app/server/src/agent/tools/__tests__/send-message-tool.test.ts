@@ -16,7 +16,7 @@
  *      验证 (1) 异常入参被容错接受、(2) sender.agent.ref.sessionId = caller self。
  */
 import { describe, it, expect } from 'vitest';
-import { sendMessageTool } from '../send-message-tool';
+import { sendMessageTool, normalizeContentBlocks } from '../send-message-tool';
 import type { ToolCtx, ToolInput } from '../../../tools/types';
 import type { Message } from '../../../message/types';
 import type { AgentToolRuntimeContext } from '../runtime-context';
@@ -240,6 +240,79 @@ describe('send_message：subagent scope 拓扑校验（a2a_protocol §6）', () 
 // ============================================================
 // [v0.0.311] result targetName 返回（后端解析可读名覆盖 subagent 等场景）
 // ============================================================
+describe('send_message [v0.0.331]：normalizeContentBlocks 公共函数全形态（D4 语义唯一来源）', () => {
+  it('array 正常形态（含 type:text）→ 原样保留', () => {
+    expect(normalizeContentBlocks([{ type: 'text', text: 'hi' }])).toEqual([
+      { type: 'text', text: 'hi' },
+    ]);
+  });
+
+  it('array 缺 type（[{text}]）→ 补 type:"text"（治本核心）', () => {
+    expect(normalizeContentBlocks([{ text: 'hi' }])).toEqual([
+      { type: 'text', text: 'hi' },
+    ]);
+  });
+
+  it('array 多块缺 type → 逐块补 type:"text"', () => {
+    expect(normalizeContentBlocks([{ text: 'a' }, { text: 'b' }])).toEqual([
+      { type: 'text', text: 'a' },
+      { type: 'text', text: 'b' },
+    ]);
+  });
+
+  it('string → 包成 [{type:"text",text:str}]（形态 C）', () => {
+    expect(normalizeContentBlocks('纯字符串')).toEqual([{ type: 'text', text: '纯字符串' }]);
+  });
+
+  it('object 单 block（{type:"text",text}）→ 包成数组（形态 B）', () => {
+    expect(normalizeContentBlocks({ type: 'text', text: '单 block' })).toEqual([
+      { type: 'text', text: '单 block' },
+    ]);
+  });
+
+  it('object 包裹信封（{item:{text}}）→ 解包 .item（形态 A）', () => {
+    expect(normalizeContentBlocks({ item: { text: '解包' } })).toEqual([
+      { type: 'text', text: '解包' },
+    ]);
+  });
+
+  it('object 包裹信封（{item, needReply}）→ 解包 .item 且忽略包裹字段（形态 A 完整）', () => {
+    expect(normalizeContentBlocks({ item: { text: '解包' }, needReply: true })).toEqual([
+      { type: 'text', text: '解包' },
+    ]);
+  });
+
+  it('block 缺 text → error 形态（text 非 string 语义不变）', () => {
+    expect(normalizeContentBlocks([{ type: 'text' }])).toEqual({
+      error: 'send_message: content block missing text string',
+    });
+  });
+
+  it('block 非 object（number）→ error 形态', () => {
+    expect(normalizeContentBlocks([42])).toEqual({
+      error: 'send_message: content block must be object',
+    });
+  });
+
+  it('number（非 string/object/array）→ error 形态', () => {
+    expect(normalizeContentBlocks(42)).toEqual({
+      error: 'send_message: content must be array of {type:"text",text:string} blocks (or a single block/string)',
+    });
+  });
+
+  it('空数组 → error 形态（must be non-empty）', () => {
+    expect(normalizeContentBlocks([])).toEqual({
+      error: 'send_message: content must be non-empty array',
+    });
+  });
+
+  it('未知 type 不透传（{type:"image",text}）→ 归一为 text block（防脏数据落库）', () => {
+    expect(normalizeContentBlocks([{ type: 'image', text: 'x' }])).toEqual([
+      { type: 'text', text: 'x' },
+    ]);
+  });
+});
+
 describe('send_message [v0.0.311]：result 含 targetName', () => {
   /** 构造带 store.getSession mock 的 subagent rtc */
   function makeRtcWithStore(
@@ -271,12 +344,69 @@ describe('send_message [v0.0.311]：result 含 targetName', () => {
     };
   }
 
+  /**
+   * [v0.0.340 决策 1] 构造带 squad 成员 target session + memberStore mock 的 rtc。
+   * @param session target session record（squadId/memberId 可空：null → 无 session）
+   * @param memberStore mock memberStore（getMember 返回实时名 / undefined = member 已删）
+   */
+  function makeRtcWithMember(
+    captured: { delivered: Message | null },
+    session: { title: string | null; squadId?: string; memberId?: string } | null,
+    memberStore?: {
+      getMember: (squadId: string, memberId: string) => Promise<{ name: string } | undefined>;
+    },
+  ): AgentToolRuntimeContext {
+    return {
+      parentSessionId: 'PARENT-001',
+      parentRunId: 'parent-run-001',
+      parentType: 'leader',
+      parentName: 'parent-session-title',
+      parentScope: 'subagent',
+      selfSessionId: 'CHILD-001',
+      selfType: 'subagent',
+      selfName: 'subagent',
+      agentManager: {
+        deliverTo: async (_sid: string, msg: Message) => {
+          captured.delivered = msg;
+          return { sessionId: _sid, runId: 'r', state: 'running', promise: Promise.resolve({} as never) } as never;
+        },
+      } as never,
+      store: {
+        getSession: async () =>
+          session
+            ? ({
+                id: 'PARENT-001',
+                title: session.title,
+                ...(session.squadId !== undefined ? { squadId: session.squadId } : {}),
+                ...(session.memberId !== undefined ? { memberId: session.memberId } : {}),
+              } as never)
+            : null,
+      } as never,
+      ...(memberStore ? { memberStore: memberStore as never } : {}),
+      sessionDeps: {} as never,
+    };
+  }
+
   async function runWithStore(
     inputFields: Record<string, unknown>,
     sessionTitle: string | null,
   ): Promise<{ text: string }> {
     const captured = { delivered: null as Message | null };
     const ctx: ToolCtx = { config: { agentToolContext: makeRtcWithStore(captured, sessionTitle) } } as unknown as ToolCtx;
+    const res = await sendMessageTool.run(inputFields as unknown as ToolInput, ctx);
+    const blocks = (res.content ?? []) as Array<{ type?: string; text?: string }>;
+    return { text: blocks.map((b) => b?.text ?? '').join('') };
+  }
+
+  async function runWithMember(
+    inputFields: Record<string, unknown>,
+    session: { title: string | null; squadId?: string; memberId?: string } | null,
+    memberStore?: {
+      getMember: (squadId: string, memberId: string) => Promise<{ name: string } | undefined>;
+    },
+  ): Promise<{ text: string }> {
+    const captured = { delivered: null as Message | null };
+    const ctx: ToolCtx = { config: { agentToolContext: makeRtcWithMember(captured, session, memberStore) } } as unknown as ToolCtx;
     const res = await sendMessageTool.run(inputFields as unknown as ToolInput, ctx);
     const blocks = (res.content ?? []) as Array<{ type?: string; text?: string }>;
     return { text: blocks.map((b) => b?.text ?? '').join('') };
@@ -313,5 +443,42 @@ describe('send_message [v0.0.311]：result 含 targetName', () => {
     const parsed = JSON.parse(text);
     expect(parsed.messageId).toBeDefined();
     expect(parsed.targetName).toBeUndefined();
+  });
+
+  // ── [v0.0.340 决策 1] 成员名权威源 = memberStore：target session 是 squad 成员 → 反查实时名 ──
+  it('[v0.0.340] target 是 squad 成员（squadId+memberId）且 memberStore 反查有实时名 → targetName 用 member 名（优先于 title 快照）', async () => {
+    const { text } = await runWithMember(
+      { target: 'parent', content: [{ type: 'text', text: 'hi' }], needReply: false },
+      { title: '旧名快照', squadId: 'SQ-1', memberId: 'MEM-1' },
+      {
+        getMember: async () => ({ name: '新名字' }),
+      },
+    );
+    const parsed = JSON.parse(text);
+    expect(parsed.targetName).toBe('新名字');
+  });
+
+  it('[v0.0.340] member 已删（getMember undefined）→ fallback session.title（不抛错）', async () => {
+    const { text } = await runWithMember(
+      { target: 'parent', content: [{ type: 'text', text: 'hi' }], needReply: false },
+      { title: '旧名快照', squadId: 'SQ-1', memberId: 'MEM-GONE' },
+      {
+        getMember: async () => undefined,
+      },
+    );
+    const parsed = JSON.parse(text);
+    expect(parsed.targetName).toBe('旧名快照');
+  });
+
+  it('[v0.0.340] target 非 squad 成员（无 squadId/memberId，如 subagent）→ title fallback（不反查）', async () => {
+    const { text } = await runWithMember(
+      { target: 'parent', content: [{ type: 'text', text: 'hi' }], needReply: false },
+      { title: 'subagent-title' },
+      {
+        getMember: async () => ({ name: '不应被使用' }),
+      },
+    );
+    const parsed = JSON.parse(text);
+    expect(parsed.targetName).toBe('subagent-title');
   });
 });

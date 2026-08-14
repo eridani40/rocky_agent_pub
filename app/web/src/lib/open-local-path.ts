@@ -10,7 +10,9 @@
  *   ② isRemoteLinkPath(.url) → 嗅探浏览器（workspace→openRemoteLink；absolute→readFileText+parseUrlFileContent+openWebUrl）
  *       嗅探失败降级 onEditor(format:'txt')
  *   ③ isImagePath → onImageViewer（内置只读 viewer）
- *   ④ getFileFormat!=null → onEditor(format)（内置可编辑 editor）
+ *   ④ getFileFormat!=null → 文本分流（v0.0.339）：
+ *       csv/tsv → 无条件系统打开（不 stat，表格不内置）
+ *       其余 → stat 大小判定：>5MB 系统打开（TEXT_OVER_SIZE_BYTES）；≤5MB → onEditor(format)；stat 失败降级内置
  *   ⑤ 其余 → 系统打开（workspace→openWorkspaceItem kind=file / absolute→rockyShell.openPath）
  *
  * 边界：不做危险协议处理（调用方 link-target 已拦）；不新开格式集/图片白名单（复用 file-format 单一权威）；
@@ -19,7 +21,7 @@
  *   vitest mock 下模块加载顺序异常导致命名绑定 undefined）。.url 嗅探命中后的 web 打开复用 remote-link 的
  *   openWebUrl（remote-link 同样不 import link-target，双向断开环）。
  */
-import { openWorkspaceItem } from './chat-api';
+import { openWorkspaceItem, statWorkspaceFile } from './chat-api';
 import { openRemoteLink, openWebUrl, parseUrlFileContent } from './remote-link';
 import { getFileFormat, isImagePath, isRemoteLinkPath, type FileFormat } from './file-format';
 
@@ -37,9 +39,12 @@ export interface OpenLocalTarget {
   source: 'workspace' | 'absolute';
 }
 
+/** 文本大小阈值：> 此字节数 → 系统打开（不内置编辑），≤ → 内置（v0.0.339） */
+export const TEXT_OVER_SIZE_BYTES = 5 * 1024 * 1024;
+
 /** openLocalPath 可选回调集（唯一权威分发的消费方契约） */
 export interface OpenLocalPathOpts {
-  /** workspace 源 HTTP 调用（openWorkspaceItem / openRemoteLink）用；absolute 源不需要 */
+  /** workspace 源 HTTP 调用（openWorkspaceItem / openRemoteLink / statWorkspaceFile）用；absolute 源不需要 */
   sessionId?: string;
   /** 路径来源：workspace 相对（HTTP）/ absolute（IPC） */
   source: 'workspace' | 'absolute';
@@ -49,6 +54,41 @@ export interface OpenLocalPathOpts {
   onEditor: (target: OpenLocalTarget) => void;
   /** image 6 格式只读 viewer 回调 */
   onImageViewer: (target: OpenLocalTarget) => void;
+  /** [v0.0.339] stat 注入（UT mock；缺省 → 按 source 走真实 stat：workspace→statWorkspaceFile / absolute→rockyShell.stat） */
+  statFile?: (path: string) => Promise<{ size: number } | undefined>;
+}
+
+/**
+ * [v0.0.339] 文件大小判定（打开分流用）：> TEXT_OVER_SIZE_BYTES → 系统打开。
+ * 注入 statFile 优先；缺省按 source 走真实 stat——workspace→statWorkspaceFile（HTTP，A8），
+ * absolute→window.rockyShell?.stat（IPC，A6；非 Electron undefined）。失败/无能力 → undefined（降级内置）。
+ */
+export async function getSize(
+  source: 'workspace' | 'absolute',
+  sessionId: string | undefined,
+  path: string,
+  statFile?: (path: string) => Promise<{ size: number } | undefined>,
+): Promise<number | undefined> {
+  if (statFile) {
+    try {
+      return (await statFile(path))?.size;
+    } catch {
+      return undefined;
+    }
+  }
+  try {
+    if (source === 'workspace') {
+      if (!sessionId) return undefined;
+      const r = await statWorkspaceFile(sessionId, path);
+      return r.size;
+    }
+    const api = typeof window !== 'undefined' ? window.rockyShell : undefined;
+    if (!api?.stat) return undefined;
+    const r = await api.stat(path);
+    return r.ok ? r.size : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** basename（兼容 / 与 \；file-format basename 私有不导出，内部 5 行实现不破坏封装） */
@@ -136,10 +176,24 @@ export function openLocalPath(path: string, opts: OpenLocalPathOpts): void {
     return;
   }
 
-  // ④ 12 格式 → 内置可编辑 editor
+  // ④ [v0.0.339] csv/tsv → 无条件系统打开（不 stat；表格文件不内置编辑）
   const fmt = getFileFormat(path);
+  if (fmt === 'csv' || fmt === 'tsv') {
+    if (source === 'workspace') openSystemWorkspace(sessionId, path, 'file');
+    else openSystemAbsolute(path);
+    return;
+  }
+
+  // ④ [v0.0.339] 其余文本格式 → stat 大小判定：>5MB 系统打开，≤5MB 内置；stat 失败 undefined → 降级内置
   if (fmt !== null) {
-    onEditor(mk(fmt));
+    void getSize(source, sessionId, path, opts.statFile).then((size) => {
+      if (size !== undefined && size > TEXT_OVER_SIZE_BYTES) {
+        if (source === 'workspace') openSystemWorkspace(sessionId, path, 'file');
+        else openSystemAbsolute(path);
+        return;
+      }
+      onEditor(mk(fmt));
+    });
     return;
   }
 

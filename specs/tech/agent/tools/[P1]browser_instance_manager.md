@@ -2,6 +2,11 @@
 
 > v0.0.264 新增架构文档。对齐 `[P1]browser_tool.md`（一次性执行器现状）与 `specs/research/browser-managed-profile-lifecycle.md`（根因分析 + 方向 A/B）。
 > `[v0.0.272]` 增对账兜底回收（§4.9）：marker 白名单 + 双段扫描 + 三层判定 + 周期/启动/close 触发——孤儿 chrome 结构性收敛（修 BUG-chrome-orphan-process-leak）。
+> `[v0.0.330]` instanceKey 三模式统一 `${sessionId}:${mode}`（profileName 不进 key，owner 天然隔离）+ close 无实例明确报错 + attach close 断 MCP 后检测 Chrome 调试态残留并返回引导提示（透传至 text）。
+> `[v0.0.334]` 删 cdpUrl（attach 仅 autoConnect）+ 持久化记录从 `browser-instances.json` 迁移到 **sqlite 台账表**（`browser_instances`，launch insert / close 硬删 / 启动按表清理残留，attach MCP 子进程入台账）。
+> `[v0.0.334.fix]` **attach 失活即时清账**（Bug2 计数虚高根治）：impl 失活分支 `env.ledger.delete` + `env.discardInstance`（best-effort 幂等），manager 收尾退化防御 catch；manager 暴露 `discardInstance` 最小同步摘表口经 env 注入（§4.2）。
+> `[v0.0.336]` **close 三层一致**（老板定调：真实资源层 + 记录层 + 感知层同步清、失败诚实上报）：`ModeImpl.close` 返回 **CloseResult**（ok/error 失败通道）；attach close 显式回收 mcp 主进程组 + 兜底杀 detached watchdog（G4/G5）+ connect/disconnect cache key 对称（G1/G2，根除 launch 复用死连接）；closeInstance 清理失败不删表可重试（close_incomplete）。
+> `[v0.0.337]` **attach launch 失败/超时清理升级**（H1-H9）：driver connect 失败路径补 kill 进程组 + watchdog（对齐 close 三层清理）+ signal abort 感知（launch 超时 → 立即清理）+ **失败入台账**（insert 不 delete，留给启动自检回收）。
 > 用户设计意图（原话）：browser 工具应该像人的浏览器——打开后一直开着，每次操作都在同一个浏览器实例上。工具本身无状态，但浏览器实例本身就是状态。应该有一个 browser instance manager 管理 session 和 instance 的关系。每 session 每类型最多一个 instance。工具调用前必须当前 session 有 chrome instance 才能发起。
 
 ## 1. 问题定义
@@ -12,7 +17,7 @@
 |------|---------|--------------------|
 | headless | 调用级 | `NodeWorkerDriver.executeOnce` 全新 spawn worker → 启动 Chrome（临时目录）→ 1 个 action → SIGKILL 进程组 → exit |
 | managed-profile | 调用级 | 同上，但用持久 user-data-dir（SingletonLock 保护）；**每次调用都重新启动 Chrome**，状态（cookie/页面/lastRefs）全丢 |
-| attach | 会话级（用户自启） | `[v0.0.266]` InstanceManager 持有（key=`sessionId:attach`，存 BrowserSession+cdpUrl）；launch=connect / 操作经 execute 统一路由（attach impl dispatch，T3）/ close=disconnect，不 kill 用户 Chrome |
+| attach | 会话级（用户自启） | `[v0.0.266]` InstanceManager 持有（key=`sessionId:attach`，存 BrowserSession；`[v0.0.334]` -cdpUrl）；launch=connect（仅 autoConnect）/ 操作经 execute 统一路由（attach impl dispatch，T3）/ close=断 MCP + 杀 mcp 进程组 + watchdog 兜底 + 检测调试态残留并提示（`[v0.0.330]`→`[v0.0.334]` 恒检测 →`[v0.0.336]` 显式回收进程组），不 kill 用户 Chrome |
 
 **根因**：`worker-entry.ts` 注释明言「一次性执行器（无会话状态保持）」。不是 bug，是架构设计——但与用户「浏览器像人的浏览器常驻」的期望冲突。
 
@@ -27,11 +32,11 @@
 
 ## 2. 概念定义
 
-- **BrowserHandle**（`[v0.0.266 T3]` 原 BrowserInstance 更名）：句柄表条目（manager 持有），`{ key, mode, state: 'starting'|'ready'|'closing'|'dead', createdAt, lastUsedAt }`；`key = sessionId:mode[:profileName]` 每 session 每类型最多一个。worker 细节（userDataDir/cdpPort/worker/workerPid/persisted）在 WorkerHandle（WorkerModeImpl 私有扩展），attach 细节（session/cdpUrl）在 AttachHandle（AttachModeImpl 私有扩展）——**manager 只读公共字段，不碰私有**。
+- **BrowserHandle**（`[v0.0.266 T3]` 原 BrowserInstance 更名）：句柄表条目（manager 持有），`{ key, mode, state: 'starting'|'ready'|'closing'|'dead', createdAt, lastUsedAt }`；`key = sessionId:mode`（`[v0.0.330]` 三模式统一，profileName 不进 key——profile 由 handle 承载；`[v0.0.334]` -cdpUrl）每 session 每 mode 最多一个。worker 细节（userDataDir/cdpPort/worker/workerPid/persisted）在 WorkerHandle（WorkerModeImpl 私有扩展），attach 细节（session/mcpPid）在 AttachHandle（AttachModeImpl 私有扩展）——**manager 只读公共字段，不碰私有**。
 - **ModeImpl / ModeImplRegistry**（`[v0.0.266 T3]`）：无状态策略集 `{ launch(key,opts,env), execute(handle,action,params,ctx), close(handle,env), cleanupOrphan?(rec,env) }`；headless/managed-profile 注册**同一 WorkerModeImpl 实例两键**，attach 注册 AttachModeImpl（自带主进程 dispatch + 失活自愈）。manager 经 `registry.get(mode)` 分发，**零 `mode ===` 判断**。
 - **BrowserInstanceManager**：平台级管理器 = 句柄表 + registry + 状态机，管生命周期（launch/execute/close 全经 impl）+ 前置校验 + idle + session 结束兜底清理 + 泄漏防护（进程/目录/端口/锁）。
 - **持久 worker**：node 子进程，循环读 stdin 任务 → 调 playwright → stdout 响应，**不退出**（区别于现状一次性 worker；仅 mode①② 用）。
-- **owner 门禁**：key 含 sessionId（attach=`sessionId:attach` / managed-profile=`sessionId:managed-profile:x` / headless=`sessionId:headless`），instance 属于 launch 它的 session，其他 session 不能复用（owner 天然隔离）。
+- **owner 门禁**：key 含 sessionId（attach=`sessionId:attach` / managed-profile=`sessionId:managed-profile` / headless=`sessionId:headless`，`[v0.0.330]` 起三模式统一 `${sessionId}:${mode}`），instance 属于 launch 它的 session，其他 session 不能复用（owner 天然隔离）。
 
 ## 3. 架构方案
 
@@ -58,7 +63,7 @@ browser tool (tool.ts)
 ```ts
 // manager 句柄表条目（只读公共字段，不碰 impl 私有扩展）
 interface BrowserHandle {
-  key: string;                 // `${sessionId}:${mode}[:${profileName}]`
+  key: string;                 // `${sessionId}:${mode}`（`[v0.0.330]` 三模式统一；profileName 不进 key，`[v0.0.334]` -cdpUrl）
   mode: 'headless' | 'managed-profile' | 'attach';
   state: 'starting' | 'ready' | 'closing' | 'dead';
   createdAt: number;
@@ -77,7 +82,8 @@ interface WorkerHandle extends BrowserHandle {
 // AttachModeImpl 私有扩展（仅 attach-mode-impl.ts 读写）
 interface AttachHandle extends BrowserHandle {
   session: BrowserSession;
-  cdpUrl?: string;
+  /** `[v0.0.334]` -cdpUrl；新增 mcpPid（chrome-devtools-mcp 子进程 pid，台账锚点） */
+  mcpPid?: number;
 }
 ```
 
@@ -88,7 +94,7 @@ interface AttachHandle extends BrowserHandle {
 
 ### 3.3 与 ConnectorManager 的关系
 
-- **attach（`[v0.0.266]` 纳入 InstanceManager；T3 下沉 AttachModeImpl）**：attach 的「instance」= InstanceManager 条目（key=`sessionId:attach`，存 AttachHandle{session, cdpUrl}，不走 worker）。launch = ChromeMcpDriver.connect（attach impl 经 ModeImplEnv 注入共享 attachDriver 单例 + isAttachEnabled 门禁）；操作经 execute 统一路由（attach impl 内 dispatchAction + 失活自愈 + screenshot 落盘）；close = attachDriver.disconnect（不杀用户 Chrome）。ConnectorManager 瘦身为「switch 门禁 + UI 状态」（enable/disable/bootstrap/getState/getAll/isReady），不再持有 attach session/owner。
+- **attach（`[v0.0.266]` 纳入 InstanceManager；T3 下沉 AttachModeImpl；`[v0.0.334]` -cdpUrl + mcpPid；`[v0.0.336]` close 显式回收进程组）**：attach 的「instance」= InstanceManager 条目（key=`sessionId:attach`，存 AttachHandle{session, mcpPid}，不走 worker）。launch = ChromeMcpDriver.connect（仅 autoConnect；attach impl 经 ModeImplEnv 注入共享 attachDriver 单例 + isAttachEnabled 门禁）；操作经 execute 统一路由（attach impl 内 dispatchAction + 失活自愈 + screenshot 落盘）；close = attachDriver.disconnect（传 userDataDir 对称清 cache）+ killProcessGroup(mcpPid) + killOrphanMcpWatchdog + 台账 delete（`[v0.0.336]` G4/G5，不杀用户 Chrome）+ CloseResult 诚实上报。ConnectorManager 瘦身为「switch 门禁 + UI 状态」（enable/disable/bootstrap/getState/getAll/isReady），不再持有 attach session/owner。
 - **headless/managed-profile**：新增 `BrowserInstanceManager`。attach 与 headless/managed-profile 统一由 InstanceManager 管理，三模式共用 launch/close/前置校验入口，互不干扰。
 - **统一 owner 门禁语义**：key 含 sessionId（attach=`sessionId:attach` / managed-profile=`sessionId:managed-profile:x` / headless=`sessionId:headless`），owner 天然隔离，跨 session 不可复用。
 
@@ -104,36 +110,43 @@ interface AttachHandle extends BrowserHandle {
 
 **attach（`[v0.0.266]`）**：
 ```
-browser(mode='attach', action='launch', cdpUrl?)   // cdpUrl 缺省 → DEFAULT_ATTACH_CDP_URL（127.0.0.1:9222）
-→ InstanceManager.launch(sessionId, {mode:'attach', cdpUrl?})
+browser(mode='attach', action='launch')   // `[v0.0.334]` -cdpUrl：仅 autoConnect（driver 恒 --autoConnect）
+→ InstanceManager.launch(sessionId, {mode:'attach'}, ctx)   // `[v0.0.337]` H7：ctx?:{signal?} 透传（attach 超时 abort 感知）
    ├─ key = sessionId:attach
    ├─ 门禁① isAttachEnabled()（读 connectorManager switch）false → {ok:false, error:{kind:'not_enabled'}}
    ├─ 门禁② attachDriver 缺省（bootstrap 降级）→ {ok:false, error:{kind:'attach_failed', message:'驱动未注册'}}（fail-closed）
    ├─ 幂等：instances.get(key) 且 state=ready → 复用，返回 {ok:true, text:'reuse attach'}
-   ├─ 无/starting/closing/dead → 清理旧 → connectAttachSession(driver, cdpUrl)
-   │    = ChromeMcpDriver.connect（spawn chrome-devtools-mcp + list_pages round-trip 判据）→ BrowserSession
-   ├─ 组装 instance：{ key, mode:'attach', sessionId, session, cdpUrl, persisted:false }
-   └─ 返回 {ok:true, text:'launched attach'}
+   ├─ 无/starting/closing/dead → 清理旧 → connectAttachSession(driver, {}, ctx?.signal)   // `[v0.0.337]` H4：signal 透传
+   │    = ChromeMcpDriver.connect({userDataDir}, signal)（spawn chrome-devtools-mcp --autoConnect + list_pages round-trip 判据）→ BrowserSession + mcpPid
+   │    `[v0.0.337]` H5：driver spawn 即记 lastSpawnPid（成功失败都记，disconnect 清；与 lastMcpPid 仅成功 set 语义区分）
+   │    `[v0.0.337]` H3：signal abort → 抛 attach_failed → 走 connect catch → H2 清理（graceful close → kill 进程组 → watchdog）
+   │    `[v0.0.337]` H2：connect 失败 catch 补 killProcessGroup(transport.pid) + killOrphanMcpWatchdog（win32 跳过，best-effort）
+   ├─ 成功：组装 instance：{ key, mode:'attach', sessionId, session, mcpPid, state:'ready' }
+   │    env.ledger.insert({ key, mode:'attach', worker_pid: mcpPid, created_at })   // `[v0.0.334]` attach 入台账
+   │    返回 {ok:true, text:'launched attach'}
+   └─ 失败（`[v0.0.337]` H9）：r.spawnPid !== undefined → env.ledger.insert({key, mode:'attach', workerPid: r.spawnPid, createdAt: now})
+        —— **insert 不 delete**：进程可能残留（driver 清理失败的极端场景），留台账给启动自检 cleanupOrphan 回收；
+        下次成功 launch INSERT OR REPLACE 覆盖同 key；启动自检 kill 已死 pid no-op + delete 无害；insert 失败 warn 不阻断 return error
 ```
 
 **mode①②（worker-based）**：
 ```
 browser(mode='managed-profile', action='launch', profileName='x')
 → InstanceManager.launch(sessionId, {mode, profileName})
-   ├─ key = sessionId:managed-profile:x
-   ├─ instances.get(key) 且 state=ready → 复用，返回 {ok:true, text:'reuse profile x'}
+   ├─ key = sessionId:managed-profile（`[v0.0.330]` 三模式统一，profileName 不进 key）
+   ├─ instances.get(key) 且 state=ready → 复用，返回 {ok:true, text:'reuse managed-profile (profile: x)'}（文本用 handle 存的首次 profileName，不读 opts——`[v0.0.330]` D-B）
    ├─ 无/starting/dead → 清理旧 instance（若有）→ 创建：
    │    userDataDir = resolveUserDataDir(dataDir, profileName)   // managed-profile
    │    cdpPort = allocateCdpPort(usedPorts) + usedPorts.add(cdpPort)
    │    spawn 持久 worker（node，detached）→ 记录 workerPid
    │    stdin 写 {requestId:0, action:'launch', launch:{executablePath,userDataDir,cdpPort,headless,persistent:true}}
    │    等 launch 确认帧（worker 内 launchChromeAndConnect 成功）→ state=ready；`[v0.0.272]` 确认帧携带 chromePid（browser.process()?.pid）→ handle.chromePid
-   │    persistInstance(instance)  // 写实例记录文件（开机自检/残留清理的锚点；`[v0.0.272]` 起含 chromePid）
+   │    persistInstance(instance)  // `[v0.0.334]` → env.ledger.insert（sqlite 台账；`[v0.0.272]` 起含 chromePid）
    └─ 返回 {ok:true, text:'launched profile x'}
 ```
 
-- 失败：launch 帧 `ok:false` 或 worker exit → state=dead，返回 {ok:false, error}（profile_in_use 等原样透传）；**失败路径同样要释放端口 + 删临时目录（headless）**；attach 失败（门禁/connect）不落 map、不持久化。
-- **幂等**：已 ready 的 launch 复用（不重复 spawn / connect）。
+- 失败：launch 帧 `ok:false` 或 worker exit → state=dead，返回 {ok:false, error}（profile_in_use 等原样透传）；**失败路径同样要释放端口 + 删临时目录（headless）**；attach 失败（门禁/connect）不落 map，但 `[v0.0.337]` H9 connect 失败且 spawnPid 存在时**入台账**（insert 不 delete，留给启动自检回收；门禁失败不 spawn 无 pid 不入账）。
+- **幂等**：已 ready 的 launch 复用（不重复 spawn / connect）。**同 session 同 mode 重复 launch（即使 profileName 不同）= 复用已有实例，不换 profile**（`[v0.0.330]` 老板语义：创建后使用/关闭只需 mode）；想换 profile 先 close 再 launch。
 
 ### 4.2 action 执行（navigate/snapshot/click/...）
 
@@ -144,9 +157,12 @@ browser(mode='attach', action='navigate', url='...')
    ├─ 前置校验①：assertReadyInstance（无 instance/非 ready → no_browser_instance 引导先 launch）
    ├─ 前置校验②：idle check（同 mode①②）
    ├─ registry.get('attach') = AttachModeImpl.execute → dispatchAction(session, action, params, ctx)
-   │    ├─ 失活检测：isAttachConnectionLost(文本) → 置 handle.state='dead' + 返回 {ok:false, error:{kind:'attach_lost', message:'连接已断开（Chrome 可能被关闭），请重新 launch'}}
+   │    ├─ 失活检测：isAttachConnectionLost(文本) → 置 handle.state='dead' + **impl 即时清账（`[v0.0.334.fix]` Bug2 计数虚高根治）**：
+   │    │   ① `env.ledger.delete(handle.key)`（sqlite 台账同步删；try/catch best-effort，失败 warn 不阻断）
+   │    │   ② `env.discardInstance?.(handle.key)`（内存 instances Map 即时摘表——`size`/`listAll` 实时准确）
+   │    │   语义：attach 失活 = Chrome 已被关、MCP 连接已断，资源实际已死，无需等 close 惰性兜底（旧 manager.execute 兜底只在「同 key 再次 execute」才触发，失活后用户不再操作 → 残留虚高）。env 来源：launch 缓存（ModeImpl.execute 接口无 env 参数，AttachModeImpl 单例缓存安全）。两操作均幂等（后续 closeInstance 兜底再删 no-op）。MUST NOT 调 disconnectAttachSession（连接已断，重复 disconnect 无意义）。返回 {ok:false, error:{kind:'attach_lost', message:'连接已断开（Chrome 可能被关闭），请重新 launch'}}
    │    └─ 非失活错误/成功 → 原样透传（screenshot 落盘在 impl 内经 ctx.snapshot）
-   └─ manager 收尾：execute 返回后 state==='dead' → closeInstance（impl.close = disconnect + 删条目）
+   └─ manager 收尾（防御 catch `[v0.0.336]`）：execute 返回后 state==='dead' → closeInstance（impl.close = disconnect + 删条目）——impl 已即时清账后此处退化为防御兜底（重复删 no-op）
 ```
 
 **mode①②（worker-based）**：
@@ -168,18 +184,32 @@ browser(mode='managed-profile', action='navigate', url='...', profileName='x')
 ```
 browser(mode='managed-profile', action='close', profileName='x')
 → InstanceManager.close(sessionId, {mode, profileName})
-   ├─ 无 instance → 幂等 {ok:true, text:'no instance'}
+   ├─ 无 instance → {ok:false, error:{kind:'no_browser_instance', message:'当前会话没有 {mode} 浏览器实例，请先调用 browser(action="launch")'}}（`[v0.0.330]` D-C，不再静默 no-op）
    ├─ 有 → 发 close 帧（worker kill chrome）→ 等 exit（3s 超时 killProcessGroup 兜底）
    ├─ 清理（三要素，全路径必达）：
    │    ① 进程：killProcessGroup(workerPid) 兜底（close 帧失败/超时）
    │    ② 目录：headless → rmSync(userDataDir, {recursive:true, force:true})
    │    ③ 端口：usedPorts.delete(cdpPort)
-   └─ 删 map 条目 + unpersistInstance(key)（删实例记录文件条目），返回 {ok:true}
+   └─ 删 map 条目 + env.ledger.delete(key)（`[v0.0.334]` 硬删台账），返回 {ok:true, text:'closed'}（impl.close 返回提示文本时透传）
 ```
 
-- **attach 的 close = disconnectAttachSession**（`[v0.0.266]`）：`close(mode='attach')` → attachDriver.disconnect（graceful client.close + transport.close kill MCP 进程），**不杀用户 Chrome / 不删目录 / 不释放端口 / 不持久化**；失败 catch 记 warn 仍删条目（幂等释放）。
-- **幂等**：close 后同 key 再 close → no instance；已 dead 的 instance close 也走清理路径（防半清理残留）。
-- **清理失败不静默**：killProcessGroup / rmSync / 删记录 catch 后记 warn（防泄漏可观测），但 close 仍返回 ok（用户视角关闭完成）。
+- **`[v0.0.336]` close 三层一致（老板定调：风雨无阻、无条件清干净 + 诚实上报）**：
+  - **真实资源层**（进程/连接）+ **记录层**（driver cache + sqlite 台账）+ **感知层**（不谎报）三层同步清，任何一步失败**不中断整体清理**（try/catch best-effort 全清），但**失败要收集最终诚实上报**。
+  - `ModeImpl.close` 返回类型升级为 **`CloseResult`**：`{ok:true, text?}` 清理成功（text 为残留引导提示，无则 manager 输出 'closed'）/ `{ok:false, error:{kind?, message}}` 清理失败（任一清理步骤失败 → kind='close_incomplete'，message 汇总各步失败）。
+  - `closeInstance`：impl.close 返回 ok=false 或抛错 → **不删 instances**（保留表项让调用方知状态未归零，可重试 close）+ 记 warn；manager.close catch → 返回 `{ok:false, error:{kind:'close_incomplete', message:'close 清理不完整（实例保留可重试）: ...'}}`，不穿透调用方。
+  - **防御 catch（`[v0.0.336]` 独立复审裁决）**：execute 失活收尾 / idle timeout 两处 closeInstance 调用补 try/catch——清理失败不逃逸出 execute/assertReadyInstance（catch 住保留表项可重试），仍返回原预期文案（attach_lost / worker_crashed / idle_timeout），不降级 RUNTIME_ERROR。
+  - worker-mode-impl close 适配 `{ok:true}`；幂等语义不变。
+
+- **attach 的 close = 断 MCP + 杀进程组 + 台账硬删 + 检测调试态残留**（`[v0.0.266]` 断连接 → `[v0.0.330]` Delta 3 升级 → `[v0.0.334]` 恒检测 + 台账 delete → `[v0.0.336]` 显式回收进程组）：`close(mode='attach')` 按序执行（每步 try/catch best-effort，失败收集进 failures[]）：
+  1. **断 MCP 连接**：attachDriver.disconnect（graceful client.close + transport.close kill MCP 主进程；`[v0.0.336]` 传 userDataDir 与 connect 同解析 → driver cache key 对称正常清 cache）；
+  2. **杀 mcp 主进程组**：`ah.mcpPid` 已知且存活 → `killProcessGroupByPid(ah.mcpPid)`（SIGKILL 当场死，不等 SDK 4s 优雅窗）；
+  3. **兜底杀 detached watchdog**：`killOrphanMcpWatchdog(ah.mcpPid)`（watchdog detached 独立进程组，killProcessGroupByPid 杀不到；按 `--parent-pid=<mcpPid>` 精确 `pkill -9 -f`，不误杀其他会话/模式 mcp；仅 POSIX，win32 跳过）；
+  4. **硬删台账**：env.ledger.delete(handle.key)（`[v0.0.334]` B9，幂等）；
+  5. **残留检测（只读）**：`detectChromeDebugResidual()`（见 `[P1]browser_tool.md §4.2`）——检测到调试态残留（9222 监听）→ tip 引导文本（chrome://inspect 取消 Allow remote debugging / 重启 Chrome）；检测失败降级无提示。
+  - **不杀用户 Chrome / 不删目录 / 不释放端口** 语义不变；`AttachKillDeps` DI 注入（isPidAlive/killProcessGroup/execPkill，UT mock 不真杀进程）。
+- **close 返回提示透传**（`[v0.0.330]` D3-A/D3-D → `[v0.0.336]` CloseResult）：`ModeImpl.close` 返回类型 `Promise<void>` → `Promise<string | void>`（`[v0.0.330]`）→ `Promise<CloseResult>`（`[v0.0.336]`）；closeInstance/close 收集 impl 返回文本，ok=true 有 text → `text` 用之，无 → 保持 'closed'；ok=false → 报 close_incomplete。releaseSession/releaseAll 同路径透传（异常路径提示不丢失）。
+- **幂等**：有实例重复 close 仍幂等（impl.close 幂等兜底）；close 后同 key 再 close → 无实例报错提示先 launch（`[v0.0.330]` D-C）；已 dead 的 instance close 也走清理路径（防半清理残留）。
+- **清理失败不静默（`[v0.0.336]` 升级）**：killProcessGroup / pkill / ledger.delete 等任一步 catch 后仍继续后续清理（全清），但收集进 failures[] 最终 ok=false 诚实上报（防「close 没清干净却报成功」）；用户视角收到 close_incomplete 错误而非假 closed。
 
 ### 4.4 session 结束兜底
 
@@ -189,7 +219,7 @@ browser(mode='managed-profile', action='close', profileName='x')
 if (deps.browserInstanceManager) await deps.browserInstanceManager.releaseSession(id).catch(...);
 ```
 
-- `releaseSession(sessionId)`：kill 该 session 全部 instance（key 前缀匹配 `sessionId:`，含 attach 的 `sessionId:attach`），幂等。**mode①② 每个 instance 走与 close 相同的三要素清理**（killProcessGroup + headless rmSync + usedPorts.delete + 删记录）；**attach 走 disconnectAttachSession**（断 MCP 连接，不杀用户 Chrome）。
+- `releaseSession(sessionId)`：kill 该 session 全部 instance（key 前缀匹配 `sessionId:`，含 attach 的 `sessionId:attach`），幂等。**mode①② 每个 instance 走与 close 相同的三要素清理**（killProcessGroup + headless rmSync + usedPorts.delete + 删记录）；**attach 走断 MCP + 杀 mcp 进程组 + watchdog 兜底 + 残留检测提示**（`[v0.0.330]` 与 close 同路径，经 closeInstance 透传 impl 文本，见 §4.3；`[v0.0.336]` 与 close 同 5 步流程 + CloseResult 诚实上报）。
 
 ### 4.5 idle timeout（配套机制，防资源泄漏）
 
@@ -210,13 +240,26 @@ InstanceManager 挂两个 shutdown hook（对齐现有 bootstrap 模式）：
 
 ### 4.7 开机自检 / 残留清理（MUST）
 
-**持久化 instance 记录**（服务崩溃后残留可被发现）：
-- 文件：`<dataDir>/browser-instances.json`（JSON 数组，同步 writeFileSync，单进程无并发问题）。
-- 记录内容：`[{ key, mode, profileName?, userDataDir, cdpPort, workerPid, createdAt, chromePid? }]`（`[v0.0.272]` 起持久化 chromePid，旧记录无该字段允许）。
-- 写时机：launch ready → persistInstance（append + 重写）；close / releaseSession / releaseAll → unpersistInstance（移除 + 重写）。写失败 catch 吞错（best-effort，不阻塞主流程）。
+**持久化 instance 台账（`[v0.0.334]` sqlite 表替换 browser-instances.json）**：
+- 库文件：`<dataDir>/browser.sqlite`（复用 `createSqlDriver`：dev=BunSqlDriver(bun:sqlite) / packaged=NodeSqlDriver(node:sqlite) / better-sqlite3 fallback——PACKAGED-GUARD 已解决双运行时，不引新依赖）。
+- 表 `browser_instances`（`BrowserInstanceLedger` 构造 `CREATE TABLE IF NOT EXISTS`）：
+  ```sql
+  CREATE TABLE IF NOT EXISTS browser_instances (
+    key TEXT PRIMARY KEY,          -- `${sessionId}:${mode}`
+    mode TEXT NOT NULL,            -- headless | managed-profile | attach
+    profile_name TEXT,
+    user_data_dir TEXT,            -- mode①②（headless 临时目录 / managed 持久目录）
+    cdp_port INTEGER,              -- mode①②
+    worker_pid INTEGER NOT NULL,   -- mode①② worker 进程 / attach MCP 子进程（`[v0.0.334]`）
+    chrome_pid INTEGER,            -- mode①②（`[v0.0.272]` 起）
+    created_at INTEGER NOT NULL
+  );
+  ```
+- 生命周期：launch ready → `insert`（INSERT OR REPLACE）；close / releaseSession / releaseAll / cleanupOrphan → **硬删 `delete`（DELETE 非 soft delete）**——表保持小规模；启动自检 = `listAll()` 逐条清理 → `clearAll()`（启动无合法实例，全部记录=残留，一次性清空）。
+- 写失败 catch 吞错（best-effort，不阻塞主流程；对齐旧 instance-record 语义）。
 
-**构造时自检 = 记录 + 扫描双源（`[v0.0.272]` 起）**：
-- **① 记录源（同步）**：`readPersistedInstances()` → 每条记录：① `isPidAlive(workerPid)`（process.kill(pid,0) catch ESRCH）② alive → `killProcessGroup(workerPid)`（清残留 chrome 树）③ headless → `rmSync(userDataDir, {recursive:true, force:true})`（managed-profile 不删用户数据）④ 删记录。`[v0.0.272]` 起 cleanupOrphan 优先精确杀 `rec.chromePid` 组（detached 独立组；负 pid 杀全家含 worker），旧记录无 chromePid 退回杀 workerPid 组。
+**构造时自检 = 台账 + 扫描双源（`[v0.0.272]` 起 + `[v0.0.334]` 台账数据源）**：
+- **① 台账源（同步）**：`ledger.listAll()` → 每条记录：① `isPidAlive(workerPid)`（process.kill(pid,0) catch ESRCH；attach 记录 workerPid=MCP 子进程 pid）② alive → `killProcessGroup(workerPid)`（清残留 chrome 树 / MCP 代理）③ headless → `rmSync(userDataDir, {recursive:true, force:true})`（managed-profile 不删用户数据）④ 硬删 `ledger.delete(key)`。`[v0.0.272]` 起 cleanupOrphan 优先精确杀 `rec.chromePid` 组（detached 独立组；负 pid 杀全家含 worker），旧记录无 chromePid 退回杀 workerPid 组。处理完 `ledger.clearAll()`（启动无合法实例，全部记录=残留，一次性清空）。
 - **② 扫描源（异步 fire-and-forget）**：构造器末尾 `void this.reconcileOrphans().catch(warn)`——全量扫描 rocky marker chrome，diff 活跃集合回收孤儿（见 §4.9）。覆盖泄漏面 A「无记录孤儿」（persist 失败/异常路径）。
 
 - **为什么安全**：服务启动时无合法 instance（纯内存态），所有持久化记录 = 上次崩溃/强杀残留 = 孤儿，一律清理；扫描源只认 rocky marker（白名单），用户主 Chrome 零接触。
@@ -252,7 +295,7 @@ InstanceManager 挂两个 shutdown hook（对齐现有 bootstrap 模式）：
 
 **活跃集合（reconcileOrphans）**：遍历 `this.instances.values()`（**含 starting/closing 态**——launch/close 中 chrome 也算活跃，防误杀）+ 持久化记录同字段（workerPid + chromePid）。
 
-**回收**（对每个孤儿候选）：`killProcessGroupByPid(proc.pid)`（chrome 组长负 pid 杀全家）+ 按 cmdline 提取 rocky userDataDir `rmSync`（rmSync 前二次验证 rocky marker 前缀防误删）+ 匹配记录 `unpersistInstance` + `console.warn` 记录 pid/ppid。单项失败 catch warn 不中断（best-effort）。
+**回收**（对每个孤儿候选）：`killProcessGroupByPid(proc.pid)`（chrome 组长负 pid 杀全家）+ 按 cmdline 提取 rocky userDataDir `rmSync`（rmSync 前二次验证 rocky marker 前缀防误删）+ 匹配记录 `ledger.delete`（`[v0.0.334]` 台账硬删）+ `console.warn` 记录 pid/ppid。单项失败 catch warn 不中断（best-effort）。
 
 **触发时机**：
 - 启动：cleanupOrphans（记录同步）+ 构造器末尾 fire-and-forget reconcileOrphans（扫描兜底，不阻塞构造）。
@@ -272,7 +315,7 @@ InstanceManager 挂两个 shutdown hook（对齐现有 bootstrap 模式）：
 | action | 适用 mode | 语义 |
 |--------|-----------|------|
 | `launch` | headless / managed-profile / attach | 启动/复用 instance（mode①② spawn worker；attach = ChromeMcpDriver.connect，幂等复用）`[v0.0.266]` |
-| `close` | headless / managed-profile / attach | 关闭 instance（mode①② 三要素清理）；attach 等价 disconnect（不杀用户 Chrome）`[v0.0.266]` |
+| `close` | headless / managed-profile / attach | 关闭 instance（mode①② 三要素清理）；attach 断 MCP + 检测调试态残留并提示（不杀用户 Chrome）`[v0.0.266]` → `[v0.0.330]` 残留检测 + 无实例报错 |
 
 ### 5.2 工具调用前置校验（用户铁律）
 
@@ -281,9 +324,9 @@ InstanceManager 挂两个 shutdown hook（对齐现有 bootstrap 模式）：
 
 ### 5.3 instance 与 tool_call 匹配
 
-- **按 session+mode 自动匹配**（不加 action 参数）：key = `sessionId:mode[:profileName]`。
-- managed-profile 需 profileName 参数（action 参数里已有）；headless 无 profileName。
-- 用户意图「每 session 每类型最多一个」→ key 天然保证。
+- **按 session+mode 自动匹配**（不加 action 参数）：key = `sessionId:mode`（`[v0.0.330]` 三模式统一；profileName 由 handle 承载，后续 execute/close 无需重传；`[v0.0.334]` -cdpUrl）。
+- managed-profile 的 profileName 仅 launch 初始化参数（handle 存首次值，复用/execute/close 均不依赖 opts.profileName）；headless 无 profileName。
+- 用户意图「每 session 每 mode 最多一个」→ key 天然保证。
 
 ## 6. worker 协议改造（单次 → 循环）
 
@@ -325,7 +368,7 @@ main():
 |------|--------|------|
 | 无 instance 调 action | execute 前置校验（assertReadyInstance，三模式共用） | `no_browser_instance` + 提示先 launch |
 | launch 失败（profile_in_use / chrome 启动失败） | launch 帧 ok:false | 原样透传错误 kind |
-| attach 失活（CDP 断线/chrome 被关） | attach impl execute 内 isAttachConnectionLost | `attach_lost` + 置 dead + manager 收尾 disconnect + 提示重新 launch |
+| attach 失活（CDP 断线/chrome 被关） | attach impl execute 内 isAttachConnectionLost | `attach_lost` + 置 dead + **impl 即时清账（ledger.delete + discardInstance，best-effort 幂等）** + manager 收尾 disconnect（防御 catch）+ 提示重新 launch |
 | worker 崩溃 | pending reject / 状态检测 | `worker_crashed` + 提示重新 launch |
 | action 超时 | WORKER_TIMEOUT_MS | `cdp_timeout` + kill instance |
 | idle 超时 | execute idle check | `idle_timeout` + 提示重新 launch |
@@ -333,10 +376,10 @@ main():
 
 ## 8. 边界与限制（v0.0.264 + `[v0.0.266]`）
 
-- **attach 已纳入 InstanceManager**（`[v0.0.266]`；T3 registry 重构）：launch=connect / 操作经 execute 统一路由（AttachModeImpl 内 dispatch + 失活自愈 attach_lost）/ close=disconnect 不杀用户 Chrome；manager 零 mode 分叉、不读 handle 私有字段。ConnectorManager 瘦身为 switch 门禁 + UI 状态。
+- **attach 已纳入 InstanceManager**（`[v0.0.266]`；T3 registry 重构；`[v0.0.330]` close 升级）：launch=connect / 操作经 execute 统一路由（AttachModeImpl 内 dispatch + 失活自愈 attach_lost）/ close=断 MCP + 检测调试态残留并返回引导提示（不杀用户 Chrome）；manager 零 mode 分叉、不读 handle 私有字段。ConnectorManager 瘦身为 switch 门禁 + UI 状态。
 - **web_fetch 不受影响**：executeOnce 保留，一次性渲染。
 - **headless 也常驻**：用户意图「每类型一个」——headless 实例 launch 后常驻（临时目录在 close/session 结束时清理）。
-- **instance 纯内存态 + 记录文件**：运行时实例全在内存（服务重启即清，下次 launch 重建）；仅持久化 `browser-instances.json` 记录（供开机自检/残留清理，非运行时状态）。
+- **instance 纯内存态 + 台账表（`[v0.0.334]` sqlite 替换记录文件）**：运行时实例全在内存（服务重启即清，下次 launch 重建）；仅持久化 sqlite 台账 `browser_instances`（供开机自检/残留清理，非运行时状态；launch insert / close 硬删 / 启动 clearAll；attach MCP 子进程入台账）。
 - **单 worker 单任务**：串行处理（一次一个 action），对齐 executeOnce 串行语义。
 - **不做 cross-session 共享**：instance 严格 owner 隔离（key 含 sessionId）。
 
@@ -345,7 +388,7 @@ main():
 | 文件 | 操作 | 变更内容 |
 |------|------|---------|
 | `app/server/src/tools/browser/instance-manager.ts` | 新增 | `BrowserInstanceManager` 类：instances Map + launch/execute/close/releaseSession/releaseAll + idle check + **泄漏防护四件套**（killProcessGroup / headless rmSync / usedPorts.delete / persist-unpersist 记录）+ 构造时开机自检 + beforeExit/SIGTERM/SIGINT shutdown hook |
-| `app/server/src/tools/browser/instance-record.ts`（新） | 新增 | `browser-instances.json` 读写：`readPersistedInstances()` / `persistInstance(rec)` / `unpersistInstance(key)` / `isPidAlive(pid)`（process.kill(pid,0) catch ESRCH）——同步 writeFileSync + catch 吞错 |
+| `app/server/src/tools/browser/instance-ledger.ts`（新，`[v0.0.334]`） | 新增 | `BrowserInstanceLedger`：sqlite 台账表 `browser_instances` 读写（建表幂等 / insert OR REPLACE / delete 硬删 / listAll / clearAll），复用 `createSqlDriver`（dev=bun:sqlite / packaged=node:sqlite）——替换 instance-record.ts 的 JSON 文件读写 |
 | `app/server/src/tools/browser/worker-entry.ts` | 修改 | 单次执行器 → 循环服务：launch 后保持，循环读 stdin 任务，close/stdin-end 退出 |
 | `app/server/src/tools/browser/worker-actions.ts` | 修改 | `dispatchAction` 增 `state: WorkerSessionState` 参数，lastRefs 跨调用保持 |
 | `app/server/src/tools/browser/browser-worker.cjs` | 修改 | 编译产物（build 重新生成） |
@@ -396,4 +439,4 @@ main():
 5. **worker 常驻 + 跨 action lastRefs**：click/type 的 ref 跨 tool_call 有效（同 instance 内）。
 6. **NodeWorkerDriver.executeOnce 保留**（web_fetch 依赖，不破坏）。
 7. **attach 纳入 InstanceManager**（`[v0.0.266]`；T3 registry 重构）：attach 与 headless/managed-profile 三模式统一 launch/close/前置校验；T3 起 attach 操作也统一走 execute（registry 路由 AttachModeImpl，impl 内 dispatch + 失活自愈 attach_lost + screenshot 落盘），零 mode 分叉；M1「execute 拒绝 attach」防御分支下线。
-8. **泄漏防护闭环**：进程（killProcessGroup）/ 目录（headless rmSync）/ 端口（usedPorts.delete）/ 锁（ensureProfileFree 清僵尸）四类泄漏各有正常路径清理 + 崩溃路径兜底（shutdown hook releaseAll + 开机自检扫残留）；持久化 `browser-instances.json` 记录是残留可发现性的锚点。
+8. **泄漏防护闭环**：进程（killProcessGroup）/ 目录（headless rmSync）/ 端口（usedPorts.delete）/ 锁（ensureProfileFree 清僵尸）四类泄漏各有正常路径清理 + 崩溃路径兜底（shutdown hook releaseAll + 开机自检扫残留）；持久化 sqlite 台账 `browser_instances` 是残留可发现性的锚点（`[v0.0.334]` 替换 browser-instances.json，attach MCP 子进程入台账）。

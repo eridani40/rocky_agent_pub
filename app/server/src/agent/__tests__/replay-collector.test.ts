@@ -108,7 +108,7 @@ describe('ReplayCollector tool_call 重组', () => {
     expect(tc.arguments).toEqual({ path: 'a.ts' });
   });
 
-  it('半截 tool_call（start+delta 无 end，buf 是不完整 JSON）→ arguments 兜底 {_raw}', () => {
+  it('半截 tool_call（start+delta 无 end，buf 是不完整 JSON）→ arguments 兜底 {_raw, _rawTruncated:true}', () => {
     const c = new ReplayCollector();
     const mid = 'm1';
     c.consume(msgStart(mid));
@@ -119,7 +119,8 @@ describe('ReplayCollector tool_call 重组', () => {
     expect(partials).toHaveLength(1);
     const tc = partials[0]!.blocks[0] as ToolCallBlock;
     expect(tc.type).toBe('tool_call');
-    expect(tc.arguments).toEqual({ _raw: '{"path":"a.ts","cont' });
+    // [v0.0.331 P1'] _rawTruncated 标记（前端 D3 显示「发送失败（参数截断）」）
+    expect(tc.arguments).toEqual({ _raw: '{"path":"a.ts","cont', _rawTruncated: true });
   });
 
   it('tool_call_start 后零 delta（无 buf）→ arguments 兜底 {}', () => {
@@ -134,6 +135,41 @@ describe('ReplayCollector tool_call 重组', () => {
     expect(tc.type).toBe('tool_call');
     expect(tc.name).toBe('ls');
     expect(tc.arguments).toEqual({});
+  });
+
+  it('[v0.0.331 P1] send_message 缺 type 的 arguments → 落库后 content 补 type:"text"（缺 type 不空白）', () => {
+    const c = new ReplayCollector();
+    const mid = 'm1';
+    c.consume(msgStart(mid));
+    c.consume(evt('tool_call_start', { messageId: mid, blockId: 'b1', toolCallId: 'tc1', toolName: 'send_message' }));
+    c.consume(evt('tool_call_delta', { messageId: mid, blockId: 'b1', toolCallId: 'tc1', delta: '{"target":"leader","content":[{"text":"hi"}]}' }));
+    c.consume(evt('tool_call_end', { messageId: mid, blockId: 'b1', toolCallId: 'tc1' }));
+
+    const partials = c.reconstitutePartials();
+    expect(partials).toHaveLength(1);
+    const tc = partials[0]!.blocks[0] as ToolCallBlock;
+    expect(tc.type).toBe('tool_call');
+    expect(tc.name).toBe('send_message');
+    // 缺 type 的 block 被 normalize 补 type:'text'（前端 envelope 提取不再空白）
+    expect(tc.arguments).toEqual({
+      target: 'leader',
+      content: [{ type: 'text', text: 'hi' }],
+    });
+  });
+
+  it('[v0.0.331 P1] send_message 半截 _raw（解析失败）→ 不 normalize（保留 _raw + _rawTruncated）', () => {
+    const c = new ReplayCollector();
+    const mid = 'm1';
+    c.consume(msgStart(mid));
+    c.consume(evt('tool_call_start', { messageId: mid, blockId: 'b1', toolCallId: 'tc1', toolName: 'send_message' }));
+    c.consume(evt('tool_call_delta', { messageId: mid, blockId: 'b1', toolCallId: 'tc1', delta: '{"target":"leader","cont' }));
+
+    const partials = c.reconstitutePartials();
+    expect(partials).toHaveLength(1);
+    const tc = partials[0]!.blocks[0] as ToolCallBlock;
+    expect(tc.name).toBe('send_message');
+    // _raw 半截路径：不补 content，保留标记
+    expect(tc.arguments).toEqual({ _raw: '{"target":"leader","cont', _rawTruncated: true });
   });
 });
 

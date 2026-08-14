@@ -222,6 +222,31 @@ export async function computeReadFileBinary(
   }
 }
 
+/**
+ * [v0.0.339] stat 绝对路径文件 → { size }（文件大小判定，供前端打开分流）。
+ * 接收**已展开的绝对路径**。只 stat 不读内容（大文件不加载）。
+ * ENOENT / EACCES / 异常均返 ok=false + reason 不抛；fs.stat 缺省 → ok=false reason='stat-unavailable' 防御。
+ *
+ * @param fs 注入的 FsLike（stat 已声明可选；此处必用）
+ */
+export async function computeFileStat(
+  absPath: string,
+  fs: FsLike,
+): Promise<{ ok: boolean; size?: number; reason?: string }> {
+  try {
+    if (typeof fs.stat !== 'function') {
+      return { ok: false, reason: 'stat-unavailable' };
+    }
+    const st = await fs.stat(absPath);
+    return { ok: true, size: st.size };
+  } catch (e) {
+    const code = (e as { code?: string } | undefined)?.code;
+    if (code === 'ENOENT') return { ok: false, reason: 'not-found' };
+    if (code === 'EACCES') return { ok: false, reason: 'permission-denied' };
+    return { ok: false, reason: errText(e) };
+  }
+}
+
 // —— Electron 主进程接线（仅运行时 require electron / fs，不进 UT）——
 
 /**
@@ -263,5 +288,11 @@ export function registerOpenExternalIpc(): void {
     const resolved = computeResolveLocalPath(args.path, home);
     if (!resolved.ok) return { ok: false, reason: resolved.reason };
     return computeReadFileBinary(resolved.absPath!, fs);
+  });
+  // [v0.0.339] stat 绝对路径文件 → { size }（文件大小判定，供前端打开分流）
+  ipcMain.handle('shell:stat', (_e: unknown, args: { path: string }) => {
+    const resolved = computeResolveLocalPath(args.path, home);
+    if (!resolved.ok) return { ok: false, reason: resolved.reason };
+    return computeFileStat(resolved.absPath!, fs);
   });
 }

@@ -3,7 +3,7 @@ type: spec
 title: Mention Search API 设计
 priority: P0
 status: active
-updated: 2026-07-15
+updated: 2026-08-14
 since: v0.0.45
 ---
 
@@ -137,12 +137,13 @@ try {
 
 ## 5. 性能考量
 
-- **FileProvider**：递归遍历 workspaceDir（排除 node_modules/.git），文件名包含匹配。预期 <10000 文件时延迟 <100ms。大 workspace 可通过 limit/cursor 分页控制单次返回量。
+- **FileProvider**：**v0.0.346 起收敛为 workspace-search-core 的适配层**——`search()` 调 `searchWorkspace(ctx.workspaceDir, ctx.query)`（`app/server/src/search/workspace-search-core.ts`），与工作区搜索端点（`GET /session/:id/workspace/search`）**共用同一遍历/排除/上限核心**（IGNORED_NAMES 单一源在 `session-workspace.ts`，排除仅 node_modules/.git）。命中集合 = 文件 + 目录（目录命中不递归其下层），files+dirs ≥ 100 早停 → `truncated: true`；目录条目复用 `type='file'` + `path=目录相对路径`。**v0.0.346-2 起目录条目带 `isDir:true` + `listView.icon='folder'`**（文件条目 isDir 缺省 + `icon='file'`）；`subtitle` 根路径（dirname='.'）渲染 `'/'` 始终展示；`display.icon` 保持 `'file'`（pill 不区分，防历史消息不一致）。FileProvider 原 5s 超时兜底移除（100 早停保障），点开头不再排除（仅 IGNORED_NAMES）。
 - **SkillProvider**：`SkillResolver.resolve()` 全量枚举 + 模糊匹配。skill 数量预期小（数十个），无性能问题。
 - **Registry 实例复用**：Registry 在 bootstrap 阶段单例创建，handler 层共享引用，无重复初始化开销。
 
 ## 6. 未决事项
 
-1. **workspace 文件搜索的 debounce**：前端输入每个字符都触发 search API，大 workspace 可能产生大量请求。后续可在前端加 200ms debounce 或在 server 加请求取消。
+1. ~~**workspace 文件搜索的 debounce**~~（v0.0.346 决策：不强制统一，保持现状——@ 搜索 200ms 面板内实时反馈，工作区搜索 500ms（v0.0.328 已从 300 调 500）。场景不同，改工作区防抖有回归风险。）
 2. **搜索结果排序**：首版按文件名匹配顺序返回（无权重排序）。后续可加「最近使用」「收藏」等排序维度。
 3. **SkillProvider workspace scope 过滤**：不同 sessionType 是否需要差异化 skill 可见集（如群聊只展示全局 skill）。首版返回全量可见 skill。
+4. **缓存索引不引入**（v0.0.346 决策）：实时遍历 + 100 上限早停已控成本（与工作区搜索现状一致，无索引）；共享索引需文件变更失效（watch 集成）复杂度高、收益低。

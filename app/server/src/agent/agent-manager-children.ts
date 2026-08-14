@@ -236,6 +236,11 @@ export interface ManagerChildrenOps {
    *   生产环境指向同一 SessionStore.getSession。
    */
   getFullSession(sessionId: string): Promise<import('./session-store-types').Session | null>;
+  /**
+   * [v0.0.340 决策 1] 可选 memberStore——enrich sender 名反查注入面（squad 成员 sender
+   *   反查实时名，不读 session.title 快照）。缺省 undefined → 不反查（行为不变）。
+   */
+  memberStore?: import('../stores/squad-store').MemberStore;
 }
 
 /**
@@ -250,6 +255,7 @@ export async function managerDeliverTo(
 ): Promise<AgentRun & { enqueueId: string }> {
   // [v0.0.31 task-2] deliverTo 内部 enqueue 前调 enrichForInbox（source='agent' 反查补全 sender.agent.ref）。
   //   lookup 用 ops.getFullSession（生产指向 SessionStore.getSession）。
+  //   [v0.0.340 决策 1] ops.memberStore 可选——注入则 squad 成员 sender 反查实时名（缺省不反查）。
   return deliverTo(
     {
       enqueue: ops.enqueue,
@@ -257,7 +263,10 @@ export async function managerDeliverTo(
     },
     sessionId,
     message,
-    { getSession: ops.getFullSession },
+    {
+      getSession: ops.getFullSession,
+      ...(ops.memberStore ? { memberStore: ops.memberStore } : {}),
+    },
   );
 }
 

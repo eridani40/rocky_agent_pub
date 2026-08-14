@@ -5,13 +5,13 @@
  *       change_plan v0.0.266 Delta（T3：操作 action 统一 execute，零 mode 分叉）
  *
  * 覆盖：
- *   - attach launch/close → im.launch/im.close（cdpUrl 透传）
+ *   - attach launch/close → im.launch/im.close（v0.0.334 删 cdpUrl，仅 {mode}）
  *   - 操作类 action（attach/headless/managed-profile 三模式统一）→ im.execute 路由
  *     （attach 失活自愈/非失活错误/未知 action 均由 impl 返回错误 → tool 透传）
  *   - headless/managed-profile：im.launch/im.close/im.execute（v0.0.264 语义不变）
  *   - 无 instanceManager → 未注册 isError（三模式统一 fail-closed）
  *   - screenshot 落盘：经 execute ctx.snapshot（落盘逻辑在 impl，tool 透传路径文本）
- *   - cdpUrl SSRF 门禁（loopback 豁免 / 私网 fail-closed）
+ *   - v0.0.334：desc 无 cdpUrl 字样（含 attach 自动连接 + 前置条件 + 同意流程 + 失败引导 + 安全警告 + 模式路由）
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createBrowserTool } from '../tool';
@@ -47,20 +47,9 @@ describe('browser Tool: attach launch/close（v0.0.266 三模式统一）', () =
     const r = await tool.run({ mode: 'attach', action: 'launch' }, makeCtx('sA'));
     expect(r.isError).toBe(false);
     expect(launch).toHaveBeenCalledTimes(1);
-    expect(launch).toHaveBeenCalledWith('sA', { mode: 'attach' });
+    // H8：launch 分支透传 ctx.signal（无 signal → undefined 第三参）
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'attach' }, { signal: undefined });
     expect((r.content[0] as { text: string }).text).toContain('launched');
-  });
-
-  it('attach launch 带 cdpUrl → im.launch 透传 cdpUrl', async () => {
-    const launch = vi.fn(async () => ({ ok: true, text: 'launched attach' }));
-    const im = makeInstanceManager({ launch });
-    const tool = createBrowserTool({ instanceManager: im });
-    const r = await tool.run(
-      { mode: 'attach', action: 'launch', cdpUrl: 'http://127.0.0.1:9222' },
-      makeCtx('sA'),
-    );
-    expect(r.isError).toBe(false);
-    expect(launch).toHaveBeenCalledWith('sA', { mode: 'attach', cdpUrl: 'http://127.0.0.1:9222' });
   });
 
   it('attach launch switch=off → im.launch 返 not_enabled → isError 引导开启', async () => {
@@ -85,6 +74,23 @@ describe('browser Tool: attach launch/close（v0.0.266 三模式统一）', () =
     expect(r.isError).toBe(false);
     expect(close).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledWith('sA', { mode: 'attach' });
+  });
+
+  it('[v0.0.337 H8] launch 分支透传 ctx.signal；close 分支不透传（清理必完整执行）', async () => {
+    const ac = new AbortController();
+    const ctx = { ...makeCtx('sA'), signal: ac.signal };
+    // launch：ctx.signal 透传 im.launch 第三参 {signal}
+    const launch = vi.fn(async () => ({ ok: true, text: 'launched attach' }));
+    const tool = createBrowserTool({ instanceManager: makeInstanceManager({ launch }) });
+    const r = await tool.run({ mode: 'attach', action: 'launch' }, ctx);
+    expect(r.isError).toBe(false);
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'attach' }, { signal: ac.signal });
+    // close：即使 ctx 有 signal 也不透传（close 是清理动作，被 abort 反而中断清理，三层分裂）
+    const close = vi.fn(async () => ({ ok: true, text: 'closed' }));
+    const tool2 = createBrowserTool({ instanceManager: makeInstanceManager({ close }) });
+    await tool2.run({ mode: 'attach', action: 'close' }, ctx);
+    expect(close).toHaveBeenCalledWith('sA', { mode: 'attach' });
+    expect(close.mock.calls[0]).toHaveLength(2); // 只 2 参（不含 signal）
   });
 });
 
@@ -168,7 +174,8 @@ describe('browser Tool: InstanceManager 常驻（headless/managed-profile，v0.0
     const r = await tool.run({ mode: 'headless', action: 'launch' }, makeCtx('sA'));
     expect(r.isError).toBe(false);
     expect(launch).toHaveBeenCalledTimes(1);
-    expect(launch).toHaveBeenCalledWith('sA', { mode: 'headless' });
+    // H8：launch 分支透传 ctx.signal（无 signal → undefined 第三参）
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'headless' }, { signal: undefined });
     expect((r.content[0] as { text: string }).text).toContain('launched');
   });
 
@@ -181,7 +188,8 @@ describe('browser Tool: InstanceManager 常驻（headless/managed-profile，v0.0
       makeCtx('sA'),
     );
     expect(r.isError).toBe(false);
-    expect(launch).toHaveBeenCalledWith('sA', { mode: 'managed-profile', profileName: 'p1' });
+    // H8：launch 分支透传 ctx.signal（无 signal → undefined 第三参）
+    expect(launch).toHaveBeenCalledWith('sA', { mode: 'managed-profile', profileName: 'p1' }, { signal: undefined });
   });
 
   it('close action → im.close 被调 + ok 透传', async () => {
@@ -289,98 +297,49 @@ describe('browser Tool: 校验失败', () => {
   });
 });
 
-describe('browser Tool: cdpUrl SSRF 门禁（仅非 loopback）', () => {
-  // spec browser_tool §4/§6 + refs/openclaw cdp-reachability-policy:
-  // CDP 控制面 ≠ 页面导航——loopback（127.x/::1/localhost）CDP 豁免 SSRF；
-  // 非 loopback（私网/link-local/file://）仍 fail-closed。
-  it('cdpUrl=127.0.0.1 loopback → SSRF 放行（CDP 控制面豁免）', async () => {
+describe('browser Tool: desc 契约（v0.0.334 删 cdpUrl + 简化重写）', () => {
+  it('definition.description 无 cdpUrl 字样 + 含自动连接/前置条件/同意流程/失败引导/安全警告/模式路由', () => {
     const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'http://127.0.0.1:9222' },
-      makeCtx(),
-    );
-    // loopback 放行——attach 路径无 im → 未注册分支，但关键是不被 SSRF 拦
-    const text = (r.content[0] as { text: string }).text;
-    expect(text).not.toContain('SSRF');
+    const desc = tool.definition.description;
+    expect(desc).not.toContain('cdpUrl');
+    expect(desc).not.toContain('--remote-debugging-port 显式启动');
+    // attach 段：自动连接（无需地址/URL）+ 前置条件 Chrome ≥144 + 同意流程 + 失败引导 + 共享浏览器安全警告
+    expect(desc).toContain('自动连接用户已打开的 Chrome');
+    expect(desc).toContain('无需指定地址/URL');
+    expect(desc).toContain('Chrome ≥144');
+    expect(desc).toContain('Enable remote debugging');
+    expect(desc).toContain('同意 prompt');
+    expect(desc).toContain('升级 Chrome');
+    expect(desc).toContain('用户真实浏览器');
+    expect(desc).toContain('谨慎操作');
+    // 模式路由
+    expect(desc).toContain('我的 chrome→attach');
+    expect(desc).toContain('登录态→managed-profile');
+    expect(desc).toContain('默认→headless');
+    // 保留：三模式示例 + 参数传递铁律 + 未 launch 报错
+    expect(desc).toContain('示例（headless）');
+    expect(desc).toContain('示例（managed-profile）');
+    expect(desc).toContain('示例（attach）');
+    expect(desc).toContain('参数传递铁律');
+    expect(desc).toContain('未 launch 即操作或关闭');
   });
 
-  it('cdpUrl=[::1] loopback → SSRF 放行', async () => {
+  it('inputSchema properties 无 cdpUrl（剩 mode/action/profileName/url/ref/text）', () => {
     const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'http://[::1]:9222' },
-      makeCtx(),
-    );
-    const text = (r.content[0] as { text: string }).text;
-    expect(text).not.toContain('SSRF');
+    const props = tool.definition.inputSchema.properties ?? {};
+    expect(props.cdpUrl).toBeUndefined();
+    expect(Object.keys(props).sort()).toEqual(['action', 'mode', 'profileName', 'ref', 'text', 'url']);
   });
 
-  it('cdpUrl=localhost loopback → SSRF 放行', async () => {
+  it('mode 字段 desc 无 cdpUrl 字样 + 含 attach 自动连接/前置条件/同意流程/安全警告', () => {
     const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'http://localhost:9222' },
-      makeCtx(),
-    );
-    const text = (r.content[0] as { text: string }).text;
-    expect(text).not.toContain('SSRF');
-  });
-
-  it('cdpUrl=10.x 私网 → isError', async () => {
-    const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'http://10.0.0.5:9222' },
-      makeCtx(),
-    );
-    expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('SSRF');
-  });
-
-  it('cdpUrl=192.168.x 私网 → isError', async () => {
-    const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'http://192.168.1.1:9222' },
-      makeCtx(),
-    );
-    expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('SSRF');
-  });
-
-  it('cdpUrl=169.254.169.254 link-local（云元数据）→ isError SSRF', async () => {
-    const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'http://169.254.169.254:9222' },
-      makeCtx(),
-    );
-    expect(r.isError).toBe(true);
-    expect((r.content[0] as { text: string }).text).toContain('SSRF');
-  });
-
-  it('cdpUrl=file:// → isError（协议被禁）', async () => {
-    const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'file:///etc/passwd' },
-      makeCtx(),
-    );
-    expect(r.isError).toBe(true);
-  });
-
-  it('cdpUrl=公网 IP → SSRF 放行（不因 SSRF 拒绝）', async () => {
-    const tool = createBrowserTool();
-    const r = await tool.run(
-      { mode: 'attach', action: 'listPages', cdpUrl: 'http://93.184.216.34:9222' },
-      makeCtx(),
-    );
-    // 公网 IP 放行——无 im → 未注册（关键：不是 SSRF 拒绝）
-    const text = (r.content[0] as { text: string }).text;
-    expect(text).not.toContain('SSRF');
-  });
-
-  it('无 cdpUrl → 不触发 SSRF 门禁（正常流程）', async () => {
-    const execute = vi.fn(async () => ({ ok: true, text: '[]' }));
-    const im = makeInstanceManager({ execute });
-    const tool = createBrowserTool({ instanceManager: im });
-    const r = await tool.run({ mode: 'attach', action: 'listPages' }, makeCtx('sA'));
-    expect(r.isError).toBe(false);
-    expect(execute).toHaveBeenCalledTimes(1);
+    const modeDesc = (tool.definition.inputSchema.properties?.mode as { description: string }).description;
+    expect(modeDesc).not.toContain('cdpUrl');
+    expect(modeDesc).toContain('自动连接用户已打开的 Chrome');
+    expect(modeDesc).toContain('无需指定地址/URL');
+    expect(modeDesc).toContain('Chrome ≥144');
+    expect(modeDesc).toContain('同意 prompt');
+    expect(modeDesc).toContain('真实浏览器');
   });
 });
 

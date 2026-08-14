@@ -12,7 +12,7 @@
  * 不引入 minimatch：用「pattern → RegExp」自实现子集
  *   （支持 双星 / 单星 / 问号 / 普通字符；不支持字符类留后续）。
  */
-import { readdirSync, statSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import type { Tool, ToolCtx, ToolInput, ToolRunResult } from './types';
@@ -55,7 +55,7 @@ export const fileGlobTool: Tool = {
 
     let rootStat;
     try {
-      rootStat = statSync(root);
+      rootStat = await stat(root);
     } catch {
       return errorResult(`[${ToolErrorCode.NOT_FOUND}] search root not found: ${root}`);
     }
@@ -73,7 +73,7 @@ export const fileGlobTool: Tool = {
 
     // 收集文件
     const matches: { path: string; mtime: number }[] = [];
-    walk(root, regex, root, matches, 0);
+    await walk(root, regex, root, matches, 0);
 
     if (matches.length === 0) {
       return textResult('(no matches)');
@@ -89,18 +89,19 @@ export const fileGlobTool: Tool = {
 /**
  * 递归遍历目录，收集相对路径匹配 regex 的文件。
  * 默认不遵循 .gitignore（含点开头文件），对齐 overall §5.5。
+ * [v0.0.345] async 化：fs.promises（libuv 线程池，不阻塞 event loop）。
  */
-function walk(
+async function walk(
   dir: string,
   regex: RegExp,
   root: string,
   out: { path: string; mtime: number }[],
   depth: number,
-): void {
+): Promise<void> {
   if (depth > MAX_DEPTH) return;
   let entries: Dirent[];
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return; // 无权限/不存在 → 跳过
   }
@@ -109,12 +110,12 @@ function walk(
     const rel = relative(root, full);
     let st;
     try {
-      st = statSync(full);
+      st = await stat(full);
     } catch {
       continue;
     }
     if (st.isDirectory()) {
-      walk(full, regex, root, out, depth + 1);
+      await walk(full, regex, root, out, depth + 1);
     } else if (st.isFile()) {
       // 同时匹配相对路径正反斜杠风格（posix）
       if (regex.test(rel.replace(/\\/g, '/'))) {

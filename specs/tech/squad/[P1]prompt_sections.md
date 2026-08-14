@@ -129,7 +129,7 @@ EP=`system_reminder`（[v0.0.273]，取代旧 `reachable_agents` + `squad_team_s
 **关键保留**（旧 reachable 语义迁移 + 统一块新语义）：
 - **全员列出（不按 running 过滤）**：running + idle 都保留——做完的 mate 不消失（旧 squad_team_status 只列 running 已删）；presence 有但 run 不在跑 = 疑似卡住可见（老板核心诉求）。
 - **bench 过滤（修真 bug）**：benched 成员无心跳不运行，列为 `send_message` 对端无意义（过去把 bench 当可达对端 = 真 bug）。过滤单点在 `squad_agents_status.ts readMembers()` 返回前——`state !== 'benched'`（duck-typed，同 team_roster 判据）；派生表结构（`readSessionType` 分派）零改，mates/peers 自动收缩到 deployed。subagent `[parent]` 分支不受影响（拓扑硬约束）。
-- **270 enableGroupChat 门控**：`role='leader'` / `role='mate'` 视角的 `squadchat` 条目由 `squad_agents_status.ts deriveSquadScoped()` 的 `squadChatEnabled` 构造门控——`squad.enableGroupChat === false` → SquadChat 行不渲染（**system prompt + system_reminder 两头同时无 SquadChat 条目**，同一 provider 一处管两头，无第二注入点）。`!== false` 语义：undefined（旧 record）视为开。关态下 send_message('squadchat') → `resolveSquadAlias` 返 null → cannot resolve target（不静默投递）；'leader'/member name 私聊解析不受影响（全私聊语义）。
+- **270 enableGroupChat 门控**：`role='leader'` / `role='mate'` 视角的 `squadchat` 条目由 `squad_agents_status.ts deriveSquadScoped()` 的 `squadChatEnabled` 构造门控——`squad.enableGroupChat === false` → SquadChat 行不渲染（**system prompt + system_reminder 两头同时无 SquadChat 条目**，同一 provider 一处管两头，无第二注入点）。`!== false` 语义：undefined（旧 record）视为开。**[v0.0.340] 新建团队默认 false=关**（建队显式写 false；存量不受影响）。关态下 send_message('squadchat') → `resolveSquadAlias` 返 null → cannot resolve target（不静默投递）；'leader'/member name 私聊解析不受影响（全私聊语义）。
 
 **格式**（每行 = 可达性 + 状态 + presence 三合一）：
 ```

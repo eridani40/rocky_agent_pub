@@ -59,8 +59,7 @@ interface SectionChatSessionProps {
 | enqueue 排队区 | `enqueue` | 不出现 |
 | effort picker / 审批模式 picker | `effortPicker` / `approvalPicker` | 不出现 |
 | model picker（含「默认模型」项=chrome.defaultModel） | 恒有（输入区内） | 不出现 |
-| usage 三件套 + CompactBtn | `usage` / `compact` | usage+Compact 保留 |
-| ClearBtn + clear modal | `clear` | 隐藏 |
+| usage 面板（环 + 浮层；CompactBtn/ClearBtn 移入 panel head） | `usage`（单门控，v0.0.326） | 保留（compact/clear 经 props 透传 panel 内部门控：`caps.compact` → onCompact / `caps.clear && !readOnly` → onClear） |
 | minimap + 右上悬浮菜单 | `minimap` / `floatMenu`（cron 项按 `cron`） | 保留 |
 | 群聊渲染策略（白名单 filter + a2a actor + max-w-760） | `groupRender`（配 members） | — |
 | member 单聊 a2a 信封折叠 | 恒有（member 单聊内置） | — |

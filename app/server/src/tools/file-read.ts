@@ -13,7 +13,7 @@
  *
  * 成功后写入 ctx.readSet，供 write/edit 的「先 read」校验使用。
  */
-import { readFileSync, statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import type { Tool, ToolCtx, ToolInput, ToolRunResult } from './types';
 import { errorResult, textResult, ToolErrorCode } from './types';
@@ -50,20 +50,20 @@ export const fileReadTool: Tool = {
       return errorResult(`[${ToolErrorCode.PATH_NOT_ABSOLUTE}] filePath must be absolute: "${filePath}"`);
     }
 
-    let stat;
+    let statRes;
     try {
-      stat = statSync(filePath);
+      statRes = await stat(filePath);
     } catch {
       return errorResult(`[${ToolErrorCode.NOT_FOUND}] file not found: ${filePath}`);
     }
     // 目录 → 不支持（read 不列目录）
-    if (stat.isDirectory()) {
+    if (statRes.isDirectory()) {
       return errorResult(`[${ToolErrorCode.INVALID_INPUT}] path is a directory (read cannot list): ${filePath}`);
     }
 
     let raw: string;
     try {
-      raw = readFileSync(filePath, 'utf8');
+      raw = await readFile(filePath, 'utf8');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return errorResult(`[${ToolErrorCode.RUNTIME_ERROR}] failed to read file: ${msg}`);

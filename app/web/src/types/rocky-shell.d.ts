@@ -29,6 +29,13 @@ export interface RockyShellReadFileBinaryResult {
   reason?: string;
 }
 
+/** stat 返回形状（v0.0.339：镜像 electron computeFileStat 返回；size=文件字节数，只 stat 不读内容） */
+export interface RockyShellStatResult {
+  ok: boolean;
+  size?: number;
+  reason?: string;
+}
+
 /** preload 经 contextBridge 暴露的通用打开外部资源能力（package_structure §4.4） */
 export interface RockyShellApi {
   /** 打开 web scheme URL（系统默认浏览器）；main 侧 shell.openExternal */
@@ -41,6 +48,8 @@ export interface RockyShellApi {
   writeFileText(path: string, content: string): Promise<RockyShellOpenResult>;
   /** [v0.0.280] 读绝对路径二进制 → base64（≤2MB）；main 侧 fs.readFile Buffer——absolute 源图片 viewer 用 */
   readFileBinary(path: string): Promise<RockyShellReadFileBinaryResult>;
+  /** [v0.0.339] stat 绝对路径文件 → { size }（文件大小判定，供打开分流）；main 侧 fs.stat——只 stat 不读内容 */
+  stat(path: string): Promise<RockyShellStatResult>;
 }
 
 declare global {

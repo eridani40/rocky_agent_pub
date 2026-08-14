@@ -149,7 +149,7 @@ async function handlePatchMember(
   const { memberStore } = makeStores(deps);
   try {
     const member = await patchMemberService(
-      { memberStore },
+      { memberStore, sessionStore: deps.sessionStore },
       squadId,
       memberId,
       patch,
@@ -174,7 +174,7 @@ async function handleDeploy(
 ): Promise<Response> {
   const { memberStore } = makeStores(deps);
   try {
-    const member = await deployMemberService({ memberStore }, squadId, memberId);
+    const member = await deployMemberService({ memberStore, sessionStore: deps.sessionStore }, squadId, memberId);
     // [v0.0.305] 落盘成功后 broadcast squad 聚合（在线数变化；PRD §4.4.2）
     deps.squadMetaBroadcaster?.broadcast(squadId);
     return json(200, { member });
@@ -205,7 +205,7 @@ async function handleBench(
 
   const { memberStore } = makeStores(deps);
   try {
-    const member = await benchMemberService({ memberStore }, squadId, memberId, body.reason);
+    const member = await benchMemberService({ memberStore, sessionStore: deps.sessionStore }, squadId, memberId, body.reason);
     // [v0.0.305] 落盘成功后 broadcast squad 聚合（在线数变化；PRD §4.4.2）
     deps.squadMetaBroadcaster?.broadcast(squadId);
     return json(200, { member });

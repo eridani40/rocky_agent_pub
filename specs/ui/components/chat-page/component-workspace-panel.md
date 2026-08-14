@@ -23,13 +23,13 @@
 - **两机制正交（老板口径）**：全量重算是**唯一中枢**（tree/expanded/childrenCache 变化 → 全量重算 → applyWatchSet）；「重算订阅」管增量（watch-set diff，集合变才 POST）+「结构刷新 refetch」管当前快照（parentOf(P) 真 GET tree 刷 P 所在层）——拆开两机制，P 展开时两者可能重叠 refetch（无脑都发，幂等 + 防抖合并可接受）。
 - **时序幂等**：初始 rootTree 异步 → 先发 {根} 后补 {根一级}（两次 applyWatchSet）；展开后 childrenCache 未到先发 {自身}、GET 成功后补 {子一级}（幂等，后端 diff 全空即 no-op）。
 - **切目录清 expanded**（v0.0.271）：`handleSwitchDir` 走 `dir-changed` 语义重置（`applyWorkspaceDirChanged` 清 expanded/tree/childrenCache/stalePaths/**structuralStalePaths**——旧相对路径相对新基准无效），watch-set 重算 effect 自动发新根集合；`handleRefresh` 同目录刷新保留 expanded（`reset` + 逐层补回 childrenCache，**同时清 structuralStalePaths**——刷新后结构新鲜，不受影响）。
-### 4.4 文件点击分流（v0.0.269：五路前置分流 .url > image > text > 系统打开；v0.0.280：改调共享 openLocalPath lib；**v0.0.320：12 格式进预览区 tab，弹层退役**）
-- 点文件节点 → `handleOpen(node)`（v0.0.280 改调共享分发 lib `openLocalPath`，五路分流语义原样保留——folder/.url/image/12 格式/系统打开，行为零变化）：
+### 4.4 文件点击分流（v0.0.269：五路前置分流 .url > image > text > 系统打开；v0.0.280：改调共享 openLocalPath lib；**v0.0.320：12 格式进预览区 tab，弹层退役**；**v0.0.339：csv/tsv 无条件系统打开 + 文本 >5MB 系统打开**）
+- 点文件节点 → `handleOpen(node)`（v0.0.280 改调共享分发 lib `openLocalPath`，分流语义原样保留——folder/.url/image/文本/系统打开，v0.0.339 文本分支升级）：
   - `openLocalPath(node.path, { sessionId, source:'workspace', kind: node.type==='dir'?'folder':'file', onEditor: (t)=>preview.openTab(t) ?? setFileEditorTarget(...), onImageViewer: (t)=>setWsImageTarget(...) })`——onEditor/onImageViewer 回调消费方按 target 分流渲染（chat 链接也走同一 lib，行为≡ 右侧）。
   - **文件夹**（`node.type === 'dir'`，含 symlink→dir）→ `openWorkspaceItem`（`POST /workspace/open` kind=folder 系统文件管理器打开目标目录；后端链式授权放行）。**v0.0.320 起文件夹 item 点击 = toggle 展开/收起**（与 twisty 同语义防双发）；「打开文件夹」hover 按钮 stopPropagation 保留。
   - **远程链接**（`.url` 快捷方式，`isRemoteLinkPath` 判定，大小写不敏感）→ `openRemoteLink(sessionId, path)`：读 `.url` 内容 → `parseUrlFileContent` 提取 http/https URL → 浏览器打开（Electron shell.openExternal / window.open fallback）；嗅探失败（无 URL）→ 降级 editor（`format: 'txt'` plain view）。实现 `app/web/src/lib/remote-link.ts`。
   - **图片**（`isImagePath` 判定，6 格式 png/jpg/jpeg/gif/webp/svg，大小写不敏感；非 6 格式 .bmp/.tiff 不加入——PRD §6 范围不扩大）→ `setWsImageTarget({ path, fileName, subtitle })` → 挂载层渲染 `component-ws-image-viewer`（只读图片查看，`GET /workspace/file?binary=1` base64 通道）。**图片不进预览区**（v0.0.320 保留弹层语义）。
-  - **文本**（`getFileFormat(node.path) !== null`，12 格式 + code）→ **v0.0.320 起进预览区 tab**：`preview.openTab({ path, fileName, subtitle, format, source:'workspace' })`（`usePreviewArea()` 有 Provider 时）；**无 Provider**（academy section-version-chat）→ 降级 `setFileEditorTarget` → `component-ws-file-editor-fallback` 弹层（D13 退役后保留的降级路径，非死代码）。
+  - **文本**（`getFileFormat(node.path) !== null`，12 格式 + code）→ **[v0.0.339] 三分流**：① `csv`/`tsv` → **无条件系统打开**（不 stat、不内置，任何大小——表格文件交 Numbers/Excel）；② 其余文本 → `getSize` stat 大小判定（workspace→`GET /workspace/stat?path=` / absolute→`rockyShell.stat`；**stat 失败 undefined 降级内置**）——**`size > 5MB`（`TEXT_OVER_SIZE_BYTES` 常量）→ 系统打开**，`≤5MB` → 内置；③ 内置路径 **v0.0.320 起进预览区 tab**：`preview.openTab({ path, fileName, subtitle, format, source:'workspace' })`（`usePreviewArea()` 有 Provider 时）；**无 Provider**（academy section-version-chat）→ 降级 `setFileEditorTarget` → `component-ws-file-editor-fallback` 弹层（D13 退役后保留的降级路径，非死代码）。**图片分支不 stat**（v0.0.339 不动图片，6 格式无大小限制）。
   - **其余（系统打开）**：以上都不命中（未知扩展名 / 非 6 格式图片）→ `openWorkspaceItem(kind='file')` 系统文件管理器打开（**无占位 pill**——前置分流后进 editor 的都是文本，二进制 pill 仅 editor 内防御）。
 - **共享分发 lib**（v0.0.280 `app/web/src/lib/open-local-path.ts`）：聊天链接与右侧文件区行为永远一致（老板铁律），openLocalPath 是唯一权威本地文件分发——5 分支 × 2 源（workspace/absolute）分流表详见 `specs/ui/components/chat-page/section-preview-area.md` + change_plan 行 25。右侧 handleOpen 传 `source:'workspace'` + `kind`；聊天链 link-target local 分支传 `source: toChatLinkTarget(target).source` + 不传 kind（kind=undefined 跳过文件夹分支，目录路径落 openPath 行为等价）。
 - **`isBuiltinEditable` 保留原 12 格式语义**（v0.0.263 架构决策②）：workspace 文件树打开**不再用它判定**；它继续服务 `link-target.ts` 的 markdown 链接点击分发（12 格式进 viewer / 其它系统打开，v0.0.253 契约）。12 格式分类表（md + structured 7 + plain 4）仍用于 editor 内 `getFileFormat` 的 view 分流（md→markdown 渲染 / structured→pre + 格式化校验按钮 / 其它→txt plain view / **code→pre 无按钮**）。
@@ -37,13 +37,15 @@
 - **弹层退役（v0.0.320 D13）**：`component-ws-file-editor.tsx` + `component-chat-link-viewer.tsx` 已删除（chat 场景）；`component-ws-file-editor-fallback.tsx` 为无 Provider 降级路径（1:1 复用原逻辑：readWorkspaceFile + ComponentModalMdEditor + last-write-wins + flash toast）。`component-modal-md-editor`（common/）保留（academy 场景）。
 - `WsFileTarget`（fallback 用）加 `format: FileFormat` 字段——modal 按 format 分流 view（md→PrimitiveMarkdownView / 其余→`<pre>`）+ edit 模式条件显示「格式化」「校验」按钮（仅 structured）。
 
-### 4.6 工作区搜索框（v0.0.320 D8，`component-ws-search-box.tsx`）
+### 4.6 工作区搜索框（v0.0.320 D8，`component-ws-search-box.tsx`；v0.0.324 D4 裁剪树；v0.0.327 merge-expanded）
 - **位置**：TabBar 与 PathBar 之间常驻输入框（`ws-search-input`）。
-- **混合搜索（防抖 500ms + 回车立即搜）**：输入连续变化 → **500ms 防抖**（停下 500ms 才发请求，[v0.0.328] 从 300ms 调至 500ms）；输入中**按回车立即触发搜索**（清防抖定时器，不等 500ms）。搜索逻辑：前端过滤已加载树（tree + childrenCache 递归 `collectLoaded`，文件名 substring 大小写不敏感）+ 后端补全（`searchWorkspaceFiles(sessionId, {q})` 递归全量）→ 合并去重（后端 dirs/files 在前）。
-- **搜索态与树态互斥**：query 非空 → 渲染结果列表（`ws-search-results`），父级隐藏 PathBar/FileTree；清空（× `ws-search-clear` 或删空）→ 恢复原树。
-- **结果项点击**：文件 → onOpenFile（父级 handleOpen 五路分流 → preview.openTab / viewer / 系统打开）；文件夹 → onToggleDir（复用树 toggle）。
-- **结果过多**：合并后 >200 或后端 truncated → `searchTooMany` 提示；后端失败 → 降级仅前端结果。
-- 递增 reqId 屏蔽过期响应（快速输入旧请求不覆盖新值）；testid `ws-search-hit-{path}`（`/` `.` 替换为 `-`）。
+- **混合搜索（防抖 500ms + 回车立即搜）**：输入连续变化 → **500ms 防抖**（停下 500ms 才发请求，[v0.0.328] 从 300ms 调至 500ms）；输入中**按回车立即触发搜索**（清防抖定时器，不等 500ms）。搜索逻辑：前端过滤已加载树（tree + childrenCache 递归 `collectLoaded`，q 不含 `/` 匹配 basename、含 `/` 匹配 path 子串，大小写不敏感）+ 后端补全（`searchWorkspaceFiles(sessionId, {q})` 递归全量）→ 合并去重（后端 dirs/files 在前）→ **onResult 上报父级**（search box 瘦身后只保留输入 + 防抖 + loading，不再内部渲染结果列表）。
+- **搜索态 = FileTree 数据源切换（v0.0.324 D4）**：FileTree **常驻**（去掉原「query 非空渲染结果列表、父级隐藏 FileTree」的互斥分支）；query 非空 → 父级 `handleSearchResult` 调 `buildFilterTree(hits, {limit, existingChildrenCache})` 构建裁剪树 → FileTree 数据源切为 `filterResult`（`tree` + `childrenCache` 合并）；**PathBar 仍隐藏**（`!searching` 条件保留）；清空（× `ws-search-clear` 或删空）→ `onResult(null)` 恢复原树。**结果列表渲染已退役**（`ws-search-results` 分支删除）。
+- **裁剪树（v0.0.324 D2，纯函数 `ws-filter-tree.ts`）**：`buildFilterTree(hits, {limit, existingChildrenCache})`——路径拆解补祖先段（祖先=dir+hasChildren=true）→ 节点去重 → 命中目录在 `existingChildrenCache` 有子项时用真实子项替换裁剪子项 → 产出顶层 `tree` + `childrenCache` + `expandedPaths`（祖先路径，命中目录本身不加入）+ `hitCount`（截断前命中总数）。
+- **[v0.0.327] merge-expanded**：`filterResult.expandedPaths` 作为**初始展开建议** dispatch `merge-expanded` **合并**入 `state.expanded`（`mergeExpanded` = 逐 path 置 true，**不覆盖**用户已有手动展开/收起；后续 toggle-expand 走同一 `state.expanded` 权威，不因搜索态数据源切换被覆盖）。**命中目录本身不自动展开**——只显示命中节点（祖先路径展开保证可见），不暴露子内容，用户想看内容手动展开。
+- **搜索态 item 点击与树态同语义**：复用 FileTree 既有 `onOpen`/`onToggleExpand`（文件→§4.4 五路分流；文件夹→toggle 展开）。
+- **结果过多**：合并后 >100（`SEARCH_LIMIT`，前后端均 100：`component-ws-search-box.tsx` L40 / `session-workspace-search.ts` L24）或后端 truncated → FileTree 底部 `searchTooMany` 文案（`tooMany` prop）；后端失败 → 降级仅前端结果（同样截断 100）。
+- 递增 reqId 屏蔽过期响应（快速输入旧请求不覆盖新值）。
 ### 4.5 文件排序（文件夹置顶 + 自然序 numeric-aware）[v0.0.239]
 - **排序规则**：顶层 `state.tree` + 子目录 `state.childrenCache[path]` 的节点顺序由 **reducer ingest 时排序** 决定（`workspace-slice-reducer.ts` 的 `setTreeLoaded` / `setChildrenLoaded` 两 ingest 点），不在渲染层 `TreeLevel` 排序：
   - **先按节点类型分组**：文件夹（`type === 'dir'`）整体置顶，文件（`type === 'file'`）在后——对齐 VSCode 默认。
