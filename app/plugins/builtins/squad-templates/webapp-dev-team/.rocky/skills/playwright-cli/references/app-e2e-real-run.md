@@ -1,7 +1,8 @@
 # App 端到端真实跑（E2E real run）
 
+> 注：本文端口 / 路径 / 页面名均为示例，按项目变量区与环境输出替换。
 > 何时用：验证某个功能/版本**「能用」**（深度使用可用）——不只单步 dom 断言绿，而是**照用户真实操作路径把功能端到端跑通**。这是 UT/AT/ET 之外的第 4 层验证，专挖「dev 自检全绿却真实不可用」的问题。
-> 前置底图：**`specs/ui/overall/00-app-guide.md`**（app 布局手册）——照它的操作路径走。
+> 前置底图：**`${SPECS_DIR}/ui/overall/00-app-guide.md`**（app 布局手册）——照它的操作路径走。
 
 ## 核心判断：什么时候必须真实跑
 
@@ -21,8 +22,8 @@ UT/AT/ET 是「断言驱动的验证」（预设预期、机械判定）。但�
 test 环境端口/数据目录与 dev/prod 隔离，真实跑用它：
 
 ```bash
-# 后端 API_PORT=3700，前端 WEB_PORT=8787，数据目录 ~/.rocky_agent_test
-# 用项目脚本起（或 tests/e2e 的 env_start.sh）
+# 端口/DATA_DIR 按项目 env 输出（示例：API 3700 / WEB 8787 / ~/.your-app_test）
+# 用项目脚本起（或 ${TESTS_DIR}/e2e 的 env_start.sh）
 source ./test.env
 # 起 server + web dev server（具体命令见 test.env 的 API_START_CMD / WEB_START_CMD）
 ```
@@ -31,13 +32,13 @@ source ./test.env
 
 ### 2. 配 LLM provider（应用设置）
 
-真实跑要调真模型。在 app 内 **应用设置（nav-settings-app）→ 模型** 配 provider，或直接改 `~/.rocky_agent_test/app_config`。
+真实跑要调真模型。在 app 设置页配 provider，或直接改测试 DATA_DIR 下的 app 配置。
 
-**坑（v0.0.187 实证）**：test 环境 default 模型可能是 thinking-heavy（如 deepseek-v4-pro），它在反思/推理任务会先「思考」吃掉大量 token（1000–7000）。若调用处 `maxTokens` 给小了（如 1024），思考阶段就耗光→文本空→功能静默失效。反思类任务 `maxTokens` 给 **16384+**。
+**坑**：test 环境 default 模型可能是 thinking-heavy（推理型），在反思/推理任务会先「思考」吃掉大量 token。若调用处 `maxTokens` 给小了（如 1024），思考阶段就耗光→文本空→功能静默失效。反思类任务 `maxTokens` 给 **16384+**。
 
 ### 3. 照 app-guide 操作路径走
 
-打开 `specs/ui/overall/00-app-guide.md`，按目标功能的操作链路逐步执行。例（Academy 训练引擎）：
+打开 `${SPECS_DIR}/ui/overall/00-app-guide.md`，按目标功能的操作链路逐步执行。例（Academy 训练引擎）：
 
 ```bash
 playwright-cli open http://localhost:8787
@@ -71,13 +72,13 @@ playwright-cli snapshot                      # 每步后看页面是否符合预
 | LLM 400 / 返回空 / JSON 解析失败 / 思考吞 token | **LLM 调用参数 bug** | 退 coder 改 `maxTokens`/prompt/解析 |
 | 元素定位不到 / playwright 自身报错 | **测试侧** | 改定位策略 / 查 element-attributes.md |
 
-> 不要把真 bug 当「测试 flaky」绕过。v0.0.187 的 5 个 BUG（含 1 Critical engineDispatcher 未注入）全是真实跑挖出、UT/AT/ET 全绿却真实不可用的问题。
+> 不要把真 bug 当「测试 flaky」绕过。真实跑挖出的 BUG（含依赖未注入的 Critical）往往是 UT/AT/ET 全绿却真实不可用的问题。
 
 ### 5. 验证闭环
 
 「能用」= **端到端跑通 + 产生真实预期效果**。不只单步绿，要看：
 - 链路首尾贯通（入口→最终效果，如训练后 student 版本真被 adopt、新 systemPrompt 真生效）。
-- 真实数据落库（curl 后端 / 查 `~/.rocky_agent_test` 确认）。
+- 真实数据落库（curl 后端 / 查本 case DATA_DIR 确认）。
 - 多轮/边界（不只 happy path，试必错题、空数据、重复操作）。
 
 ## 注意事项
@@ -91,7 +92,7 @@ playwright-cli snapshot                      # 每步后看页面是否符合预
 
 ## 与 app-guide 的关系
 
-`specs/ui/overall/00-app-guide.md` 是**导航底图**（入口/路径/链路/布局），本 reference 是**执行方法**（怎么用 playwright-cli 把那条路径走一遍、遇问题怎么修）。两者配套：
+`${SPECS_DIR}/ui/overall/00-app-guide.md` 是**导航底图**（入口/路径/链路/布局），本 reference 是**执行方法**（怎么用 playwright-cli 把那条路径走一遍、遇问题怎么修）。两者配套：
 
 - app-guide 告诉你「功能在哪、怎么走」；
 - 本 reference 告诉你「怎么验证它真能走通、走不通怎么归因修」。

@@ -41,3 +41,9 @@
 
 ## 消费方
 - `app/web/src/components/providers/component-provider-detail.tsx`
+
+## [v0.0.350] 类型选择器（新「类型」KeyChoiceCards）
+
+- 表单顶部加「类型」控件（KeyChoiceCards，testid provider-field-type）：选项 5 项 = `PROVIDER_TYPE_PRESETS`（provider-type-presets.ts）——anthropic_compatible（通用）+ kimi_coding_plan / glm_coding_plan / minimax_coding_plan / deepseek_api（4 native，友好名 i18n `providers.json type.*`）
+- 选中 native 类型联动（联动逻辑在 component-provider-detail handleTypeChange，fields 只承载控件）：protocol 控件**只读锁定** anthropic_messages（禁点，视觉置灰）；baseUrl 填 preset 默认值（detail 层判断：仅通用→native 且值为空/未自定义时填充）；新建且 models 空时预填默认模型一条（kimi contextWindow 262144）
+- preset 表（默认 baseUrl/默认模型）权威：`specs/prd/v0.0.350-native-coding-plans-and-balance-query.md` §2.1 表 + change_plan 决策④

@@ -44,11 +44,11 @@ wire body 基础示例见 protocol §4；下面 §4 在其上加 cache_control�
 
 > 权威契约见 `[P0]cache_control.md`（目标机制 + 两层独立 + 核心原则）。本节是 anthropic_messages impl 的**落地细节**。
 
-Anthropic prompt caching。每次 encode 注入 **2 个 cache_control breakpoint** + **wire 层过滤历史 reminder**，最大化缓存命中（机制三步详见 cache_control.md §3）：
+Anthropic prompt caching。每次 encode 注入 **3 个 cache_control breakpoint**（system 末 + tools 末 + messages 末）+ **历史 reminder 块全保留进 wire**（v0.0.361），最大化缓存命中（机制详见 cache_control.md §3）：
 
-1. **bp#1 — system 末 block**：顶层 `system` 的 content block 加 `cache_control`（system 跨 turn 极稳）。
-2. **bp#2 — 跨 messages 反向扫第一个非 reminder block**：从 `messages` 末尾向前扫（跨 message 边界），命中第一个 `isSystemReminder !== true` 的 block 注入。bp 必须落在 reminder 之前——落在 reminder 上则下轮该 reminder 内容变 → cache miss。
-3. **wire 层过滤历史 reminder**：encode 各 message 时，非最末 user message 的 reminder block 全 drop，最末 user message 只保留最末一个 reminder block（当轮 reminder 仍发 LLM，历史 reminder 不进 wire）。
+1. **bp#1 — system 末 block**：顶层 `system` 的末 content block 加 `cache_control`（system 跨 turn 极稳）。
+2. **bp#T — tools 末位 tool**：wire `tools` 数组末位 tool 定义加 `cache_control`（工具集 run/session 级稳定；三层各自锚定，任一层变更不拖垮其余缓存）。
+3. **bp#2 — 最末 message 最末 block**：固定打 messages 末 block（无反向扫描、无避让）。历史 reminder 块 append-only 字节稳定 → bp#2 前缀 = 稳定历史 + 本轮新块 → 每轮命中上一轮条目，只有新块计费。
 
 **ttl：默认**（ephemeral，不指定 `ttl` 字段 = Anthropic 默认 5 分钟）。
 
@@ -57,27 +57,27 @@ Anthropic prompt caching。每次 encode 注入 **2 个 cache_control breakpoint
   "system": [
     { "type": "text", "text": "你是助手...", "cache_control": { "type": "ephemeral" } }
   ],
+  "tools": [
+    { "name": "bash", "description": "...", "input_schema": {}, "cache_control": { "type": "ephemeral" } }
+  ],
   "messages": [
-    { "role": "user", "content": [ { "type": "text", "text": "历史..." } ] },
+    { "role": "user", "content": [ { "type": "text", "text": "历史...（含历史 reminder 块，append-only 全保留）" } ] },
     { "role": "user", "content": [
-      { "type": "text", "text": "用户正文", "cache_control": { "type": "ephemeral" } },
-      { "type": "text", "text": "[system_reminder]\n- ...当轮 reminder..." }
+      { "type": "text", "text": "用户正文" },
+      { "type": "text", "text": "[system_reminder]\n- ...当轮 reminder...", "cache_control": { "type": "ephemeral" } }
     ]}
   ]
 }
 ```
 
-> 上例 bp#2 落在「用户正文」block（reminder 之前的稳定段），最末 reminder block **不加** cache_control（它是动态段，每轮变）。
-
-**实现**（`encodeAnthropicMessages`）：
-- **system bp#1**：encode 时转 content block array（若原始是 string），给其 block 加 `cache_control: { type: "ephemeral" }`。
-- **reminder 过滤 + 标记**：`encodeMessage(m, isLastMessage)` 单遍过滤——`lastKeptReminderIdx`（非最末 message=-1 全 drop；最末 message=最末 reminder 索引），`isRem && i !== lastKeptReminderIdx` drop；同时平行产 `flags[]` 标记每个保留 wire block 是否原为 reminder。
-- **bp#2 反向扫**：`injectLastNonReminderCacheControl(encoded, reminderFlags)` 双循环从末尾向前，`flags[bi]===true` 跳过，命中第一个非 reminder block 注入并 return。**必须在 merge 相邻同 role 前**（reminder 标记仅 pre-merge 可读）。
+**实现**（`encodeAnthropicMessages` + `encodeTools`）：
+- **system bp#1**：encode 时转 content block array（若原始是 string），给末 block 加 `cache_control: { type: "ephemeral" }`。
+- **tools bp#T**：`encodeTools` 末位 tool 定义加 `cache_control`（原纯映射无注入，v0.0.361 新增）。
+- **messages bp#2**：encode 完成后给最末 message 最末 block 固定注入（无反向扫描、无避让；旧 `injectLastNonReminderCacheControl` 已删）。
+- **历史块全保留**：各 message 一视同仁 encode，无 reminder drop（旧 `encodeMessage` 的 `lastKeptReminderIdx` 过滤已删）。
 - **`isSystemReminder` 不进 wire**：`encodeContentBlock` text 分支只取 `{type:'text', text: b.text}`，丢弃块级标记字段（LLM 零侵入）。
 
-**为什么 bp#2 不落最后 block（v0.0.52 修正）**：reminder 由 context ingest 持久化进 transcript（`../context/[P0]system_reminder.md §4`），每轮追加到最末 user message 末。若 bp#2 落「最后 block」（= reminder），下轮 reminder 内容变（时间/环境/工具错误）→ cache key 失配 → miss。反向扫到非 reminder block 才能保稳定段命中。
-
-> Anthropic 限制：最多 4 breakpoints；本规则用 2 个，留余量。cache_control 在 encode 翻译时注入（protocol impl 职责）。
+> Anthropic 限制：最多 4 breakpoints；本规则用 3 个，留余量。cache_control 在 encode 翻译时注入（protocol impl 职责）。
 > cache 命中在 `Usage.input_cache_read` 体现（见 `../session/[P0]session_usage.md §1` Usage 的 cache 拆分；命中 = 省 token / 钱）。
 
 ## 4a. stop_sequences（SquadChat EOS）`[v0.0.33.2]`

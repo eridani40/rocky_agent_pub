@@ -10,6 +10,30 @@
       "description": "__MSG_plugin.builtin.llm_anthropic.impl.anthropic_compatible.description__"
     },
     {
+      "implId": "kimi_coding_plan",
+      "point": "llm_provider",
+      "impl": "./provider-kimi.ts",
+      "description": "__MSG_plugin.builtin.llm_anthropic.impl.kimi_coding_plan.description__"
+    },
+    {
+      "implId": "glm_coding_plan",
+      "point": "llm_provider",
+      "impl": "./provider-glm.ts",
+      "description": "__MSG_plugin.builtin.llm_anthropic.impl.glm_coding_plan.description__"
+    },
+    {
+      "implId": "minimax_coding_plan",
+      "point": "llm_provider",
+      "impl": "./provider-minimax.ts",
+      "description": "__MSG_plugin.builtin.llm_anthropic.impl.minimax_coding_plan.description__"
+    },
+    {
+      "implId": "deepseek_api",
+      "point": "llm_provider",
+      "impl": "./provider-deepseek.ts",
+      "description": "__MSG_plugin.builtin.llm_anthropic.impl.deepseek_api.description__"
+    },
+    {
       "implId": "anthropic_messages",
       "point": "llm_protocol",
       "impl": "./protocol.ts",

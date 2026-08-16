@@ -9,12 +9,13 @@
  *   - session_status_update CAS 成功后推送（statusBus 注入）
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompositeStore } from '../../persistence/composite';
 import { FsCrudStore } from '../../persistence/fs-store';
 import { ulid } from '../../config/ulid';
+import { SquadStore, MemberStore } from '../../stores/squad-store';
 import {
   SessionSchema,
   MessageSchema,
@@ -247,5 +248,92 @@ describe('SessionStateMachine — session_status_update 推送', () => {
     // 只应有 1 条 running 事件（第一次）
     const runningEvents = events.filter((e) => e.data.state === 'running');
     expect(runningEvents.length).toBe(1);
+  });
+});
+
+// ============================================================
+// [v0.0.361 T4] markX → member_state reminder 写入（change_plan §1.5）
+// ============================================================
+describe('SessionStateMachine — member_state reminder 写入', () => {
+  /** 读 {sid} 的 reminder queue entries */
+  function readQueue(sid: string): Array<{ key: string; value: string }> {
+    const p = join(tmpRoot, 'sessions', sid, 'reminder_queue.json');
+    if (!existsSync(p)) return [];
+    return (JSON.parse(readFileSync(p, 'utf8')) as { entries: Array<{ key: string; value: string }> }).entries;
+  }
+
+  /** 建 squad + 2 member fixture（真实 store，落 tmpRoot） */
+  async function seedSquad(selfSid: string): Promise<{ squadId: string; leaderSid: string; chatSid: string }> {
+    const squadId = ulid();
+    const leaderId = ulid();
+    const selfId = ulid();
+    const leaderSid = ulid();
+    const chatSid = ulid();
+    const squadStore = new SquadStore({ root: tmpRoot });
+    const memberStore = new MemberStore({ root: tmpRoot });
+    await squadStore.putSquad({
+      id: squadId, name: 'S', modelDefault: 'm', leaderId,
+      memberIds: [leaderId, selfId], squadChatSessionId: chatSid, enableHeartBeat: false,
+    } as Parameters<SquadStore['putSquad']>[0]);
+    const base = { squadId, role: 'mate', tools: [], skillConfig: { mode: 'inherit' }, state: 'deployed' };
+    await memberStore.putMember({ id: leaderId, ...base, sessionId: leaderSid, name: 'darvin', role: 'leader' } as never);
+    await memberStore.putMember({ id: selfId, ...base, sessionId: selfSid, name: 'bob' } as never);
+    return { squadId, leaderSid, chatSid };
+  }
+
+  /** 等 fire-and-forget notifyReminder 落盘 */
+  async function flushReminder(): Promise<void> {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+
+  it('markRunning：squad session → member_state:{sid} 渲染行 fanout 全员 + squadChat', async () => {
+    const sid = ulid();
+    const { squadId, leaderSid, chatSid } = await seedSquad(sid);
+    await store.createSession({ id: sid, squadId });
+    const ok = await store.stateMachine.markRunning(sid, ulid());
+    expect(ok).toBe(true);
+    await flushReminder();
+    for (const target of [sid, leaderSid, chatSid]) {
+      expect(readQueue(target).map((e) => [e.key, e.value])).toEqual([
+        [`member_state:${sid}`, '[squad:agents] bob → running'],
+      ]);
+    }
+  });
+
+  it('markIdle/markError/markSuspended：四态各写一行（key 同为 member_state:{sid}）', async () => {
+    const sid = ulid();
+    const { squadId } = await seedSquad(sid);
+    await store.createSession({ id: sid, squadId });
+    const runId1 = ulid();
+    await store.stateMachine.markRunning(sid, runId1);
+    await store.stateMachine.markSuspended(sid, runId1);
+    const runId2 = ulid();
+    await store.stateMachine.markRunning(sid, runId2);
+    await store.stateMachine.markError(sid, runId2);
+    await flushReminder();
+    const values = readQueue(sid).map((e) => e.value);
+    // 同 key 覆盖语义：queue 里只留最后一行（error）
+    expect(values).toEqual(['[squad:agents] bob → error']);
+  });
+
+  it('非 squad session（无 squadId）→ 跳过不写', async () => {
+    const sid = await newSession();
+    await store.stateMachine.markRunning(sid, ulid());
+    await flushReminder();
+    expect(readQueue(sid)).toEqual([]);
+  });
+
+  it('reminderFsRoot 缺省 → no-op（构造时不传 fsRoot）', async () => {
+    // 独立 SessionStore：不透传 fsRoot → stateMachine 无 reminderFsRoot
+    const sid = ulid();
+    const { squadId } = await seedSquad(sid);
+    const fs2 = new FsCrudStore({ root: tmpRoot });
+    const crud2 = new CompositeStore().mount('session', fs2).mount('runs', fs2);
+    const store2 = new SessionStore({ crud: crud2, statusBus });
+    await store2.createSession({ id: sid, squadId });
+    const ok = await store2.stateMachine.markRunning(sid, ulid());
+    expect(ok).toBe(true);
+    await flushReminder();
+    expect(readQueue(sid)).toEqual([]);
   });
 });

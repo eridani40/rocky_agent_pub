@@ -1,10 +1,18 @@
 ---
 type: log
 title: Context KB 变更记录
-updated: 2026-08-07
+updated: 2026-08-15
 ---
 
 # Context KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-15 · v0.0.361（session states 三层结构 — reminder 双模式 + 静态半迁 mapper）
+
+- **`[P0]system_reminder.md`**：全文改双模式定位（full=run 首轮/summary 重建后，incremental=run 内后续轮）；§3 内置 provider 表 8→4（退役 env/time/workspace/squad_workspace，time 平移 injector 时间固定段注记，tz 语义不变）；§4 injector 伪码改双模式（`RunState.useFullReminder` + `queueClearAll`/`queueDrain`）；§5 wire 段改三断点引用（历史 reminder 块 append-only 全保留，不再 drop）；§5.1 squad_agents_status 拆半（名单归 team_roster）；frontmatter `updated`。
+- **`[P0]system_prompt.md`**：§4 mapper 表新增 `session_states` 行（登记序 12，stable，env/工作目录/团队盘三小节，fragment priority 810）；frontmatter `updated`。
+- **`[P0]context_ingest_detail.md`**：§3 `system_reminder_injector` 行改双模式描述（触发 user/tool/a2a，v0.0.274 放宽的现状对齐）；frontmatter `updated`。
+- **`[P0]extension point and implementations.md`**：§1 计数 57→53；§3.4 mapper 表 12→13（+`session_states`）；§3.6 reminder 表 8→4 + 退役注记（env/workspace/squad_workspace 迁 mapper，time 平移 injector）；§3 合计行 + §5 manifest 样例同步；frontmatter `updated`。
+- **`index.md`**：① 计数 53 + v0.0.361 注记；system_reminder 概念行改双模式（动态 provider 4 个 + queue 增量行）；边界表计数行同步；frontmatter `updated`。
 
 ## 2026-08-07 · v0.0.273（squad_agents_status 统一块取代 reachable_agents — reminder provider 名清理）
 

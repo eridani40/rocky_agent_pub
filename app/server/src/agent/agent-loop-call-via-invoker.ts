@@ -94,6 +94,7 @@ export async function callLLMViaInvoker(
   // 生产路径（main / 旁路 run）的 client 永远是 LlmClient 实例（SessionConfig.client）
   // [v0.0.25 retry-1 P2] 透传可选 llmRequestConfig / allProviders / health（多 provider fallback 接通）
   // [v0.0.25 T15 rev2] sessionId 接线：从 input.sessionId 注入 InvokeContext（health 按 (sessionId,...) 四元组）
+  // [v0.0.347] 透传 routingPlan（分支 2 挂载方案）+ clientBuilder（routing 多候选模型真实建 client）
   const ctx = buildInvokeContext({
     client: client as unknown as LlmClient,
     errorState: runState.llmErrorState,
@@ -106,6 +107,8 @@ export async function callLLMViaInvoker(
     allProviders: input.allProviders,
     health: input.health,
     logWriter: input.logWriter,
+    routingPlan: input.routingPlan,
+    clientBuilder: input.clientBuilder,
   });
   await llmCaller.invoke(baseReq, ctx);
   // invoke 已通过 onEvent 转发 StreamEvent 给 consumer，consumer 已聚合 message/usage。

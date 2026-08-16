@@ -6,7 +6,8 @@
  * 覆盖：
  *   - query_truncate：阈值边界（< 阈值不动 / > 阈值截断 + rawRef）/ 非用户角色消息不动 / cfg 覆盖默认值
  *   - tool_result_truncate：阈值边界 / 非工具角色消息不动 / 多个 tool_result 块
- *   - system_reminder_injector：空链不动 / 末尾用户消息追加 reminder 块 / 末尾非用户消息不动 / runner 缺失不动
+ *   - system_reminder_injector：[v0.0.361 T3] 双模式——full（链全量+时间固定段+清 queue+置 false）/
+ *     incremental（时间+drain 按序 value）；触发条件（user/tool/a2a）与块级 isSystemReminder 不变
  *   - [v0.0.49 D15] store_sink：写 ctx.store / 无 store 时 no-op / 原样返回 messages
  *
  * [v0.0.66 §2.4] buffer_sink 已删（store 扩展点取代）；相关 UT 已删。
@@ -14,9 +15,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import QueryTruncateHandler from '../ingest/query_truncate';
 import ToolResultTruncateHandler from '../ingest/tool_result_truncate';
-import SystemReminderInjectorHandler, {
-  formatReminders,
-} from '../ingest/system_reminder_injector';
+import SystemReminderInjectorHandler from '../ingest/system_reminder_injector';
 import StoreSinkHandler from '../ingest/store_sink';
 import type { Message } from '../../../../server/src/message/types';
 import type { IngestCtx } from '../types';
@@ -151,55 +150,64 @@ describe('tool_result_truncate', () => {
 });
 
 describe('system_reminder_injector', () => {
-  it('空 reminder → 不动 messages', () => {
+  it('[v0.0.361] 空 reminder 链 → 仍注时间固定段块（时间恒出，§1.6；runState 缺席视 full）', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const m = mkMsg('u1', 'user', 'hi');
-    const out = h.handle([m], {
+    const out = await h.handle([m], {
       config: {} as never,
       reminderRunner: () => [],
     });
-    expect(out[0]!.content).toHaveLength(1);
+    expect(out[0]!.content).toHaveLength(2);
+    const text = (out[0]!.content[1] as { text: string }).text;
+    expect(text).toContain('[system_reminder]');
+    expect(text).toMatch(/Current date and time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(/);
+    // 空链：仅 header + 时间两行（无动态/增量行）
+    expect(text.split('\n')).toHaveLength(2);
   });
 
-  it('末尾 user message + 有 reminder → 追加 reminder block（块级 isSystemReminder 唯一权威）', () => {
+  it('末尾 user message + 有 reminder → 追加 reminder block（块级 isSystemReminder 唯一权威）', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const m = mkMsg('u1', 'user', 'hi');
-    const out = h.handle([m], {
+    const out = await h.handle([m], {
       config: {} as never,
       reminderRunner: () => [{ id: 'env', content: 'app=dev', tier: 'info' }],
     });
     expect(out[0]!.content).toHaveLength(2);
-    expect((out[0]!.content[1] as { text: string }).text).toContain('app=dev');
+    const text = (out[0]!.content[1] as { text: string }).text;
+    expect(text).toContain('app=dev');
+    // [v0.0.361] 时间固定段恒出（§1.6）+ 动态 content 行首无 `- ` 前缀（§2 样例）
+    expect(text).toMatch(/Current date and time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(/);
+    expect(text).not.toContain('- app=dev');
     // [v0.0.50] 块级 TextBlock.isSystemReminder 唯一权威
     expect((out[0]!.content[1] as { isSystemReminder?: boolean }).isSystemReminder).toBe(true);
     // [v0.0.50] 消息级 metadata.isSystemReminder 已废止（不应出现）
     expect(out[0]!.metadata?.isSystemReminder).toBeUndefined();
   });
 
-  it('末尾 assistant message → 不动（agent 输出不是输入，显式排除）', () => {
+  it('末尾 assistant message → 不动（agent 输出不是输入，显式排除）', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const a = mkMsg('a1', 'assistant', 'hi');
-    const out = h.handle([a], {
+    const out = await h.handle([a], {
       config: {} as never,
       reminderRunner: () => [{ id: 'env', content: 'app=dev' }],
     });
     expect(out[0]!.content).toHaveLength(1);
   });
 
-  it('[v0.0.274] 末尾 system message → 不动（系统消息不是输入，显式排除）', () => {
+  it('[v0.0.274] 末尾 system message → 不动（系统消息不是输入，显式排除）', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const s = mkMsg('s1', 'system', 'system directive');
-    const out = h.handle([s], {
+    const out = await h.handle([s], {
       config: {} as never,
       reminderRunner: () => [{ id: 'env', content: 'app=dev' }],
     });
     expect(out[0]!.content).toHaveLength(1);
   });
 
-  it('[v0.0.274] 末尾 tool message（role=tool，tool_result block）→ 触发 reminder 追加（工具循环刷新）', () => {
+  it('[v0.0.274] 末尾 tool message（role=tool，tool_result block）→ 触发 reminder 追加（工具循环刷新）', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const t = mkToolMsg('t1', 'call-1', 'tool result data');
-    const out = h.handle([t], {
+    const out = await h.handle([t], {
       config: {} as never,
       reminderRunner: () => [{ id: 'env', content: 'app=dev', tier: 'info' }],
     });
@@ -216,36 +224,46 @@ describe('system_reminder_injector', () => {
     expect((out[0]!.content[1] as { isSystemReminder?: boolean }).isSystemReminder).toBe(true);
   });
 
-  it('无 reminderRunner（ctx 缺失）→ 不动', () => {
+  it('[v0.0.361] 无 reminderRunner（fixture）→ 仍注时间固定段块（时间平移 injector 内部，不依赖链）', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const m = mkMsg('u1', 'user', 'hi');
-    const out = h.handle([m], { config: {} as never });
-    expect(out[0]!.content).toHaveLength(1);
-  });
-
-  it('formatReminders：warn tier 加 [warn] 标记', () => {
-    const text = formatReminders([
-      { id: 'env', content: 'app=dev', tier: 'info' },
-      { id: 'err', content: 'oops', tier: 'warn' },
-    ]);
+    const out = await h.handle([m], { config: {} as never });
+    expect(out[0]!.content).toHaveLength(2);
+    const text = (out[0]!.content[1] as { text: string }).text;
     expect(text).toContain('[system_reminder]');
-    expect(text).toContain('- app=dev');
-    expect(text).toContain('- [warn] oops');
+    expect(text).toMatch(/Current date and time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(/);
   });
 
-  it('空 messages 数组 → 不动（无 throw）', () => {
+  it('[v0.0.361] warn tier 加 [warn] 标记、行首无 `- ` 前缀', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
-    const out = h.handle([], {
+    const m = mkMsg('u1', 'user', 'hi');
+    const out = await h.handle([m], {
+      config: {} as never,
+      reminderRunner: () => [
+        { id: 'env', content: 'app=dev', tier: 'info' },
+        { id: 'err', content: 'oops', tier: 'warn' },
+      ],
+    });
+    const text = (out[0]!.content[1] as { text: string }).text;
+    expect(text).toContain('[system_reminder]');
+    expect(text).toContain('app=dev');
+    expect(text).toContain('[warn] oops');
+    expect(text).not.toContain('- app=dev');
+  });
+
+  it('空 messages 数组 → 不动（无 throw）', async () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const out = await h.handle([], {
       config: {} as never,
       reminderRunner: () => [{ id: 'env', content: 'x' }],
     });
     expect(out).toEqual([]);
   });
 
-  it('[v0.0.33.3] 末尾 a2a message（sender.source=agent）→ 触发 reminder（squad 协作场景）', () => {
+  it('[v0.0.33.3] 末尾 a2a message（sender.source=agent）→ 触发 reminder（squad 协作场景）', async () => {
     const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
     const m = mkA2AMsg('a2a-1', 'from mate');
-    const out = h.handle([m], {
+    const out = await h.handle([m], {
       config: {} as never,
       reminderRunner: () => [{ id: 'squad_charter', content: '[squad:charter] ...' }],
     });
@@ -254,6 +272,123 @@ describe('system_reminder_injector', () => {
     // [v0.0.50] 块级 TextBlock.isSystemReminder 唯一权威；消息级 metadata 已废止
     expect((out[0]!.content[1] as { isSystemReminder?: boolean }).isSystemReminder).toBe(true);
     expect(out[0]!.metadata?.isSystemReminder).toBeUndefined();
+  });
+
+  // ---------- [v0.0.361 T3] 双模式（§1.1：full / incremental）----------
+
+  it('[v0.0.361] full：动态链全量 + 时间固定段 + queueClearAll(sid) + runState 置 false', async () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const m = mkMsg('u1', 'user', 'hi');
+    const runState = { useFullReminder: true };
+    const clearAll = vi.fn(async () => {
+      /* noop */
+    });
+    const out = await h.handle([m], {
+      config: { sessionId: 's1' } as never,
+      reminderRunner: () => [{ id: 'todo', content: '[todo] item', tier: 'info' }],
+      runState,
+      queueClearAll: clearAll,
+    });
+    const text = (out[0]!.content[1] as { text: string }).text;
+    // 动态链内容全量渲染 + 时间固定段
+    expect(text).toContain('[todo] item');
+    expect(text).toMatch(/Current date and time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(/);
+    // 时间行在 header 后第一行（§2 样例：header → time → content）
+    expect(text.split('\n')[1]).toMatch(/^Current date and time: /);
+    // full 已涵盖最新态 → pending queue 作废清空（拿锁清）
+    expect(clearAll).toHaveBeenCalledTimes(1);
+    expect(clearAll).toHaveBeenCalledWith('s1');
+    // 消费后置 false（run 内后续轮转 incremental）
+    expect(runState.useFullReminder).toBe(false);
+  });
+
+  it('[v0.0.361] incremental：useFullReminder=false → 忽略动态链 + drain 按序 value + runState 不再改', async () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const m = mkMsg('u1', 'user', 'hi');
+    const runState = { useFullReminder: false };
+    const runner = vi.fn(() => [{ id: 'todo', content: '[todo] should-not-appear', tier: 'info' }]);
+    const drain = vi.fn(async () => [
+      '[todo] item「落四件套」step「写 change_plan」→ done',
+      '[squad:agents] mate-1 running',
+    ]);
+    const out = await h.handle([m], {
+      config: { sessionId: 's1' } as never,
+      reminderRunner: runner,
+      runState,
+      queueDrain: drain,
+    });
+    const text = (out[0]!.content[1] as { text: string }).text;
+    // 时间固定段 + drain value 按序逐行（value 原文注入，不二次渲染）
+    expect(text.split('\n')[0]).toBe('[system_reminder]');
+    expect(text.split('\n')[1]).toMatch(/^Current date and time: /);
+    expect(text.split('\n')[2]).toBe('[todo] item「落四件套」step「写 change_plan」→ done');
+    expect(text.split('\n')[3]).toBe('[squad:agents] mate-1 running');
+    // incremental 不跑动态链（§1.1：链产出对渲染零贡献）
+    expect(runner).not.toHaveBeenCalled();
+    // drain 只调一次 + sid 正确
+    expect(drain).toHaveBeenCalledTimes(1);
+    expect(drain).toHaveBeenCalledWith('s1');
+    // incremental 不改 runState（保持 false；置 true 由 summary 重建路径负责）
+    expect(runState.useFullReminder).toBe(false);
+  });
+
+  it('[v0.0.361] incremental 空 queue → 仅时间行（时间恒出，§1.6）', async () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const m = mkMsg('u1', 'user', 'hi');
+    const out = await h.handle([m], {
+      config: { sessionId: 's1' } as never,
+      runState: { useFullReminder: false },
+      queueDrain: async () => [],
+    });
+    const text = (out[0]!.content[1] as { text: string }).text;
+    expect(text.split('\n')).toHaveLength(2);
+    expect(text.split('\n')[0]).toBe('[system_reminder]');
+    expect(text.split('\n')[1]).toMatch(/^Current date and time: /);
+  });
+
+  it('[v0.0.361] incremental drain 失败 → 降级仅时间行（不 throw，下轮兜底）', async () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const m = mkMsg('u1', 'user', 'hi');
+    const out = await h.handle([m], {
+      config: { sessionId: 's1' } as never,
+      runState: { useFullReminder: false },
+      queueDrain: async () => {
+        throw new Error('fs broken');
+      },
+    });
+    const text = (out[0]!.content[1] as { text: string }).text;
+    expect(text.split('\n')).toHaveLength(2);
+    expect(text.split('\n')[1]).toMatch(/^Current date and time: /);
+  });
+
+  it('[v0.0.361] full queueClearAll 失败 → 仍渲染 full 块 + 照置 false（降级不阻断）', async () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const m = mkMsg('u1', 'user', 'hi');
+    const runState = { useFullReminder: true };
+    const out = await h.handle([m], {
+      config: { sessionId: 's1' } as never,
+      reminderRunner: () => [{ id: 'todo', content: '[todo] item', tier: 'info' }],
+      runState,
+      queueClearAll: async () => {
+        throw new Error('lock timeout');
+      },
+    });
+    const text = (out[0]!.content[1] as { text: string }).text;
+    expect(text).toContain('[todo] item');
+    expect(text).toMatch(/Current date and time: /);
+    expect(runState.useFullReminder).toBe(false);
+  });
+
+  it('[v0.0.361] runState 缺席（UT fixture / forked）→ 视 full（§1.4 forked 恒 full）', async () => {
+    const h = new SystemReminderInjectorHandler('system_reminder_injector', {});
+    const m = mkMsg('u1', 'user', 'hi');
+    const out = await h.handle([m], {
+      config: { sessionId: 's1' } as never,
+      reminderRunner: () => [{ id: 'todo', content: '[todo] fixture', tier: 'info' }],
+    });
+    const text = (out[0]!.content[1] as { text: string }).text;
+    expect(text).toContain('[todo] fixture');
+    expect(text).toMatch(/Current date and time: /);
   });
 });
 

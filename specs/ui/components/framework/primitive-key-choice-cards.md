@@ -12,6 +12,7 @@
 - options: string[];              // dark/light 带主题预览色块
 - onChange: (next: string) => void
 - testId?: string;                // 容器 `${testId}`；每卡 `${testId}-${value}`
+- labels?: Record<string, string> — **[v0.0.350]** 选项友好名映射（value → 展示文本）；传入时卡片渲染 `labels[opt]`，缺省回退 opt 原文。消费方：component-provider-fields 类型选择器（5 类型友好名 i18n）；既有 dark/light 主题调用方不传 labels 零影响
 
 ## 状态 / 交互
 - 点任一卡片 → onChange(该选项 value)

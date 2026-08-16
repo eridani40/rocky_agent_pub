@@ -24,9 +24,9 @@ playwright-cli snapshot
 # Output shows: e1 [textbox "Email"], e2 [textbox "Password"], e3 [button "Sign In"]
 
 # Fill form fields - generates code automatically
-playwright-cli fill e1 "user@example.com"
+playwright-cli fill e1 "user.com"
 # Ran Playwright code:
-# await page.getByRole('textbox', { name: 'Email' }).fill('user@example.com');
+# await page.getByRole('textbox', { name: 'Email' }).fill('user.com');
 
 playwright-cli fill e2 "password123"
 # Ran Playwright code:
@@ -42,12 +42,12 @@ playwright-cli click e3
 Collect the generated code into a Playwright test:
 
 ```typescript
-import { test, expect } from '@playwright/test';
+import { test, expect } from '/test';
 
 test('login flow', async ({ page }) => {
   // Generated code from playwright-cli session:
   await page.goto('https://example.com/login');
-  await page.getByRole('textbox', { name: 'Email' }).fill('user@example.com');
+  await page.getByRole('textbox', { name: 'Email' }).fill('user.com');
   await page.getByRole('textbox', { name: 'Password' }).fill('password123');
   await page.getByRole('button', { name: 'Sign In' }).click();
 
@@ -89,7 +89,7 @@ Generated code captures actions but not assertions. Add expectations in your tes
 - `toBeChecked() / toBeUnchecked()` — checkbox state matches
 - `toMatchAriaSnapshot(snapshot)` — page (or locator) matches a partial accessibility snapshot
 
-Use `playwright-cli generate-locator <target>` to produce the locator expression for the assertion, and the snapshot/eval commands to capture the expected value.
+Use `playwright-cli generate-locator ${TARGET}` to produce the locator expression for the assertion, and the snapshot/eval commands to capture the expected value.
 
 When asserting text content, make sure that generated locator does not contain text from the element itself. `getByTestId()` or `getByLabel()` usually work well with asserting text. When locator is text-based, prefer `toBeVisible()` instead.
 
@@ -119,7 +119,7 @@ await page.getByRole('button', { name: 'Submit' }).click();
 // Manual assertions using the outputs above:
 await expect(page.getByRole('alert', { name: 'Success' })).toBeVisible();
 await expect(page.getByTestId('main-header')).toHaveText('Welcome, user');
-await expect(page.getByRole('textbox', { name: 'Email' })).toHaveValue('user@example.com');
+await expect(page.getByRole('textbox', { name: 'Email' })).toHaveValue('user.com');
 await expect(page.getByRole('checkbox', { name: 'Enable notifications' })).toBeChecked();
 
 // toMatchAriaSnapshot on the whole page, finds a matching region
@@ -141,7 +141,7 @@ await expect(page.getByRole('navigation')).toMatchAriaSnapshot(`
 
 ## 1. Planning
 
-Goal: produce a spec file (e.g. `specs/<feature>.plan.md`) that enumerates the scenarios to test. **Always** write the spec to a file.
+Goal: produce a spec file (e.g. `specs/${FEATURE}.plan.md`) that enumerates the scenarios to test. **Always** write the spec to a file.
 
 ### 1.1 Prerequisite: workspace
 
@@ -156,7 +156,7 @@ npx --no-install playwright --version
 If there is no Playwright install, bootstrap one and let the user pick the defaults:
 
 ```bash
-npm init playwright@latest
+npm init playwright
 ```
 
 ### 1.2 Prerequisite: seed test
@@ -167,7 +167,7 @@ Minimum viable seed:
 
 ```ts
 // tests/seed.spec.ts
-import { test } from '@playwright/test';
+import { test } from '/test';
 
 test('seed', async ({ page }) => {
   await page.goto('https://example.com/');
@@ -178,8 +178,8 @@ Preferred — push navigation into a fixture so scenario tests reuse it:
 
 ```ts
 // tests/fixtures.ts
-import { test as baseTest } from '@playwright/test';
-export { expect } from '@playwright/test';
+import { test as baseTest } from '/test';
+export { expect } from '/test';
 
 export const test = baseTest.extend({
   page: async ({ page }, use) => {
@@ -233,7 +233,7 @@ Map out:
 
 ### 1.4 Write the spec file
 
-Save under `specs/<feature>.plan.md`. Use this structure:
+Save under `specs/${FEATURE}.plan.md`. Use this structure:
 
 ```markdown
 # <Feature> Test Plan
@@ -248,16 +248,16 @@ Save under `specs/<feature>.plan.md`. Use this structure:
 
 **Seed:** `tests/seed.spec.ts`
 
-#### 1.1. <kebab-case-scenario-name>
+#### 1.1. ${SCENARIO_NAME}
 
-**File:** `tests/<group>/<kebab-case-scenario-name>.spec.ts`
+**File:** `tests/${GROUP}/${SCENARIO_NAME}.spec.ts`
 
 **Steps:**
   1. <Concrete user step>
     - expect: <observable outcome>
     - expect: <another observable outcome>
   2. <Next step>
-    - expect: <outcome>
+    - expect: ${OUTCOME}
 
 #### 1.2. <next-scenario>
 ...
@@ -318,7 +318,7 @@ Collect the generated code and write the test file at the path given in the spec
 ```ts
 // spec: specs/basic-operations.plan.md
 // seed: tests/seed.spec.ts
-import { test, expect } from './fixtures';   // or '@playwright/test' if no fixtures file
+import { test, expect } from './fixtures';   // or '/test' if no fixtures file
 
 test.describe('Signing in and out', () => {
   test('should sign in', async ({ page }) => {
@@ -344,7 +344,7 @@ Rules:
 - **One test per file.** File path, describe name, and test name come verbatim from the spec (minus the ordinal).
 - Prefix each numbered step with a `// N. <step text>` comment before its actions.
 - Use the describe group name verbatim from the spec (no `1.` ordinal).
-- Import from `./fixtures` if the project has one; otherwise `@playwright/test`.
+- Import from `./fixtures` if the project has one; otherwise `/test`.
 - **Important**: close the CLI session and stop the background test before moving to the next scenario.
 
 ### 2.3 Generate multiple scenarios
@@ -356,7 +356,7 @@ Loop 2.2 over the targeted scenarios one at a time, restarting the seed between 
 After generation, run the new tests once:
 
 ```bash
-PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/<group>/<scenario>.spec.ts
+PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/${GROUP}/${SCENARIO}.spec.ts
 ```
 
 Any failure goes to Section 3.
@@ -373,14 +373,14 @@ Goal: fix failing tests, and update the spec if the app's intended behaviour cha
 PLAYWRIGHT_HTML_OPEN=never npx playwright test
 ```
 
-Record the list of failing `<file>:<line>` entries and process them one at a time. Do not attempt parallel fixes — shared state and the single CLI session make that fragile.
+Record the list of failing `${FILE}:${LINE}` entries and process them one at a time. Do not attempt parallel fixes — shared state and the single CLI session make that fragile.
 
 ### 3.2 Debug one failure
 
 Run the single failing test in debug mode in the background, then attach:
 
 ```bash
-PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/<group>/<scenario>.spec.ts:<line> --debug=cli
+PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/${GROUP}/${SCENARIO}.spec.ts:${LINE} --debug=cli
 # wait for "Debugging Instructions" and the tw-XXXX session name
 playwright-cli attach tw-XXXX
 ```

@@ -71,6 +71,7 @@ export async function consolidateGlobalSkills(
     systemPrompt: '', // 未使用（forked 走 snapshot.system）
     client: buildLlmClient(model.providerId, model.modelId, deps.appConfig, deps.pluginManager),
     modelId: model.modelId,
+    providerId: model.providerId,
     dataDir: deps.dataDir, // skill_manage 读 ctx.config.dataDir
     tools: [skillManageTool],
   };

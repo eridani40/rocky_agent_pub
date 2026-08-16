@@ -8,7 +8,7 @@
  *   - GET /session/:id/workspace/search?q= 递归全量搜索文件名/文件夹名（大小写不敏感 substring）
  *
  * 安全：复用 session-workspace.ts export 的 json() + session-workspace-path.ts 的 whitelistResolve()
- *   （根校验与 tree 一致；symlink 目录不跟随出 workspace——防越权/循环，API change_log §1.3 约束）。
+ *   （根校验与 tree 一致；symlink 受控跟随语义在 workspace-search-core——v0.0.360 链式授权 + realpath 防循环）。
  * IGNORED_NAMES（node_modules/.git）复用 session-workspace.ts 导出（不重复定义）。
  *
  * 拆独立文件对齐 session-workspace-file.ts / session-workspace-save-image.ts 先例
@@ -23,7 +23,7 @@ import { searchWorkspace } from '../search/workspace-search-core';
 /**
  * GET /session/:id/workspace/search —— 递归全量搜索 workspace 文件名/文件夹名。
  * 流程：method 校验 → getSession → query q 校验 → workspaceDir → realRoot → whitelistResolve 根校验 →
- *   递归遍历（ignore node_modules/.git；symlink 目录不跟随出 workspace）→ files/dirs（相对路径）。
+ *   递归遍历（ignore node_modules/.git；symlink 受控跟随——v0.0.360 起链式授权）→ files/dirs（相对路径）。
  * 错误：405 非 GET / 404 session / 400 q 缺失或空串 / 500 workspaceDir 不可读。
  */
 export async function handleWorkspaceSearch(

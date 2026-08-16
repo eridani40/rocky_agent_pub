@@ -218,8 +218,12 @@ provider/model 实例数据是 **app_config 数据**（PRD §5.2 + `config/[P0]a
 | `GET` | `/provider/:id` | 取单个 provider 实例（含 models[]） | 无 | `200` · `{ "provider": ProviderInstance }` |
 | `PUT` | `/provider/:id` | 更新 provider 实例（label/baseUrl/credentials/enabled/`[v0.0.53]` protocolId） | `ProviderUpdateBody` | `200` · `{ "provider": ProviderInstance }` |
 | `DELETE` | `/provider/:id` | 删除 provider 实例（级联删其 models[]） | 无 | `200` · `{ "ok": true }` |
+| `GET` | `/provider/quota` | 读全局额度 store 秒回 `[v0.0.363]`（见 §5.6） | 无 | `200` · `{ "items": QuotaSnapshot[], "lastSyncedAt": number \| null }` |
+| `POST` | `/provider/quota/sync` | 触发一轮增量同步 fire-and-forget `[v0.0.363]`（见 §5.6c） | 无 | `202` · `{ "syncing": boolean, ... }` |
 
 > **实现说明（v0.0.3）**：DELETE 走 **tombstone 软删**（record 标 `_deleted: true`，GET 列表过滤 tombstone 对外表现为已删）。原因：底层 `KvConfigService`（v0.0.2）只提供 KV upsert/get/listGroup，无 delete 接口。功能正确（GET/PUT/:id 命中 tombstone 返 404、列表不返回）；未来 persistence 层补 delete 接口时清理 tombstone 残留。此为实现妥协，**对外 API 契约（语义 = 已删）不变**。
+>
+> **[v0.0.349] UI 删除入口补充**：v0.0.349 起 provider 详情页提供删除入口（ConfirmModal + 通用引用警示文案）；API 契约零变更（DELETE 端点早已存在）。删除后引用其模型的方案条目成 dangling——双语义见 `21-model-routing.md §2.7`（runtime 跳过 + 编辑拦保存）。删除时不做方案引用实时扫描（无新端点）。
 
 ### 5.2 类型
 
@@ -227,7 +231,10 @@ provider/model 实例数据是 **app_config 数据**（PRD §5.2 + `config/[P0]a
 /** provider 实例（= app_config providers 组一条 record 的 data，含 models[]） */
 interface ProviderInstance {
   id: string;                       // ULID（= app_config record key）
-  name: "anthropic_compatible";     // v0.0.3 仅此一种 ProviderName（指向内置 llm_provider ext impl）
+  // [v0.0.350] name = ProviderName：anthropic_compatible（通用，v0.0.3 既有缺省值）+
+  // 4 native coding plan 类型（kimi_coding_plan / glm_coding_plan / minimax_coding_plan / deepseek_api，
+  // 指向 llm_anthropic plugin 同名 llm_provider ext impl；POST/PUT 白名单校验，缺省 anthropic_compatible 向后兼容）
+  name: ProviderName;
   protocolId: "anthropic_messages"; // [v0.0.53] 必填，1 provider : 1 protocol 锁定（指向 llm_protocol ext impl）。当前仅 "anthropic_messages" 字面量；未来扩多 protocol 时此处 union 扩展
   label: string;                    // 用户起的展示名
   baseUrl: string;                  // e.g. "https://api.anthropic.com"
@@ -310,7 +317,7 @@ type ModelUpdateBody = Partial<ModelCreateBody>;
 
 | HTTP status | 触发条件 | 响应体 |
 |---|---|---|
-| `400` | POST/PUT body 缺必填；`name` 非 v0.0.3 允许值；`[v0.0.53]` POST `/provider` 缺 `protocolId` 或 `protocolId` 不在已注册 `llm_protocol` ext impl 的 implId 集合内 | `{ "error": "<原因>" }` |
+| `400` | POST/PUT body 缺必填；`name` 非 v0.0.3 允许值（`[v0.0.350]` 白名单扩 5 值：anthropic_compatible + 4 native coding plan）；`[v0.0.53]` POST `/provider` 缺 `protocolId` 或 `protocolId` 不在已注册 `llm_protocol` ext impl 的 implId 集合内 | `{ "error": "<原因>" }` |
 | `404` | `:id` / `:modelId` 不命中 | `{ "error": "Not Found" }` |
 | `409` | POST model 时 `modelId` 在该 provider 下已存在 | `{ "error": "Conflict" }` |
 
@@ -363,6 +370,76 @@ Content-Type: application/json
 
 > **AT 路径覆盖**：`tests/api/session/model_default_resolve` (P7) + `tests/api/compact/summary_model_fallback` (P8) + `tests/api/multi_agent/squad_summary_model` (P9) + `tests/api/config/dev_to_app_migration` (P10)。
 
+### 5.6 `GET /provider/quota` — 全局额度 store 读取（`[v0.0.350]` 引入现拉聚合，`[v0.0.363]` 改读 store 秒回）
+
+**语义**：读 server 全局 QuotaStore 立即返回（秒回，不再现拉渠道 API）——store 由 QuotaSyncService 每 5min（env `QUOTA_SYNC_INTERVAL_MS` 可配，缺省 300000）后台同步 + 启动立即首轮；同步完成后经 SSE `provider_quota` 广播推送（§5.6b）。覆盖全部 4 native 类型（kimi/glm/minimax/deepseek coding plan）provider；通用 anthropic_compatible 实例不参与（items 不含）。
+
+**请求**：`GET /provider/quota`（无参数）
+
+**响应 200**：
+
+```typescript
+interface QuotaGetResponse {
+  items: QuotaSnapshot[];       // store 当前快照（含 error 项——错误态也是状态）；零 native provider → []
+  lastSyncedAt: number | null;  // store 上次同步毫秒时间戳；null = 启动空窗（尚未完成首轮）
+}
+
+// 快照条目（v0.0.350 形状不变）
+interface QuotaSnapshot {
+  providerId: string;         // provider 实例 id
+  providerLabel: string;      // 实例 label（用户起的展示名）
+  implId: string;             // kimi_coding_plan | glm_coding_plan | minimax_coding_plan | deepseek_api
+  kind: 'quota' | 'balance';  // 额度型（三渠道）| 余额型（deepseek）
+  tiers?: QuotaTier[];        // kind=quota 时：5h/周两桶（usedPercent=已用百分比）
+  membership?: string;        // 套餐/会员档位（glm data.level / kimi membership.level）
+  balance?: { currency: string; total: number; granted?: number; toppedUp?: number };
+  isAvailable?: boolean;      // kind=balance：is_available（false → UI「余额不足」）
+  error?: { kind: 'auth' | 'business' | 'network' | 'timeout'; message: string }; // 单渠道错误（401/403→auth；业务错误透原始文案）
+  fetchedAt: number;          // 快照毫秒时间戳
+}
+interface QuotaTier { window: 'five_hour' | 'weekly'; usedPercent: number; resetsAt?: string }
+```
+
+**启动空窗行为**：store 空 → 异步触发一轮同步（**不等待**）+ 立即返回 `{ items: [], lastSyncedAt: null }`——前端 lastGood 兜底 + SSE 帧到达刷新。
+
+**错误隔离**：单渠道查询失败**不炸整体**——该渠道 item 带 `error` 字段返回（其余渠道正常）；零 coding plan provider → `items: []`。渠道内字段缺失/形状漂移 → 防御式降级（缺哪段展示哪段，见 tech `llm_provider_interface.md` §queryQuota）。
+
+**实现约束**：查询域从 provider 实例 baseUrl 推导（子串匹配：glm 按 bigmodel.cn→国内站否则 z.ai；minimax 按 minimax.io→国际站否则国内站；kimi 用 baseUrl 原样；deepseek 取 origin）；glm 鉴权**裸 api_key 无 Bearer**（其余 Bearer）；解析规则权威 = `specs/research/v0.0.350-live-verify.md`（实测）+ cc-switch 对照。
+
+### 5.6b `[v0.0.363]` SSE topic `provider_quota` — store 更新广播
+
+- **订阅**：`POST /sse` body `{ "topics": ["provider_quota"], "group": "_all" }`（广播组 `_all`，同 `app_task` 模式——所有打开中的页面共享）。
+- **触发时机**：QuotaSyncService 每轮同步写 store 完成后（5min 周期轮 / 启动首轮 / POST sync 触发的增量轮，同构 syncOnce）。
+- **帧形状**：
+
+```typescript
+{
+  "topic": "provider_quota",
+  "group": "_all",
+  "data": { "items": QuotaSnapshot[], "lastSyncedAt": number },  // 同 GET 响应体（items 含 error 项）
+  "timestamp": string                                           // ISO 8601（同步完成时刻）
+}
+```
+
+- **断线语义**：SSE 断线期间 store 更新不达——重连后由下一轮 5min 周期 / 下次打开页面触发补齐（既有 SSE 全 topic 共性）；前端浏览器侧 lastGood 兜底展示。
+
+### 5.6c `[v0.0.363]` `POST /provider/quota/sync` — 触发一轮增量同步
+
+**语义**：fire-and-forget 触发一轮 syncOnce（聚合全部 native provider 快照 → store 全量覆盖 → SSE 广播），立即返回 202。前端打开额度消费页面（squad 额度弹层 / providers 页）时调用，「打开触发」= 提前跑一轮（与 5min 周期轮同构，增量范围 = 全量 native providers ≤5 个，成本低）。
+
+**请求**：`POST /provider/quota/sync`（无 body）
+
+**响应 202**：
+
+```typescript
+// 接受触发
+{ "syncing": true, "lastTriggeredAt": number }   // lastTriggeredAt = 本次受理时刻（诊断字段）
+// 拒绝触发（非错误——同步已在途 / 30s 节流窗内）
+{ "syncing": false, "reason": string }            // reason = 'in_flight' | 'throttled'
+```
+
+**节流语义**：`inFlight`（上一轮未完跳过）+ `lastTriggeredAt` 30s 节流（多页面同时打开触发不叠加）。结果经 SSE `provider_quota` 帧到达（本端点不回传同步结果）。
+
 ## 6. 文件变更清单（planner/coder 依据）
 
 v0.0.3 端点首次落地（已在 dev1 合并）：
@@ -383,4 +460,4 @@ v0.0.7 `/provider` `/provider/:id/model` 端点扩展：`PUT /provider/:id` 从 
 
 ## 7. 版本
 
-version: 1.7 `[v0.0.59 modified]`（§1 header 加 v0.0.59 段：displayReason 前端 i18n 化——契约不变（零 API breakage），前端启用 react-i18next 后前端侧优先按 errorCategory 查 locale 表、回退 displayReason 字段；技术权威 `specs/tech/i18n/[P0]i18n_overview.md §8`；PRD `specs/prd/version_logs/v0.0.59.i18n.md`。**[v0.0.59 corrected]** 同步修正两处历史偏差：(1) `LlmErrorCategory` 实测 **18 值**（不是 19——后端 `DISPLAY_REASON_TABLE` 当前 18 行，`MAX_TOKENS_TOO_HIGH` 只出现一次；前端 `error.json` 同步 18 leaf）；(2) `GET /session/:id` 响应 `currentRun.error` **仅在 `state=running` 且 `currentRunId≠null` 时存在**——`state=error` + eager-drain 时响应无 currentRun/error 字段，AT 改读 SSE error 事件或 history run RunRecord。详见 `specs/api/version_logs/v0.0.59.i18n/change_log.md`）。1.6 `[v0.0.25 rev2 modified]`（§1 header 加 rev2 错误外显 + 自适应机制说明：LlmErrorCategory 17→19 值（+MAX_TOKENS_TOO_HIGH/EMPTY_RESPONSE）；SSE error 事件再扩 displayReason+errorDetail（向后兼容）；新增 `llm_attempt` SSE event（per-attempt retry/fallback 进度）；Run/RunRecord.error 落 RunErrorInfo（errorCategory+displayReason+errorDetail，GET /session/:id 可读）；连续错误驱动 maxTokens 派生（base×0.7^TOO_HIGH，旧 maxTokensOverlay 移除）；per-session×per-model 降级（四元组 key 两遍扫描）；length one-shot ceiling bump + prefill defer；validate 收口 BUG-005。权威附录 `specs/tech/version_logs/v0.0.25/llm_caller_rev2_changes.md`）。1.5 `[v0.0.25 modified]`（§1 header 加 LLM 调用错误处理说明：server 内部 client.stream → llmCaller.invoke（端点形状不变）；SSE error 事件新增 `errorCategory` 字段（LlmErrorCategory 17 值，向后兼容）；新增 `/config/app/llm_request` 端点（→ `03-config-center.md §2.4`）；langfuse metadata 补 physical_wire_body/errorCategory/retry_chain；anthropic role=tool 协议修复 BUG-002）。1.4 `[v0.0.8 modified]`（1.3 → 1.4 [v0.0.7]：`PUT /provider/:id` 从 spec 声明落地为实现；`ModelInstance` / `ProviderCreateBody` / `ModelCreateBody` 扩展 label/enabled；路径/方法/错误码/脱敏规则不变。→ 1.4 [v0.0.8]：`/chat` 端点作废删除，被 `04-agent-session.md` 的 session 化端点取代；`/provider` `/provider/:id/model` 不变；§3 保留 `/chat` 历史契约仅作参考）
+version: 1.9 `[v0.0.363 modified]`（§5.1 GET /provider/quota 行改 store 秒回语义 + 新增 POST /provider/quota/sync 行；§5.6 重写——GET 从现拉聚合（350 决策⑥，已推翻）改为读全局 QuotaStore 秒回（响应加 lastSyncedAt；启动空窗 `{items:[],lastSyncedAt:null}` 异步触发不等待）；新增 §5.6b SSE topic `provider_quota`（广播组 _all，每轮同步完成推送 `{data:{items,lastSyncedAt},timestamp:ISO}`）+ §5.6c POST /provider/quota/sync（202 fire-and-forget；`{syncing:true,lastTriggeredAt}` / 节流 `{syncing:false,reason}`）。技术权威 `specs/tech/version_logs/v0.0.363/change_plan.md` + `specs/tech/version_logs/v0.0.363/change_log.md`）。1.8 `[v0.0.350 modified]`（§5.1 加 `GET /provider/quota` 行；§5.2 `ProviderInstance.name` 从 `"anthropic_compatible"` 字面量放宽为 `ProviderName` union（+4 native coding plan 类型，POST/PUT 白名单校验、缺省值向后兼容）；新增 §5.6 quota 聚合端点契约（QuotaSnapshot/QuotaTier 形状 + 错误隔离语义 + baseUrl 推导/glm 裸 key 实现约束）。技术权威 `specs/tech/version_logs/v0.0.350/change_plan.md` + `specs/api/version_logs/v0.0.350/change_log.md`）。1.7 `[v0.0.59 modified]`（§1 header 加 v0.0.59 段：displayReason 前端 i18n 化——契约不变（零 API breakage），前端启用 react-i18next 后前端侧优先按 errorCategory 查 locale 表、回退 displayReason 字段；技术权威 `specs/tech/i18n/[P0]i18n_overview.md §8`；PRD `specs/prd/version_logs/v0.0.59.i18n.md`。**[v0.0.59 corrected]** 同步修正两处历史偏差：(1) `LlmErrorCategory` 实测 **18 值**（不是 19——后端 `DISPLAY_REASON_TABLE` 当前 18 行，`MAX_TOKENS_TOO_HIGH` 只出现一次；前端 `error.json` 同步 18 leaf）；(2) `GET /session/:id` 响应 `currentRun.error` **仅在 `state=running` 且 `currentRunId≠null` 时存在**——`state=error` + eager-drain 时响应无 currentRun/error 字段，AT 改读 SSE error 事件或 history run RunRecord。详见 `specs/api/version_logs/v0.0.59.i18n/change_log.md`）。1.6 `[v0.0.25 rev2 modified]`（§1 header 加 rev2 错误外显 + 自适应机制说明：LlmErrorCategory 17→19 值（+MAX_TOKENS_TOO_HIGH/EMPTY_RESPONSE）；SSE error 事件再扩 displayReason+errorDetail（向后兼容）；新增 `llm_attempt` SSE event（per-attempt retry/fallback 进度）；Run/RunRecord.error 落 RunErrorInfo（errorCategory+displayReason+errorDetail，GET /session/:id 可读）；连续错误驱动 maxTokens 派生（base×0.7^TOO_HIGH，旧 maxTokensOverlay 移除）；per-session×per-model 降级（四元组 key 两遍扫描）；length one-shot ceiling bump + prefill defer；validate 收口 BUG-005。权威附录 `specs/tech/version_logs/v0.0.25/llm_caller_rev2_changes.md`）。1.5 `[v0.0.25 modified]`（§1 header 加 LLM 调用错误处理说明：server 内部 client.stream → llmCaller.invoke（端点形状不变）；SSE error 事件新增 `errorCategory` 字段（LlmErrorCategory 17 值，向后兼容）；新增 `/config/app/llm_request` 端点（→ `03-config-center.md §2.4`）；langfuse metadata 补 physical_wire_body/errorCategory/retry_chain；anthropic role=tool 协议修复 BUG-002）。1.4 `[v0.0.8 modified]`（1.3 → 1.4 [v0.0.7]：`PUT /provider/:id` 从 spec 声明落地为实现；`ModelInstance` / `ProviderCreateBody` / `ModelCreateBody` 扩展 label/enabled；路径/方法/错误码/脱敏规则不变。→ 1.4 [v0.0.8]：`/chat` 端点作废删除，被 `04-agent-session.md` 的 session 化端点取代；`/provider` `/provider/:id/model` 不变；§3 保留 `/chat` 历史契约仅作参考）

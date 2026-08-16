@@ -1,10 +1,16 @@
 ---
 type: log
 title: Squad KB 变更记录
-updated: 2026-08-13
+updated: 2026-08-15
 ---
 
 # Squad KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-15 · v0.0.361（squad reminder 拆半 + queue fanout — squad_workspace 退役）
+
+- **`[P1]squad_reminder_providers.md`**：标题/定位改 2 provider（`squad_workspace` 退役）；§2 改退役注记（逻辑平移 `session_states` mapper + 五链同步：plugin.json/scopes/i18n/计数断言）；§3 squad_agents_status 改动态半（名单归 team_roster，行内仅 name 锚点）；§5 角色矩阵删 squad_workspace 行；§7 injector 改双模式；新增 §7b reminder queue 写入接线表（`squad-states-fanout` 三入口：presence/member_state/task transition，key/audience/写点代码）；§8 边界表同步；frontmatter `updated`。
+- **`[P1]prompt_sections.md`**：§1 贡献点总表加 `session_states` mapper 行 + 删 squad_workspace provider 行；§4 表改 2 provider + 拆半注记；§5 格式行改 name 锚点（去 role/sessionId）；§6 生命周期动态变化行改双模式；frontmatter `updated`。
+- **`index.md`**：reminder 概念行改（queue 写侧投递 + squad_workspace 退役注记）+ presence 行改拆半口径；frontmatter `updated`。
 
 ## 2026-08-13 · v0.0.319（团队同步服务层 spec 补建 — [P1]team_sync.md）
 

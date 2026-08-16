@@ -54,6 +54,9 @@
     "providers": {
       "label": "供应商"
     },
+    "model_routing_plans": {
+      "label": "模型组合方案库"
+    },
     "web_search": {
       "label": "网络搜索"
     },
@@ -92,6 +95,72 @@
     },
     "consolidation": {
       "label": "整理"
+    }
+  },
+  "modelRouting": {
+    "list": {
+      "create": "新建方案",
+      "rename": "重命名",
+      "copy": "复制",
+      "delete": "删除",
+      "loading": "加载中…",
+      "empty": "还没有模型组合方案。点右上「新建方案」创建。",
+      "modelsCount": "{{count}} 个模型",
+      "mountedTo": "已挂载到 {{names}}",
+      "unmounted": "未挂载",
+      "moreActions": "更多操作"
+    },
+    "editor": {
+      "addItem": "添加模型条目",
+      "enabled": "启用",
+      "circuitTitle": "熔断参数（高级）",
+      "circuitFailureThreshold": "连续失败阈值",
+      "circuitSuccessThreshold": "连续成功阈值",
+      "circuitTimeoutSeconds": "熔断时长（秒）",
+      "circuitErrorRateThreshold": "错误率阈值",
+      "circuitMinRequests": "窗口样本数",
+      "degradeOrder": "降级顺序（拖拽排序，序号即优先级）",
+      "timeCondition": "时间限制",
+      "defaultHint": "默认 {{value}}"
+    },
+    "validate": {
+      "nameRequired": "方案名称不能为空",
+      "itemsRequired": "方案至少需要一个模型条目",
+      "itemModelRequired": "每条目必须选择 provider 和 model",
+      "sameModelMax2": "同一模型最多 2 个启用条目（1 带时间 + 1 不带时间）",
+      "sameModel2Time": "同一模型不允许 2 个带时间条目",
+      "sameModel2NoTime": "同一模型不允许 2 个不带时间条目",
+      "timeAboveUnconditional": "带时间条目必须在不带时间条目上面",
+      "itemModelInvalid": "存在失效条目：条目模型已删除或禁用，请重新选择模型"
+    },
+    "status": {
+      "normal": "正常",
+      "abnormal": "异常",
+      "observing": "观察中",
+      "normalTitle": "模型正常",
+      "abnormalTitle": "模型异常，N 秒后自动恢复",
+      "observingTitle": "模型观察中（探测恢复）"
+    },
+    "delete": {
+      "title": "删除方案",
+      "body": "确定删除方案「{{name}}」？已挂载该方案的 squad / playground 将回退到默认模型。",
+      "ok": "删除",
+      "cancel": "取消",
+      "detachedHint": "已解除 {{count}} 个挂载方的方案引用"
+    },
+    "time": {
+      "popoverHeader": "选择可用小时（拖拽连续段 / 点击单格）· 深色 = 该小时可用",
+      "unselected": "未选择",
+      "clearSchedule": "清除定时",
+      "confirm": "确定",
+      "errEmpty": "至少选择 1 个小时（全不选 = 无效）",
+      "errFull": "全选 = 全天可用，直接「清除定时」即可"
+    },
+    "deleteItem": {
+      "title": "删除路由条目？",
+      "body": "确定删除 {{name}}（序号 {{index}}）吗？此操作不可撤销。",
+      "ok": "删除",
+      "cancel": "取消"
     }
   },
   "userMemory": {
@@ -359,5 +428,12 @@
       "confirm_ok": "确认导入",
       "confirm_cancel": "取消"
     }
+  },
+  "modelOrPlan": {
+    "groupModels": "模型",
+    "groupPlans": "方案",
+    "placeholder": "选择模型或方案",
+    "emptyPlans": "暂无方案",
+    "planPrefix": "方案"
   }
 }

@@ -1,0 +1,152 @@
+# mr_tc4 — [v0.0.347] 路由调用降级链：401 直接熔断 + 降级成功 + open/half_open 呈现
+#
+# 覆盖契约：specs/api/overall/21-model-routing.md §2.6（status 呈现映射）+ tech §5/§6/§7
+#           + change_plan（routing_loop / circuit_breaker_registry / 分支 2 挂载查询）
+#  P-C 核心路径黑盒实证（test-plan §3.5）：
+#   1. 无效 key provider（baseUrl 真实可达 minimax，key=sk-invalid-xxx）→ 请求必然 401 AUTH_INVALID
+#      → routingRetryPolicy directOpen → CircuitBreakerRegistry 直接 Open（UC-16）
+#   2. 方案 = [坏模型(priority1), minimax(priority2)] 挂载到 squad → leader session（modelId=default）
+#      走方案链：坏模型 401 快速失败 → bannedModels → 降级 minimax 成功（UC-14/16 降级收敛）
+#   3. GET status → 坏模型 circuitState=open + presentation=abnormal + remainingSeconds exists（🔴 带倒计时）
+#      minimax 条目 presentation=normal（降级成功未熔断）
+#   4. 方案级 circuit.timeoutSeconds=30 覆盖 → 等 30s 到期 → 坏模型 half_open + presentation=observing
+#      + remainingSeconds absent（🟡 无倒计时）
+#
+# 真调 LLM（minimax 正常条目）；429/529/503 框架层自动 skip。timeout 240。
+# teardown 解散 squad + 删方案 + 删坏 provider（不污染 test pool）。
+case: mr_tc4
+module: model-routing
+timeout: 240
+
+setup:
+  - name: 创建坏 provider（无效 key，baseUrl 指向真实 minimax 端点 → 401 确定性触发）
+    requests:
+      - method: POST
+        path: /provider
+        body:
+          name: "anthropic_compatible"
+          protocolId: "anthropic_messages"
+          label: "zz-mr-tc4-bad"
+          baseUrl: "https://api.minimaxi.com/anthropic"
+          credentials:
+            key: "sk-invalid-mr-tc4-xxx"
+          enabled: true
+    save:
+      bad_pid: .provider.id
+    check:
+      - .provider.id exists
+      - .provider.enabled == true
+
+  - name: 给坏 provider 加 model（合法 enabled model，供方案引用）
+    requests:
+      - method: POST
+        path: /provider/{bad_pid}/model
+        body:
+          modelId: "zz-bad-model"
+          label: "zz-bad-model"
+          enabled: true
+    check:
+      - .model.modelId == "zz-bad-model"
+
+  - name: PUT 方案 — [坏模型 priority1, minimax priority2]（timeoutSeconds=30 覆盖，加速 half_open 可测）
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc4-plan"
+          data:
+            id: "zz-mr-tc4-plan"
+            name: "zz-mr-tc4-plan"
+            items:
+              - providerId: "{bad_pid}"
+                modelId: "zz-bad-model"
+                priority: 1
+                enabled: true
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 2
+                enabled: true
+            circuit:
+              timeoutSeconds: 30
+            createdAt: 1755200000000
+    check:
+      - .ok == true
+
+  - name: 建 squad 并挂载方案（leader session modelId=default → 走方案链）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "zz-mr-tc4-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "zz-mr-tc4-leader"
+    save:
+      squad_id: .id
+      sid: .members[0].sessionId
+    check:
+      - .id exists
+      - .members[0].sessionId exists
+
+  - name: PATCH squad 挂载方案
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}
+        body:
+          modelRoutingPlanId: "zz-mr-tc4-plan"
+    check:
+      - .modelRoutingPlanId == "zz-mr-tc4-plan"
+
+steps:
+  - name: leader session 发消息（同步等终态）— 坏模型 401 → 降级 minimax 成功
+    run:
+      content: "请回复「OK」两个字母，不要调用任何工具，直接回复即可。"
+    check:
+      - .state == "idle"
+
+  - name: GET status — 坏模型 open/abnormal/倒计时，minimax normal（降级成功未熔断）
+    requests:
+      - GET /model-routing/plans/zz-mr-tc4-plan/status
+    check:
+      - .planId == "zz-mr-tc4-plan"
+      - .items[] any .presentation == "abnormal"
+      - .items[] any .circuitState == "open"
+      - .items[] any .remainingSeconds exists
+      - .items[] any .presentation == "normal"
+      - .items[] any .circuitState == "closed"
+
+  - name: 轮询 status — timeoutSeconds=30 到期 → 坏模型 half_open/observing 无倒计时（🟡 观察中）
+    poll:
+      request: GET /model-routing/plans/zz-mr-tc4-plan/status
+      until: '.items[] any .circuitState == "half_open"'
+      every: 3
+      timeout: 60
+    check:
+      - .items[] any .presentation == "observing"
+      - .items[] all .remainingSeconds absent
+
+teardown:
+  - name: 解散 squad
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+        status: [200, 404]
+    check:
+      - .deleted == true
+
+  - name: 删除方案
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=zz-mr-tc4-plan
+        status: [200, 404]
+    check:
+      - .ok == true
+
+  - name: 删除坏 provider（不污染 test pool）
+    requests:
+      - method: DELETE
+        path: /provider/{bad_pid}
+        status: [200, 404]
+    check:
+      - .ok == true

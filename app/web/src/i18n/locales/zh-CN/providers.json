@@ -5,6 +5,8 @@
     "addProvider": "+ 添加提供商"
   },
   "field": {
+    "typeLabel": "类型",
+    "typeHint": "name（coding plan 预置）",
     "nameLabel": "名称",
     "namePlaceholder": "如 Claude",
     "apiKeyHint": "credentials.key（脱敏 ***，重输覆盖）",
@@ -14,6 +16,37 @@
     "urlEmpty": "先填 Base URL 与选择 protocol",
     "enableTitle": "启用此提供商",
     "enableHint": "disabled 后不出现在模型选择器"
+  },
+  "type": {
+    "anthropic_compatible": "Anthropic 格式兼容",
+    "kimi_coding_plan": "Kimi Coding Plan",
+    "glm_coding_plan": "智谱 GLM Coding Plan",
+    "minimax_coding_plan": "MiniMax Coding Plan",
+    "deepseek_api": "DeepSeek（按量付费）"
+  },
+  "quota": {
+    "title": "额度总览",
+    "groupQuota": "套餐额度",
+    "groupBalance": "充值余额",
+    "providerCount": "{{count}} 渠道",
+    "fiveHour": "5 小时额度",
+    "weekly": "本周额度",
+    "used": "已用",
+    "time": "时间",
+    "resetSuffix": "重置",
+    "balance": "余额",
+    "insufficient": "余额不足",
+    "membership": "套餐",
+    "granted": "赠送",
+    "toppedUp": "充值",
+    "fullResetTime": "重置",
+    "countdown": "约 {{h}} 小时 {{m}} 分 {{s}} 秒后重置",
+    "lastUpdated": "上次更新 {{time}}",
+    "errorAuth": "凭证已失效，请检查 API Key",
+    "fast": "消耗偏快"
+  },
+  "fold": {
+    "disabled": "已停用 ({{count}})"
   },
   "list": {
     "modelCount": "{{count}} 个模型",
@@ -27,7 +60,10 @@
     "saved": "✓ 已保存",
     "modelsTitle": "关联模型 · {{count}}",
     "addModel": "+ 添加模型",
-    "emptyModels": "暂无模型，点「添加模型」新增"
+    "emptyModels": "暂无模型，点「添加模型」新增",
+    "delete": "删除",
+    "deleteTitle": "删除提供商",
+    "deleteBody": "删除后，引用该提供商模型的组合方案条目将失效；正在使用其模型的会话将自动切换或回退到其他模型。确定删除吗？"
   },
   "model": {
     "add": "添加模型",

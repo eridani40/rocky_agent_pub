@@ -150,6 +150,7 @@ function newConfig(sessionId: string, client: LlmClient): SessionConfig {
     systemPrompt: 'You are a helpful assistant.',
     client,
     modelId: 'mock-compact-model',
+    providerId: 'mock-provider',
     // 生产 compact() 的 config 必带 kind（resolveConfigBySid 注入），assemble 按 session scope 解析
     kind: new SessionKind({ biz: 'playground', role: 'rocky', derivation: 'parent' }),
   };

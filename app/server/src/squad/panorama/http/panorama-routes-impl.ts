@@ -17,6 +17,7 @@ import { BreakingChangeRequiresApprovalError, MigrationMismatchError, MigrationP
 import type { MigrationPlan } from '../migration/types';
 import { emitPanoramaEvent } from './sse';
 import { ensureSystemEntities, injectSystemEntities, afterTaskWrite, SYSTEM_ENTITY_DEFS } from '../builtin';
+import { notifyTaskTransition } from '../../squad-states-fanout';
 import type { ReplayableEventBus } from '../../../agent/event-hub';
 
 interface RouteCtx {
@@ -283,7 +284,15 @@ export async function handleTransition(req: Request, ctx: RouteCtx, entity: stri
   s.transitionInstance(entity, id, stateField!, from, to, { messageId: caller.messageId ?? null, source: 'drag' });
   emitEntity(ctx, entity, 'transitioned', id, { ...inst, [stateField!]: to }, { from, to }, s);
   // task transition（如 todo→done）→ 重算依赖该 task 的 waiting 解除（panorama_builtin §4）
-  if (entity === 'task') afterTaskWrite(s);
+  if (entity === 'task') {
+    afterTaskWrite(s);
+    // [v0.0.361 T4] task 状态变化写 reminder queue + audience fanout（与 tool 入口同调 helper，§1.5 不重复实现）
+    await notifyTaskTransition(
+      { fsRoot: ctx.dataDir, squadId: ctx.squadId, store: s },
+      { ...inst, [stateField!]: to },
+      to,
+    );
+  }
   return json(200, { ok: true, from, to });
 }
 

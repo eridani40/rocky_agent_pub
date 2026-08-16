@@ -27,6 +27,7 @@ export function ComponentProviderListCard({ provider, onClick }: ComponentProvid
   return (
     <div
       data-action-key="providers.provider.open-detail"
+      data-testid={`provider-card-${provider.id}`}
       onClick={onClick}
       className="border border-border rounded-[10px] py-[16px] px-[20px] mb-2 bg-surface-2 transition-colors hover:border-border-strong cursor-pointer flex items-center gap-3"
     >

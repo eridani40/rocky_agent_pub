@@ -2,9 +2,10 @@
  * component-chat-float-menu —— 聊天区右上悬浮菜单（v0.0.131 新建）
  * 参考: specs/ui/components/chat-page/component-chat-float-menu.md
  *
- * 竖向工具条：长期记忆 / 定时任务 / skills / 团队状态 / 待办 五个菜单项（memory/cron/todo 带 badge；
- * skills 无计数需求不挂 badge；v0.0.269 第 4 项「团队状态」（squad 图标 + running badge，skills 下方
- * todo 上方——todo 保持最后）。顺序 1=memory/cron/skills/squad-status/todo 自上而下）。
+ * 竖向工具条：长期记忆 / 定时任务 / skills / 余额查询 / 团队状态 / 待办 六个菜单项（memory/cron/todo 带 badge；
+ * skills 无计数需求不挂 badge；余额查询第 4 项（v0.0.356，老板 20:15 拍板 skills 与团队状态之间）；
+ * 团队状态第 5 项（squad 图标 + running badge，quota 下方 todo 上方——todo 保持最后）。
+ * 顺序 1=memory/cron/skills/quota/squad-status/todo 自上而下）。
  * 恒挂载 useMemoryCrud + useCronCrud + useSkillsCatalog + useTodoCrud
  * （chat 挂载即拉，badge 才有意义），badge 与弹层列表同一 hook 实例（弹层开关不重 GET；
  * skills 弹层每次打开由弹层侧 refetch，PRD UC-S7）。
@@ -22,7 +23,7 @@
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BrainIcon, ClockIcon, StarIcon, TodoIcon } from './icons';
+import { BatteryIcon, BrainIcon, ClockIcon, StarIcon, TodoIcon } from './icons';
 import { useMemoryCrud } from './use-memory-crud';
 import { useCronCrud } from './use-cron-crud';
 import { useSkillsCatalog } from './use-skills-catalog';
@@ -32,6 +33,7 @@ import { ComponentCronModal } from './component-cron-modal';
 import { ComponentSkillsModal } from './component-skills-modal';
 import { ComponentTodoModal } from './component-todo-modal';
 import { ComponentSquadStatusModal } from '../studio-page/component-squad-status-modal';
+import { ComponentQuotaEntryModal } from './component-quota-entry-modal';
 import { useSquadStatus } from '../studio-page/squad-status-context';
 import { deriveRunningCount } from '../studio-page/squad-status-utils';
 import { Icon } from '../studio-page/studio-icons';
@@ -61,7 +63,7 @@ function Badge({ count }: { count: number }) {
 
 export function ComponentChatFloatMenu({ sessionId, hideCron = false, chrome }: ChatFloatMenuProps) {
   const { t } = useTranslation('chat');
-  const [open, setOpen] = useState<'memory' | 'cron' | 'skills' | 'squad-status' | 'todo' | null>(null);
+  const [open, setOpen] = useState<'memory' | 'cron' | 'skills' | 'squad-status' | 'quota' | 'todo' | null>(null);
 
   // 数据所有权单一源：恒挂载，弹层开关不重 GET，badge 与弹层列表同一实例（component-chat-float-menu.md §2）
   const memory = useMemoryCrud('session', sessionId);
@@ -122,7 +124,21 @@ export function ComponentChatFloatMenu({ sessionId, hideCron = false, chrome }: 
         >
           <StarIcon size={16} />
         </button>
-        {/* 团队状态第 4 菜单项（v0.0.269，skills 下方 todo 上方——todo 保持最后）；
+        {/* 余额查询第 4 菜单项（v0.0.356，skills 下方 squad-status 上方——老板 20:15 拍板倒数第三位）
+            渲染条件：squadCtx.detail.modelRoutingPlanId 存在（未挂载方案不显示） */}
+        {squadCtx?.detail?.modelRoutingPlanId && (
+          <button
+            type="button"
+            data-action-key="chat.quota.open"
+            onClick={() => setOpen('quota')}
+            aria-label={t('floatMenu.quota')}
+            title={t('floatMenu.quota')}
+            className="relative flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-bg-warm hover:text-fg"
+          >
+            <BatteryIcon size={16} />
+          </button>
+        )}
+        {/* 团队状态第 5 菜单项（v0.0.269，quota 下方 todo 上方——todo 保持最后）；
             useSquadStatus 无 Provider（playground/academy）→ 按钮不渲染（fail-safe）；
             running badge=deployed 成员 isRunningState 计数含 leader；0 态 Badge 不渲染（绝对定位不占位） */}
         {squadCtx && (
@@ -138,7 +154,7 @@ export function ComponentChatFloatMenu({ sessionId, hideCron = false, chrome }: 
             <Badge count={runningCount} />
           </button>
         )}
-        {/* todo 第 5 菜单项（v0.0.223，skills 下方）；badge=未完成主 item 数 */}
+        {/* todo 第 6 菜单项（v0.0.223，保持最后）；badge=未完成主 item 数 */}
         <button
           type="button"
           data-action-key="chat.todo.open"
@@ -165,6 +181,12 @@ export function ComponentChatFloatMenu({ sessionId, hideCron = false, chrome }: 
         <ComponentSquadStatusModal
           onClose={() => setOpen(null)}
           currentMemberId={chrome?.memberId ?? undefined}
+        />
+      )}
+      {open === 'quota' && squadCtx?.detail?.modelRoutingPlanId && (
+        <ComponentQuotaEntryModal
+          planId={squadCtx.detail.modelRoutingPlanId}
+          onClose={() => setOpen(null)}
         />
       )}
       {open === 'todo' && (

@@ -23,6 +23,7 @@ import { json } from './router-helpers';
 import {
   handleKvConfig,
   handleKvConfigPut,
+  handleKvConfigDelete,
   handlePluginConfig,
 } from '../handlers/config';
 import {
@@ -82,7 +83,9 @@ export async function dispatchConfigRoutes(
   if (path === '/config/app') {
     if (method === 'GET') return handleKvConfig(req, 'GET', url, bs.appConfig);
     if (method === 'PUT') return handleKvConfigPut(req, bs.appConfig);
-    return json(405, { error: 'Method Not Allowed' }, { allow: 'GET,PUT' });
+    // [v0.0.347] DELETE：方案库删除（group 白名单 + 引用解除；dataDir 供 SquadStore 扫描）
+    if (method === 'DELETE') return handleKvConfigDelete(url, bs.appConfig, dataDir);
+    return json(405, { error: 'Method Not Allowed' }, { allow: 'GET,PUT,DELETE' });
   }
   // [v0.0.26] scope + 激活端点（v0.0.67 D4：写端点返 405，handler 层统一处理）
   // 必须在通用 /config/plugin 之前注册——/config/plugin/scopes 是 /config/plugin 的子路径，

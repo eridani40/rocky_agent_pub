@@ -1,16 +1,21 @@
 /**
  * builtin llm_anthropic plugin — encode 纯函数 helper 集
  * 参考: specs/tech/agent/providers_and_models/[P0]llm_protocol_interface.md §3.5/§4
- *       specs/tech/agent/providers_and_models/anthropic_impl.md §4（cache control 2bp）
+ *       specs/tech/agent/providers_and_models/anthropic_impl.md §4（cache control 三断点体系，[v0.0.361]）
  *       specs/tech/agent/providers_and_models/[P0]cache_control.md §3.2/§3.3
  *
  * v0.0.191：从 protocol-encode.ts 拆出（参照 rocky_context/assemble/base_builder +
  * base_builder_helpers 范式），纯函数无逻辑依赖，搬文件不改 wire 输出。
  * 主文件 protocol-encode.ts 保留 encodeAnthropicMessages 入口 + EFFORT_WIRE_MAP 常量。
  *
- * 包含：CACHE_CONTROL_EPHEMERAL 常量 + 8 个 encode 纯函数：
+ * [v0.0.361 T5] wire 层 reminder 过滤 + bp#2 避让扫描删除（change_plan §1.3 B' 裁决）：
+ *   历史 reminder 块 append-only 全保留进 wire；bp#2 固定打最末 message 最末 block；
+ *   encodeTools 末位注入 cache_control（bp#T 新增，老板 20:34）。TextBlock.isSystemReminder
+ *   字段保留（前端契约），encode 不再读它。
+ *
+ * 包含：CACHE_CONTROL_EPHEMERAL 常量 + 7 个 encode 纯函数：
  *   encodeContentBlock / mergeAdjacentSameRole / encodeTools / encodeToolResultContent /
- *   extractSystemText / injectLastNonReminderCacheControl / encodeMessage / isReminderBlock
+ *   extractSystemText / injectLastMessageCacheControl / encodeMessage
  */
 import type { ContentBlock, Message } from '../../../server/src/llm/protocol-types';
 
@@ -75,74 +80,34 @@ export function encodeToolResultContent(
 }
 
 /**
- * canonical Message → anthropic wire message（role + content blocks）+ reminder 过滤标记。
+ * canonical Message → anthropic wire message（role + content blocks）。
  * role 映射 tool → user（库内仍 role:"tool"，仅 encode 边界转 user）。
- * wire 层 reminder 过滤（[P0]cache_control.md §3.3）：非最末 message drop
- *   所有 reminder；最末 message 只保留最末一个 reminder。wire 是一次性产物，
- *   transcript 不动（两层独立，spec §5）。flags 平行标记保留的 wire block 是否原为
- *   reminder，供 bp#2 决定落点（spec §3.2）。返回 {role, content, flags}。
+ * [v0.0.361 T5] wire 层 reminder 过滤删除（change_plan §1.3 B'）：历史 reminder 块
+ * append-only 全保留进 wire（transcript 字节不变 → 前缀稳定）；TextBlock.isSystemReminder
+ * 字段不进 wire（encodeContentBlock 只映射 text 字段，前端契约字段不出协议边界）。
  */
 export function encodeMessage(
   m: Message,
-  isLastMessage: boolean,
-): { role: string; content: Array<Record<string, unknown>>; flags: boolean[] } {
+): { role: string; content: Array<Record<string, unknown>> } {
   const role = m.role === 'tool' ? 'user' : m.role;
-  const blocks = m.content;
-
-  // 计算保留的 reminder 索引（§3.3）：非最末 message 不保留（-1，全 drop）；
-  // 最末 message 保留最末一个 reminder（其索引）；无 reminder 时 -1（自然全保留非 reminder 块）。
-  let lastKeptReminderIdx = -1;
-  if (isLastMessage) {
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      if (isReminderBlock(blocks[i]!)) {
-        lastKeptReminderIdx = i;
-        break;
-      }
-    }
-  }
-  // 单遍过滤：reminder 且不在保留位置 → drop；其余 encode + 平行标记 flag
-  const content: Array<Record<string, unknown>> = [];
-  const flags: boolean[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    const b = blocks[i]!;
-    const isRem = isReminderBlock(b);
-    if (isRem && i !== lastKeptReminderIdx) continue; // 历史/非保留 reminder → drop
-    content.push(encodeContentBlock(b));
-    flags.push(isRem);
-  }
-  return { role, content, flags };
+  return { role, content: m.content.map(encodeContentBlock) };
 }
 
 /**
- * 判定 canonical block 是否为 reminder（context ingest 注入的 TextBlock 块级标记，
- * 见 protocol-types ContentBlock text variant 的 isSystemReminder 字段）。
- * 只有 text block 能携带此标记（对齐 message/types.ts TextBlock）。spec §3.2。
+ * cache_control bp#2（[v0.0.361 T5] 固定落位）：最末 wire message 的最末 block 注入
+ * cache_control（mutate wire block）。不再反向扫非 reminder 避让——历史 reminder 块
+ * 全保留后，最末 block 即本轮新增内容末端，bp 落此 = 前缀稳定（每轮命中上一轮缓存
+ * 条目，只有新块计费）。messages 为空 / 最末 content 为空时 no-op。
  */
-export function isReminderBlock(b: ContentBlock): boolean {
-  return b.type === 'text' && b.isSystemReminder === true;
-}
-
-/**
- * cache_control bp#2（spec §3.2）：跨所有 encoded message 从末尾向前扫，命中第一个
- * 非 reminder block 即注入 cache_control（mutate wire block）。bp 落 reminder 上会致下轮
- * cache miss。无 reminder 时退化为「最后 block」（与旧版一致）。reminderFlags 与 encoded
- * 平行：flags[mi][bi]=true 表示该 wire block 原是 reminder。
- */
-export function injectLastNonReminderCacheControl(
-  encoded: Array<Record<string, unknown>>,
-  reminderFlags: boolean[][],
+export function injectLastMessageCacheControl(
+  wireMessages: Array<Record<string, unknown>>,
 ): void {
-  for (let mi = encoded.length - 1; mi >= 0; mi--) {
-    const content = encoded[mi]!['content'];
-    const flags = reminderFlags[mi]!;
-    if (!Array.isArray(content) || content.length === 0) continue;
-    for (let bi = content.length - 1; bi >= 0; bi--) {
-      if (flags[bi] === true) continue; // reminder block：bp 跳过（spec §3.2）
-      const block = content[bi] as Record<string, unknown>;
-      block['cache_control'] = { ...CACHE_CONTROL_EPHEMERAL };
-      return; // 命中第一个非 reminder block，bp#2 完成
-    }
-  }
+  const last = wireMessages[wireMessages.length - 1];
+  if (!last) return;
+  const content = last['content'];
+  if (!Array.isArray(content) || content.length === 0) return;
+  const block = content[content.length - 1] as Record<string, unknown>;
+  block['cache_control'] = { ...CACHE_CONTROL_EPHEMERAL };
 }
 
 /** 抽出 messages[] 中 role:system 的纯文本（多 block 拼接）；无 system 返 null */
@@ -187,14 +152,24 @@ export function mergeAdjacentSameRole(
  * 映射为 anthropic wire tools 数组：{name, description, input_schema}。
  * 按形状 narrow：元素需有 string `name` 才采纳；description/inputSchema 缺则给空值兜底。
  * 非法元素（无 name）跳过。返回空数组表示「无工具可用」。
+ *
+ * [v0.0.361 T5] bp#T（老板 20:34 三断点体系）：最末位 tool 注入 cache_control——
+ * tools 变更频率低（session 级稳定），bp 落末位使 system 段变更时 tools 前缀仍命中；
+ * tools 为空数组时无断点（Anthropic 上限 4 断点，三断点体系下合规）。
  */
 export function encodeTools(tools: unknown[] | undefined): Array<{
   name: string;
   description: string;
   input_schema: unknown;
+  cache_control?: { type: 'ephemeral' };
 }> {
   if (!Array.isArray(tools) || tools.length === 0) return [];
-  const out: Array<{ name: string; description: string; input_schema: unknown }> = [];
+  const out: Array<{
+    name: string;
+    description: string;
+    input_schema: unknown;
+    cache_control?: { type: 'ephemeral' };
+  }> = [];
   for (const t of tools) {
     if (!t || typeof t !== 'object') continue;
     const obj = t as Record<string, unknown>;
@@ -205,6 +180,10 @@ export function encodeTools(tools: unknown[] | undefined): Array<{
     // inputSchema 缺省给空 object schema（anthropic 要求 input_schema 存在）
     const input_schema = obj['inputSchema'] ?? { type: 'object', properties: {} };
     out.push({ name, description, input_schema });
+  }
+  // bp#T：末位 tool 注入 cache_control（tools 非空才落）
+  if (out.length > 0) {
+    out[out.length - 1]!.cache_control = { ...CACHE_CONTROL_EPHEMERAL };
   }
   return out;
 }

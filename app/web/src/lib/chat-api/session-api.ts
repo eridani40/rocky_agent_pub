@@ -49,9 +49,24 @@ export async function createSession(
   }, base);
 }
 
-/** GET /session —— 会话列表（§2.2，按 updatedAt desc） */
+/** GET /session —— 会话列表（§2.2，按 updatedAt desc；缺省 biz=playground） */
 export async function listSessions(base?: string): Promise<Session[]> {
   const r = await req<{ items: Session[] }>('/session', undefined, base);
+  return r.items ?? [];
+}
+
+/**
+ * GET /session?biz=xxx —— 按 biz 过滤的会话列表（[v0.0.348] T1）。
+ * 参考: specs/api/overall/04-agent-session.md §2.2（biz 过滤：缺省 playground / ?biz=studio 仅返 studio）
+ *       specs/tech/version_logs/v0.0.348/change_plan.md 决策①③（GET 基线 hydrate + onResumed 重 GET 校正）
+ * 不动 listSessions 原签名（3 个现有调用方 use-page-chat-mount/use-chat-actions×2 零改动）。
+ */
+export async function listSessionsByBiz(biz: string, base?: string): Promise<Session[]> {
+  const r = await req<{ items: Session[] }>(
+    `/session?biz=${encodeURIComponent(biz)}`,
+    undefined,
+    base,
+  );
   return r.items ?? [];
 }
 
@@ -190,6 +205,8 @@ export interface SessionChromeView {
   sessionModel: { providerId: string; modelId: string } | null;
   /** 该 kind 的默认模型（picker「默认模型」项数据源）；未配置 → null */
   defaultModel: { providerId?: string; modelId: string } | null;
+  /** 该 kind 挂载的默认方案（picker「方案 · 名（默认）」数据源）；未挂载/方案被删 → null；academy 恒 null（同构字段恒在） */
+  defaultRoutingPlan: { planId: string; planName: string } | null;
   effort: 'default' | 'low' | 'high' | 'max' | null;
   approvalMode: 'normal' | 'greenlight' | null;
   /** studio: squad 全体成员投影（群聊 actor 解析用）；其他 kind 恒 [] */

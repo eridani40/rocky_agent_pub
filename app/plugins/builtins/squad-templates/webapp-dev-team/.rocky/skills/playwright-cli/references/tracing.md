@@ -21,7 +21,7 @@ playwright-cli tracing-stop
 
 When you start tracing, Playwright creates a `traces/` directory with several files:
 
-### `trace-{timestamp}.trace`
+### `trace-${TIMESTAMP}.trace`
 
 **Action log** - The main trace file containing:
 - Every action performed (clicks, fills, navigations)
@@ -31,7 +31,7 @@ When you start tracing, Playwright creates a `traces/` directory with several fi
 - Console messages
 - Source locations
 
-### `trace-{timestamp}.network`
+### `trace-${TIMESTAMP}.network`
 
 **Network log** - Complete network activity:
 - All HTTP requests and responses

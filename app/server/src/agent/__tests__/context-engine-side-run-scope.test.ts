@@ -97,6 +97,7 @@ function mkConfig(sessionId?: string): SessionConfig {
     systemPrompt: 'ORIGINAL-PROMPT',
     client: { contextWindow: 100000 } as unknown as LlmClient,
     modelId: 'test-model',
+    providerId: 'p-test',
   };
 }
 

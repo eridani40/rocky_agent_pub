@@ -1,13 +1,18 @@
 ---
 type: log
 title: Persistence KB 变更记录
-updated: 2026-08-13
+updated: 2026-08-15
 ---
 
 # Persistence KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-15 · v0.0.359（model 归属改记实际命中 physical model）
+
+- **`[P1]token_usage_stat.md`**：§4 写入路径流程图第 3 步 + 关键不变量，model 归属从「三级配置侧 fallback」升级为优先级链「success-target-registry 命中（运行时真实命中，最高优先）→ session 显式 → squad.modelDefault → `__unknown__`」；registry miss（进程重启后/旧 session 补记/测试注入）三级 fallback 原样兜底，零回归。registry 本体契约 → `../agent/llm_caller/[P0]success_target_registry.md`（新）。
+- 详情：`specs/tech/version_logs/v0.0.359/change_log.md`
 
 ## 2026-08-13 · v0.0.345（atomicWriteAsync 新增 + 工具层 fs.promises 真异步）
 

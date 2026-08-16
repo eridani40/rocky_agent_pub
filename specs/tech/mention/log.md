@@ -1,7 +1,7 @@
 ---
 type: log
 title: Mention KB 变更记录
-updated: 2026-08-14
+updated: 2026-08-15
 since: v0.0.45
 ---
 
@@ -9,6 +9,12 @@ since: v0.0.45
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-15 · v0.0.360（workspace 搜索 symlink 受控跟随 — 链式授权对齐树语义）
+
+- **`provider-interface.md` §5**：FileProvider 共用后端段措辞同步——「symlink 目录不递归防越权/循环」→「symlink 目录**受控跟随**（链式授权 + realpath visited 防循环，语义见 api spec §2.6.8 行为 6）」；同步 fs API 清单（lstatSync→realpathSync）。
+- **`search-api.md` §5**：FileProvider 适配层段补 symlink 受控跟随语义（workspace 内 symlink = 授权、目标可在外如 squad `project` 链接、broken 跳过、symlink→file 可命中）——FileProvider 经 `searchWorkspace` 核心升级自动受益，零代码改动。
+- 语义变更在搜索核心 `workspace-search-core.ts`（详见 `specs/tech/version_logs/v0.0.360/change_log.md`：T1 实现 + review CONDITIONAL PASS + Minor×2 修复）。
 
 ## 2026-08-14 · v0.0.346（mention 交互修复 — 触发双层门控 + 文件搜索共用 workspace-search-core）
 

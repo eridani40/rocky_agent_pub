@@ -160,3 +160,52 @@ describe('provider handler — credentials.key 明文返回（BUG-002）', () =>
     expect(body.provider.credentials.key).not.toBe('***');
   });
 });
+
+// ---- [v0.0.350 决策⑤] name 白名单通道（POST 5 值 + PUT 可选切换类型）----
+
+describe('provider handler — name 白名单（v0.0.350 决策⑤）', () => {
+  const VALID_BODY = {
+    label: 'L', baseUrl: 'https://x.example.com',
+    credentials: { key: 'sk-x' }, protocolId: 'anthropic_messages',
+  };
+
+  it('POST name 4 个 native 值全 201（白名单 5 值中的 4 个新成员）', async () => {
+    for (const name of ['kimi_coding_plan', 'glm_coding_plan', 'minimax_coding_plan', 'deepseek_api']) {
+      const res = await handleProviderCollection(postReq({ ...VALID_BODY, name }), 'POST', svc, undefined);
+      expect(res.status, `name=${name}`).toBe(201);
+      const body = await res.json() as { provider: { name: string } };
+      expect(body.provider.name).toBe(name);
+    }
+  });
+
+  it('POST 缺省 name → anthropic_compatible（旧 client 向后兼容，不 400）', async () => {
+    const res = await handleProviderCollection(postReq({ ...VALID_BODY }), 'POST', svc, undefined);
+    expect(res.status).toBe(201);
+    const body = await res.json() as { provider: { name: string } };
+    expect(body.provider.name).toBe('anthropic_compatible');
+  });
+
+  it('POST name 白名单外 → 400', async () => {
+    const res = await handleProviderCollection(postReq({ ...VALID_BODY, name: 'openai_compatible' }), 'POST', svc, undefined);
+    expect(res.status).toBe(400);
+  });
+
+  it('PUT 传白名单内 name → 写入（已存 provider 切换类型通道）', async () => {
+    seedProvider('prov-n1', 'sk-k');
+    const res = await handleProviderItem(
+      putReq('prov-n1', { name: 'glm_coding_plan' }), 'PUT', 'prov-n1', svc, undefined,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as { provider: { name: string } };
+    expect(body.provider.name).toBe('glm_coding_plan');
+  });
+
+  it('PUT 不传 name → 不变；白名单外 → 400', async () => {
+    seedProvider('prov-n2', 'sk-k');
+    const keep = await handleProviderItem(putReq('prov-n2', { label: 'X' }), 'PUT', 'prov-n2', svc, undefined);
+    expect(keep.status).toBe(200);
+    expect(((await keep.json()) as { provider: { name: string } }).provider.name).toBe('anthropic_compatible');
+    const bad = await handleProviderItem(putReq('prov-n2', { name: 'glm' }), 'PUT', 'prov-n2', svc, undefined);
+    expect(bad.status).toBe(400);
+  });
+});

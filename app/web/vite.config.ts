@@ -82,6 +82,18 @@ export default defineConfig({
       // 前缀匹配覆盖 /academy 整棵子树：/academy/classroom、/academy/classroom/:cid/student、
       // /academy/training-task/:tid、/academy/dataset、/academy/grader 等（specs/api/overall/18-academy.md）
       '/academy': { target: API_TARGET, changeOrigin: false },
+      // v0.0.347：/model-routing/*（方案库 CRUD + 挂载 + 状态红绿灯 status 端点）—— 漏配致 dev 下
+      // 红绿灯拉 status 被 vite 当 SPA 路由吞成 index.html（text/html HTTP 200）→ 恒不渲染（BUG-001，ET-3 实证）。
+      // 后端直连正常（application/json）。packaged 不走 vite 不受影响。同类 v0.0.21 /skill 漏配先例。
+      // 前缀匹配覆盖 /model-routing 整棵子树：/model-routing/plans/:planId/status 等
+      '/model-routing': { target: API_TARGET, changeOrigin: false },
+      // v0.0.166：/skills/market/*（复数，skill 市场 search/detail/install/capabilities）—— 漏配致 dev 下
+      // 市场请求被 vite 当 SPA 路由返 index.html（misc-routes 注释：复数 /skills ≠ 单数 /skill，互不 startsWith，
+      // /skill proxy 前缀覆盖不到 /skills）。packaged 不走 vite 不受影响。同类 v0.0.21 /skill 漏配先例。
+      '/skills': { target: API_TARGET, changeOrigin: false },
+      // v0.0.150：/bootstrap/status（启动期迁移错误提示，app-shell 拉取）—— 漏配致 dev 下启动迁移错误
+      // 提示被 vite 当 SPA 路由返 index.html → JSON 解析失败 → 错误提示永不显示。同类 /skill 漏配先例。
+      '/bootstrap': { target: API_TARGET, changeOrigin: false },
     },
   },
 });

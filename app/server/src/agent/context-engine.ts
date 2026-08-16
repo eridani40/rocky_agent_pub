@@ -22,7 +22,8 @@ import { runCleanViewPipeline } from './clean-view-pipeline';
 import { extractTag } from './context-compact-helpers';
 import { estimateChars, estimateMessageChars, estimateToolChars, computeContextWindowUsage } from './context-usage-calc';
 import { runCompact } from './context-compact-runner';
-import { applyIngestPipeline } from './context-ingest-pipeline';
+import { applyIngestPipeline, type ReminderQueueHandles } from './context-ingest-pipeline';
+import type { ReminderQueueStore } from './system-reminder-queue';
 import { scopeIdOf } from './scope-id';
 import { buildReminderExtras, type SquadReminderDeps } from './squad-reminder-deps';
 import type { ConsolidateRunner, CompactPluginContext } from './compact-types';
@@ -87,6 +88,11 @@ export class ContextEngine {
    * 鸭子类型 listBySession（todo_tools.md §6）；bootstrap 注入实例。
    */
   private todoStore: { listBySession(sid: string): Promise<unknown[]> | unknown[] } | null = null;
+  /**
+   * [v0.0.361 §1.2 T3] ReminderQueueStore 句柄（reminder queue 消费侧数据源，缺省 null 降级不注入）。
+   * bootstrap 注入单例（同 TodoStore 模式）；ingest 期构造 drain/clearAll closure 透传给 injector。
+   */
+  private reminderQueueStore: ReminderQueueStore | null = null;
 
   constructor(opts: ContextEngineOptions) {
     this.store = opts.store;
@@ -154,6 +160,23 @@ export class ContextEngine {
     this.todoStore = store;
   }
 
+  /**
+   * [v0.0.361 §1.2 T3] 注入 ReminderQueueStore 单例（bootstrap 装配；同 setTodoStore 模式）。
+   * 注入后 ingest 构造 queueDrain/queueClearAll closure 透传 injector（closure 防 handler 持 store）。
+   * 缺省（UT fixture）→ 不注入 queue 句柄（injector 降级，向后兼容）。
+   */
+  setReminderQueueStore(store: ReminderQueueStore | null): void {
+    this.reminderQueueStore = store;
+  }
+
+  /**
+   * [v0.0.361 §1.2 T3] 暴露 ReminderQueueStore（T4 写入方接线用：todo/presence/state-machine
+   * 等五点 queue.write 与消费侧共享同一单例——per-sid mutex 必须单实例内互斥）。
+   */
+  getReminderQueueStore(): ReminderQueueStore | null {
+    return this.reminderQueueStore;
+  }
+
   /** v0.0.66 §2.3 解析 scope 选中的 session_store EP impl（委托 store-resolver helper）。 */
   resolveStore(scopeId: string): SessionStore {
     return resolveStore(this.pluginManager, this.store, scopeId);
@@ -182,12 +205,33 @@ export class ContextEngine {
     scopeId: string = 'default',
     _allowEdit = false,
     opts?: StoreCallOpts,
+    /**
+     * [v0.0.361 §1.4 T3] 当前 run 的状态（RunState 透传；主 run 调用点持有 state 传入）。
+     * injector 读 useFullReminder 决 full/incremental（undefined 视 true = run 首天然 full）；
+     * forked / UT fixture 不传 → undefined → 恒 full（§1.4 语义）。
+     */
+    runState?: { useFullReminder?: boolean },
   ): Promise<void> {
     const extras = await buildReminderExtras(this.store, this.squadReminderDeps, config);
     // [v0.0.223] todoStore 透传到 reminder provider（TodoReminderProvider 经 ctx.todoStore 读 session todo）
     if (this.todoStore) (extras as { todoStore?: unknown }).todoStore = this.todoStore;
     // [v0.0.66 §2.3] store 按 scope 选 EP impl（default 持久 / forked 内存）；统一注入 store_sink
     const store = this.resolveStore(scopeId);
+    // [v0.0.361 §1.2/§1.4 T3] reminder queue 句柄装配（drain/clearAll closure + runState 透传；
+    //   queue store 缺席（UT fixture）仅透传 runState；两者皆无 → undefined（injector 降级））
+    const qs = this.reminderQueueStore;
+    const queueHandles: ReminderQueueHandles | undefined =
+      qs || runState !== undefined
+        ? {
+            ...(qs
+              ? {
+                  queueDrain: (sid: string) => qs.drain(sid),
+                  queueClearAll: (sid: string) => qs.clearAll(sid),
+                }
+              : {}),
+            ...(runState !== undefined ? { runState } : {}),
+          }
+        : undefined;
     await applyIngestPipeline(
       this.pluginManager,
       config,
@@ -196,6 +240,7 @@ export class ContextEngine {
       scopeId,
       store,
       opts,
+      queueHandles,
     );
   }
 

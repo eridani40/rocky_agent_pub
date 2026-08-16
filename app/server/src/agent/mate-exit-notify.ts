@@ -1,6 +1,7 @@
 /**
  * mate-exit-notify —— mate run 退出通知 leader hook（v0.0.273 块1）
  * 参考: specs/tech/version_logs/v0.0.273/change_plan.md（R1-R5）
+ *       specs/tech/version_logs/v0.0.362/change_plan.md（run-end 汇报去重）
  *       specs/tech/multi_agent/[P1]a2a_protocol.md（send_message 信封构造）
  *       app/server/src/agent/tools/send-message-tool.ts（sender.source='agent' + selfAgentRef）
  *
@@ -99,7 +100,7 @@ export function formatMateExitNotify(input: MateExitNotifyInput): string {
   // v0.0.338 M1：interrupted 追加提示（由用户中断，老板钦定文案），其他 6 种 reason 输出逐字节不变
   const reasonLine =
     input.stopReason === 'interrupted'
-      ? `退出原因: ${input.stopReason}（由用户中断，如需要可向用户查证）`
+      ? `退出原因: ${input.stopReason}（由用户主动中断，无需处理）`
       : `退出原因: ${input.stopReason}`;
   lines.push(reasonLine);
   lines.push(`耗时: ${input.durationSec}s`);
@@ -116,6 +117,48 @@ export function formatMateExitNotify(input: MateExitNotifyInput): string {
     lines.push(`[待审批] 悬挂工具: ${tools}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * [v0.0.362] run-end 汇报去重判定（纯函数，零 IO）：
+ * 最近 N 轮 assistant message 内是否有 send_message→leader 的 tool_call。
+ *
+ * 数据源：snapshot.messages 过滤 assistant + lastAssistantContent 拼伪消息补末轮
+ * （run 的最终 assistant 回复不在 snapshot 内——snapshot 是发给 LLM 的输入侧，
+ * 不补则最常见的末轮 send_message 永不命中）→ slice(-window) 窗口。
+ *
+ * target 命中三形态（req 口径）：字符串 'parent'（mate 的 parent 即 leader）/
+ * 字符串显式 sessionId===leaderSid / AgentRef.sessionId===leaderSid。
+ * name 形态 AgentRef 不解析比对（避免每条 tool_call 异步 store 解析，老板拍板已知限制）；
+ * 只看 tool_use 存在性，不看 needReply/发送成败。
+ */
+export function hasRecentLeaderReport(
+  snapshotMessages: Message[] | null | undefined,
+  lastAssistantContent: ContentBlock[] | undefined,
+  leaderSid: string,
+  window = 3,
+): boolean {
+  // snapshot null（理论不达，防御）→ 视为未命中照发
+  if (!snapshotMessages) return false;
+  const rounds: ContentBlock[][] = snapshotMessages
+    .filter((m) => m.role === 'assistant')
+    .map((m) => m.content);
+  // 末轮补拼：最终 assistant 回复不在 snapshot 内，非空时追加为伪消息
+  if (lastAssistantContent && lastAssistantContent.length > 0) rounds.push(lastAssistantContent);
+  const recent = rounds.slice(-window);
+  for (const blocks of recent) {
+    for (const b of blocks) {
+      if (b.type !== 'tool_call' || b.name !== 'send_message') continue;
+      const t = b.arguments?.target;
+      // 三形态命中：'parent' 直命中（mate 的 parent 即 leader）/ 字符串 ===leaderSid / AgentRef.sessionId===leaderSid
+      if (t === 'parent' || t === leaderSid) return true;
+      if (
+        typeof t === 'object' && t !== null && !Array.isArray(t) &&
+        (t as { sessionId?: unknown }).sessionId === leaderSid
+      ) return true;
+    }
+  }
+  return false;
 }
 
 /** notifyMateExit 执行参数 */
@@ -148,6 +191,12 @@ export async function notifyMateExit(
     const leaderSid = leader?.sessionId;
     if (!leaderSid) {
       console.warn(`[mateExitNotify] leader session not found (squad ${opts.squadId}, leaderId ${squad.leaderId}), skip notify`);
+      return;
+    }
+    // [v0.0.362] run-end 汇报去重：最近 3 轮 assistant 内已有 send_message→leader 调用
+    // 则认定已汇报过，跳过本次投递（只看 tool_use 存在性，不看 needReply/成败）
+    if (hasRecentLeaderReport(state.snapshot?.messages, state.lastAssistantContent, leaderSid)) {
+      console.log('[mateExitNotify] recent send_message to leader found, skip run-end report (dedup)');
       return;
     }
     const markdown = formatMateExitNotify({

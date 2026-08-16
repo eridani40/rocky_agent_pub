@@ -3,7 +3,7 @@ type: interface
 title: Todo 工具（session 级双层待办）
 priority: P1
 status: active
-updated: 2026-07-31
+updated: 2026-08-15
 since: v0.0.223
 related: [[P0]tool_policy.md, [P1]task_tools.md, ../../agent/context/[P0]system_reminder.md]
 ---
@@ -142,12 +142,14 @@ TODO_ACTIONS = `['add_item', 'update_item', 'add_step', 'update_step', 'delete_i
 
 ## 6. todo reminder（填壳）
 
-todo 工具产出的数据，经 `reminder/todo.ts` provider（`[P0]system_reminder.md §3` row 5）每轮注入 reminder：
+todo 工具产出的数据，经 `reminder/todo.ts` provider（`[P0]system_reminder.md §3`，登记序 2）每轮注入 reminder：
 - **数据源**：`ctx.todoStore.listBySession(config.sessionId)`（ReminderCtx 扩展 todoStore，仿 squadContext 模式）。
 - **产出格式**：`[todo] 进行中：{desc} ({done}/{total} 步骤) · {desc2} (未开始)`（未结束主 item 摘要 + 步骤进度）。
 - **角色 filter**：仅 parent.main session 产出（subagent/forked 不产出，避免噪声）。
 - **MUST NOT 读 task_tools**（语义已重定义：旧 no-op 空壳 → 新 session todo 进度）。
 - **prompt 差别说明**：prompt 段必须讲清 todo reminder（session 手头双层待办）vs task reminder（squad 团队认领/待认领任务）差别，避免 agent 混淆。
+
+**reminder queue 接线（v0.0.361）**：todo 工具各写 action（add/update item、add/update step、delete、cleanup）成功后向 per-session reminder queue 写一行**已渲染增量行**——`new ReminderQueueStore({ fsRoot: dataDir }).write(sid, 'todo:{itemId}', value)`（如 `[todo] item「desc」→ done` / step 变化 / `[todo] item「desc」已删除`）；key=`todo:{itemId}`（同 key 重写删旧追加尾）；**写失败 catch 吞**（reminder 是 best-effort 通知，绝不阻断工具返回）；fsRoot=DATA_DIR（缺省 no-op）；queue 实例 per-call new（write 临界区纯同步 JS，多实例不交错）。消费侧由 incremental 轮 injector `queueDrain` 拼进当轮 reminder（`../../context/[P0]system_reminder.md §4`）。
 
 ---
 

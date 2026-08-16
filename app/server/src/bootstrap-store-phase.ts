@@ -47,11 +47,17 @@ import { setTokenUsageSubscriberDeps } from './squad/token-usage/token-usage-sub
 import { SquadStore, MemberStore } from './stores/squad-store';
 // [v0.0.210] AcademyStore —— academy 域 7 entity CrudStore facade（classroom/student/version/task/turn/dataset/grader）
 import { AcademyStore } from './academy/academy-store';
-// [v0.0.305] squad 层聚合 meta 广播器（订阅 statusBus 自治广播 squad 聚合状态）
+// [v0.0.305] SquadMetaBroadcaster —— squad 层聚合 meta 广播器（handler 写路径 broadcast + wrap fan-out 触发）
 import { SquadMetaBroadcaster } from './squad/squad-meta-broadcaster';
+// [v0.0.363] 全局额度 store + 周期同步服务（change_plan §1.2）
+import { QuotaStore } from './llm/quota-store';
+import { QuotaSyncService, parseQuotaSyncIntervalMs } from './llm/quota-sync-service';
+import type { AppConfigService } from './config/app-config-service';
+import type { PluginManager } from './plugin/plugin-manager';
 
 /**
- * Phase 7 装配：SessionStore + SessionUnreadRuntime + SessionTaskLock + AcademyStore。
+ * Phase 7 装配：SessionStore + SessionUnreadRuntime + SessionTaskLock + AcademyStore
+ *   + [v0.0.363] QuotaStore/QuotaSyncService（全局额度同步）。
  *
  * @param dataDir 数据根目录绝对路径
  * @param sessionStatusBus session_panel topic 的 bus（来自 bus-phase）
@@ -59,9 +65,12 @@ import { SquadMetaBroadcaster } from './squad/squad-meta-broadcaster';
  * @param squadMetaBus squad_meta topic 的 bus（来自 bus-phase；SquadMetaBroadcaster 注入）
  * @param sseChannel SseChannel（来自 bus-phase，作为 unreadRuntime.presenceProbe）
  * @param logWriter dev-logs 写入器
- * @returns store + unreadRuntime + sessionMetaBroadcaster + taskLock + academyStore + squadMetaBroadcaster
+ * @param providerQuotaBus provider_quota topic 的 bus（来自 bus-phase；registerTopic 已完成，start 前 bus 就绪）
+ * @param appConfig 配置服务（QuotaSyncService collect 用）
+ * @param pluginManager 插件管理器（QuotaSyncService collect 用）
+ * @returns store + unreadRuntime + sessionMetaBroadcaster + taskLock + academyStore + squadMetaBroadcaster + quotaStore/quotaSyncService
  */
-export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: ReplayableEventBus, sessionMetaBus: ReplayableEventBus, squadMetaBus: ReplayableEventBus, sseChannel: SseChannel, logWriter: LogWriter): Promise<{
+export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: ReplayableEventBus, sessionMetaBus: ReplayableEventBus, squadMetaBus: ReplayableEventBus, sseChannel: SseChannel, logWriter: LogWriter, providerQuotaBus?: ReplayableEventBus, appConfig?: AppConfigService, pluginManager?: PluginManager): Promise<{
   store: SessionStore;
   unreadRuntime: SessionUnreadRuntime;
   sessionMetaBroadcaster: SessionMetaBroadcaster;
@@ -73,6 +82,9 @@ export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: Rep
   academyStore: AcademyStore;
   /** [v0.0.305] squad 聚合 meta 广播器（handler 写路径 broadcast + wrap fan-out 触发） */
   squadMetaBroadcaster: SquadMetaBroadcaster;
+  /** [v0.0.363] 全局额度 store（GET /provider/quota 读）+ 同步服务（5min 周期 + 增量触发） */
+  quotaStore: QuotaStore;
+  quotaSyncService: QuotaSyncService;
 }> {
   // SessionStore：CompositeStore mount 4 schema（session/transcript/summary/runs）到 fs engine
   const fs = new FsCrudStore({ root: dataDir });
@@ -139,6 +151,30 @@ export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: Rep
   const appTaskLock = new AppTaskLock();
   appTaskLock.reconcileOnStartup();
 
+  // [v0.0.363] QuotaStore + QuotaSyncService —— 全局额度权威源 + 5min 周期同步
+  // （change_plan §1.2）。registerTopic 在 bus-phase 已完成（start 前 bus 就绪保证）。
+  // 启动立即首轮（15s 内补齐重启空窗）+ SIGTERM trap。appConfig/pluginManager 未传
+  // （UT 场景）→ 跳过装配（quotaStore 仍返回空视图 GET 秒回契约不破）。
+  const quotaStore = new QuotaStore();
+  let quotaSyncService: QuotaSyncService;
+  if (appConfig && pluginManager) {
+    quotaSyncService = new QuotaSyncService({
+      svc: appConfig,
+      pluginManager,
+      store: quotaStore,
+      bus: providerQuotaBus,
+      intervalMs: parseQuotaSyncIntervalMs(process.env['QUOTA_SYNC_INTERVAL_MS']),
+    });
+    quotaSyncService.start();
+  } else {
+    // 占位（类型非可选）：不 start 的哑服务（collect 不会被触发）
+    quotaSyncService = new QuotaSyncService({
+      svc: undefined as unknown as AppConfigService,
+      pluginManager: undefined as unknown as PluginManager,
+      store: quotaStore,
+    });
+  }
+
   // reconcile 完成后启用未读运行时——此后 agent-loop 正常完成的 session_status_update
   // completion 信号（idle/error）会触发 markUnreadTrue（非前台时）。
   unreadRuntime.start();
@@ -168,5 +204,8 @@ export async function bootstrapStorePhase(dataDir: string, sessionStatusBus: Rep
     academyStore: new AcademyStore({ root: dataDir }),
     // [v0.0.305] squad 聚合 meta 广播器（bootstrap.ts 透传到 BootstrapResult → handler/routes）
     squadMetaBroadcaster,
+    // [v0.0.363] 全局额度 store + 同步服务（BootstrapResult 透传 → misc-routes handler）
+    quotaStore,
+    quotaSyncService,
   };
 }

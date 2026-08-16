@@ -23,6 +23,8 @@ import type { LogWriter } from './dev-logs/log-writer';
 import { SESSION_META_TOPIC, APP_TASK_TOPIC } from './agent/session-event-types';
 // [v0.0.305] squad_meta topic 名（squad 层事件类型文件导出；白名单测试 import 真值）
 import { SQUAD_META_TOPIC } from './squad/squad-event-types';
+// [v0.0.363] provider_quota topic 名（额度快照 SSE 广播；白名单测试 import 真值）
+import { PROVIDER_QUOTA_TOPIC } from './llm/quota-events';
 // [v0.0.189] panorama topic 名（hub.registerTopic 用；SSE 前端订阅白名单项）
 const PANORAMA_TOPIC = 'panorama';
 export { PANORAMA_TOPIC };
@@ -49,6 +51,8 @@ export async function bootstrapBusPhase(logWriter: LogWriter): Promise<{
   appTaskBus: ReplayableEventBusType;
   panoramaBus: ReplayableEventBusType;
   squadMetaBus: ReplayableEventBusType;
+  /** [v0.0.363] provider_quota topic 的 bus（QuotaSyncService emit 用） */
+  providerQuotaBus: ReplayableEventBusType;
   sseChannel: SseChannel;
 }> {
   // EventHub 全局单例 + agent_loop topic 的 replayable bus + session_panel topic 的 bus
@@ -131,9 +135,19 @@ export async function bootstrapBusPhase(logWriter: LogWriter): Promise<{
   );
   hub.registerTopic(SQUAD_META_TOPIC, squadMetaBus);
 
+  // [v0.0.363] provider_quota topic —— 全局额度快照广播（QuotaSyncService.syncOnce 写 store 后 emit）。
+  //   non-replayable（快照态：初始态走 GET /provider/quota 拉 store，订阅后只收增量——对齐 session_meta §10.3）。
+  //   共享广播 group `_all`（同 app_task）。registerTopic 先于 store-phase 的 QuotaSyncService.start（bus 就绪保证）。
+  const providerQuotaBus = wrapBusWithLog(
+    new ReplayableEventBus({ replayable: false }),
+    logWriter,
+    PROVIDER_QUOTA_TOPIC,
+  );
+  hub.registerTopic(PROVIDER_QUOTA_TOPIC, providerQuotaBus);
+
   // SseChannel 创建前置（仅依赖 hub）——供 SessionUnreadRuntime 注入前台判定探针。
   // [REPLAY-DEBUG] 传 logWriter：SseChannel 在 SSE 实际发送点（enqueue）记录每条帧全文到 event.log。
   const sseChannel = new SseChannel(hub, logWriter);
 
-  return { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, squadMetaBus, sseChannel };
+  return { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, squadMetaBus, providerQuotaBus, sseChannel };
 }

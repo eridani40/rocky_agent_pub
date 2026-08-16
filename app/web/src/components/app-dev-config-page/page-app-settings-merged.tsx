@@ -54,6 +54,9 @@ export function PageAppSettingsMerged() {
     kvGroups,
     defaultModelsDraft,
     handleDefaultModelsChange,
+    mountDraft,
+    handleMountChange,
+    clearPlaygroundMountState,
     consolidationDraft,
     handleKeyChange,
     dirtyOfTab,
@@ -239,6 +242,12 @@ export function PageAppSettingsMerged() {
                 kvGroups={kvGroups}
                 defaultModelsDraft={defaultModelsDraft}
                 onDefaultModelsChange={handleDefaultModelsChange}
+                mountDraft={mountDraft}
+                onMountChange={handleMountChange}
+                onPlanDeleted={(detached, planId) => {
+                  // [v0.0.349 BUG-004] 删方案 detached 含 playground → 服务端已解绑挂载，本地同步清
+                  if (detached.includes('playground')) clearPlaygroundMountState(planId);
+                }}
                 onKeyChange={handleKeyChange}
                 consolidationDraft={consolidationDraft}
                 registerSection={activeAgg?.register}

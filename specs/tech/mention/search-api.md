@@ -3,7 +3,7 @@ type: spec
 title: Mention Search API 设计
 priority: P0
 status: active
-updated: 2026-08-14
+updated: 2026-08-15
 since: v0.0.45
 ---
 
@@ -137,7 +137,7 @@ try {
 
 ## 5. 性能考量
 
-- **FileProvider**：**v0.0.346 起收敛为 workspace-search-core 的适配层**——`search()` 调 `searchWorkspace(ctx.workspaceDir, ctx.query)`（`app/server/src/search/workspace-search-core.ts`），与工作区搜索端点（`GET /session/:id/workspace/search`）**共用同一遍历/排除/上限核心**（IGNORED_NAMES 单一源在 `session-workspace.ts`，排除仅 node_modules/.git）。命中集合 = 文件 + 目录（目录命中不递归其下层），files+dirs ≥ 100 早停 → `truncated: true`；目录条目复用 `type='file'` + `path=目录相对路径`。**v0.0.346-2 起目录条目带 `isDir:true` + `listView.icon='folder'`**（文件条目 isDir 缺省 + `icon='file'`）；`subtitle` 根路径（dirname='.'）渲染 `'/'` 始终展示；`display.icon` 保持 `'file'`（pill 不区分，防历史消息不一致）。FileProvider 原 5s 超时兜底移除（100 早停保障），点开头不再排除（仅 IGNORED_NAMES）。
+- **FileProvider**：**v0.0.346 起收敛为 workspace-search-core 的适配层**——`search()` 调 `searchWorkspace(ctx.workspaceDir, ctx.query)`（`app/server/src/search/workspace-search-core.ts`），与工作区搜索端点（`GET /session/:id/workspace/search`）**共用同一遍历/排除/上限核心**（IGNORED_NAMES 单一源在 `session-workspace.ts`，排除仅 node_modules/.git）。**symlink 目录受控跟随（与树端点链式授权同模型）：workspace 内 symlink = 授权（目标可在 workspace 外，如 squad `project` 链接）；realpath visited 防循环；broken symlink 跳过；symlink→file 可命中**（契约见 `specs/api/overall/04-agent-session.md` §2.6.8 行为 6）。命中集合 = 文件 + 目录（目录命中不递归其下层），files+dirs ≥ 100 早停 → `truncated: true`；目录条目复用 `type='file'` + `path=目录相对路径`。**v0.0.346-2 起目录条目带 `isDir:true` + `listView.icon='folder'`**（文件条目 isDir 缺省 + `icon='file'`）；`subtitle` 根路径（dirname='.'）渲染 `'/'` 始终展示；`display.icon` 保持 `'file'`（pill 不区分，防历史消息不一致）。FileProvider 原 5s 超时兜底移除（100 早停保障），点开头不再排除（仅 IGNORED_NAMES）。
 - **SkillProvider**：`SkillResolver.resolve()` 全量枚举 + 模糊匹配。skill 数量预期小（数十个），无性能问题。
 - **Registry 实例复用**：Registry 在 bootstrap 阶段单例创建，handler 层共享引用，无重复初始化开销。
 

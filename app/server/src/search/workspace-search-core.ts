@@ -6,14 +6,18 @@
  * 从 session-workspace-search.ts walkSearch 提取的公共纯函数模块：
  *   - session-workspace-search.ts（工作区搜索端点）与 mention/file-provider（@ 搜索）共用
  *   - IGNORED_NAMES（node_modules/.git）从 session-workspace.ts 导入（单一源，不重复定义）
- *   - 同步 DFS（readdirSync/statSync/lstatSync），与旧 walkSearch 行为逐字节一致：
+ *   - 同步 DFS（readdirSync/statSync/realpathSync），与旧 walkSearch 行为一致：
  *     pathMode（q 含 `/` → relChild 完整相对路径匹配，否则 basename）、目录命中推 dirs 不递归
- *     其下层、files+dirs ≥ limit 早停 truncated:true、symlink 目录不递归
- *   - 安全面与现状一致：symlink 目录不跟随出 workspace（防越权/循环）；目录不可读 / lstat /
- *     stat 失败跳过该分支（权限/竞态删）
+ *     其下层、files+dirs ≥ limit 早停 truncated:true
+ *   - symlink 受控跟随（v0.0.360 起与 tree 链式授权同模型，spec §2.6.8 行为 6）：
+ *     workspace 内 symlink = 用户放置 = 授权（目标可在 workspace 外，如 squad 盘 project 链接）；
+ *     symlink→dir 与普通目录同递归；realpath 归一化 visited 集防循环（祖先/自指/环归一后同路径 → 跳过）；
+ *     symlink→file 可列入 files
+ *   - 安全面与 tree 端点一致（链式授权，v0.0.263 起）：用户不放置链接，搜索不可达 workspace 外；
+ *     realpath/stat/lstat/readdir 失败跳过该分支（broken symlink / 权限 / 竞态删）
  *   - 不引入点开头排除（排除仅 IGNORED_NAMES）
  */
-import { lstatSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { IGNORED_NAMES } from '../handlers/session-workspace';
 
@@ -37,6 +41,7 @@ export interface WorkspaceSearchResult {
  * 递归搜索目录（当前目录绝对路径 + 相对 rootDir 的 POSIX 路径前缀）。
  * pathMode=true（q 含 `/`）→ 匹配完整相对路径 relChild（子串、大小写不敏感）；
  * pathMode=false（q 不含 `/`）→ 匹配 basename name。
+ * visited = 已遍历目录 realpath 归一化集合（防循环 C2：祖先/自指/环 realpath 后同路径 → 不重入）。
  * 返回 true = 已达上限需停止；false = 可继续。
  */
 function walkSearch(
@@ -47,24 +52,32 @@ function walkSearch(
   files: string[],
   dirs: string[],
   limit: number,
+  visited: Set<string>,
 ): boolean {
+  // realpath 归一化（每目录一次，含经 symlink 进入的）：失败 = broken 链中间环节 → 跳过该分支；
+  //   归一后路径重复 = 循环（祖先/自指/环）→ 跳过
+  let realDir: string;
+  try {
+    realDir = realpathSync(absDir);
+  } catch {
+    return false;
+  }
+  if (visited.has(realDir)) return false;
+  visited.add(realDir);
+
   let entries: string[];
   try {
-    entries = readdirSync(absDir);
+    entries = readdirSync(realDir);
   } catch {
     return false; // 目录不可读（权限/竞态删）→ 跳过该分支
   }
   for (const name of entries) {
     if (IGNORED_NAMES.has(name)) continue; // node_modules/.git 不遍历不返回（与 tree/watch 一致）
-    const absChild = join(absDir, name);
+    // 条目路径基于 realDir 拼接：absDir 本身可能是 symlink（经链接进入），readdir(realDir) 后
+    //   absDir/name 会不可达，realDir/name 才是真实文件系统位置
+    const absChild = join(realDir, name);
     const relChild = relDir ? `${relDir}/${name}` : name;
 
-    let isSymlink = false;
-    try {
-      isSymlink = lstatSync(absChild).isSymbolicLink();
-    } catch {
-      continue; // lstat 失败（权限/竞态删）跳过
-    }
     let isDir = false;
     try {
       isDir = statSync(absChild).isDirectory();
@@ -83,11 +96,9 @@ function walkSearch(
         if (files.length + dirs.length >= limit) return true;
         continue;
       }
-      // 目录未命中 → 递归其下层（普通目录）；symlink→dir 一律不递归——目标可能出 workspace 或
-      //   指向祖先（循环），保守跳过（防越权/循环，比 API 文档约束更严）
-      if (!isSymlink) {
-        if (walkSearch(absChild, relChild, qLower, pathMode, files, dirs, limit)) return true;
-      }
+      // 目录未命中 → 递归其下层：普通目录与 symlink→dir 同递归（受控跟随，链式授权同 tree）；
+      //   循环/越权由 visited realpath 去重 + 「链接必须在 workspace 内才可达」结构性约束兜住
+      if (walkSearch(absChild, relChild, qLower, pathMode, files, dirs, limit, visited)) return true;
       continue;
     }
 
@@ -115,8 +126,9 @@ export function searchWorkspace(
   const files: string[] = [];
   const dirs: string[] = [];
   const absStart = relRoot ? join(rootDir, relRoot) : rootDir;
+  // visited 跨整个搜索共享（闭包内单实例经参数传递）：防多路径经链接抵达同一真实目录后重入
   const truncated = walkSearch(
-    absStart, relRoot, q.toLowerCase(), q.includes('/'), files, dirs, limit,
+    absStart, relRoot, q.toLowerCase(), q.includes('/'), files, dirs, limit, new Set<string>(),
   );
   return { files, dirs, truncated };
 }

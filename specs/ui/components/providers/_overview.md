@@ -3,7 +3,7 @@
 > 层级: 子系统（app config → providers group 的内容区）
 
 ## 数据源
-REST CRUD 无 SSE——挂载 `GET /provider` 一次取 `{ items: ProviderInstance[], protocols: ProtocolMeta[] }`（protocols cache 共享给 component-provider-fields）；CRUD：`POST /provider`（新建）、`PUT /provider/:id`（改 label/baseUrl/apiKey/enabled/protocolId）、`DELETE /provider/:id`（级联删 models）；model：`POST /provider/:id/model`、`PUT /provider/:id/model/:modelId`、`DELETE /provider/:id/model/:modelId`。无 SSE topic，所有变更由本组件命令式 refetch 兜底。
+REST CRUD 无 SSE——挂载 `GET /provider` 一次取 `{ items: ProviderInstance[], protocols: ProtocolMeta[] }`（protocols cache 共享给 component-provider-fields）；CRUD：`POST /provider`（新建）、`PUT /provider/:id`（改 label/baseUrl/apiKey/enabled/protocolId）、`DELETE /provider/:id`（级联删 models）；model：`POST /provider/:id/model`、`PUT /provider/:id/model/:modelId`、`DELETE /provider/:id/model/:modelId`。**例外（v0.0.363）**：额度总览数据走 SSE topic `provider_quota`（广播组 `_all`，server QuotaStore 每轮同步后推送）——经 `use-provider-quota-store.ts` 共享 hook 消费（GET store 秒开 + 打开触发 `POST /provider/quota/sync` + 帧刷新，无轮询）；provider/model CRUD 变更仍由本组件命令式 refetch 兜底。
 
 ## 2. 数据模型（对齐我们的定义）
 ### ProviderInstance（**v0.0.53 修订** += protocolId）

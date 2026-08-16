@@ -1,0 +1,75 @@
+# quota_store_sync — v0.0.363 全局额度 store + 同步任务 + SSE 推送（黑盒契约面）
+#
+# 权威依据：specs/tech/version_logs/v0.0.363/change_plan.md §1.3/§1.4（T1 冻结契约）
+#   + specs/api/overall/02-llm-chat.md §5.6（QuotaSnapshot item 形状，350 契约不变）
+#
+# 测试面（T1 契约逐条）：
+#   A  GET /provider/quota 秒回语义：读 store 立即返回 {items, lastSyncedAt}——本步容忍启动空窗
+#      （items:[] + lastSyncedAt:null 不作非空断言；空窗口径归本步「存在性」+ D 步对照）
+#   B1 烧穿启动空窗：poll GET until .items[0] exists——test 池 3 个 enabled native provider
+#      （kimi/deepseek/minimax coding plan）+ 错误 item 也进 store（T1「错误态也是状态」）→ 首轮后确定性非空
+#   B2 POST /provider/quota/sync 契约：202 {syncing:true, lastTriggeredAt}（fire-and-forget）。
+#      30s 节流（lastTriggeredAt）使单次 POST 可能返 {syncing:false,reason}——用 poll 每 2s 重触发
+#      烧穿节流窗，until .syncing == true（节流分支 {syncing:false,reason} 不作断言主路径）
+#   C  SSE topic provider_quota（广播 group _all，同 app_task 模式）：先订阅后触发（step1 早于 B2），
+#      帧必达。断言按 sse_collector 存储形状（topic/group 顶层字段）过滤计数；
+#      帧内容形状 {data:{items,lastSyncedAt},timestamp} 的字段级校验 DSL 不支持（k=v 精确匹配
+#      无法断 ISO 时间戳），归 UT（sync-service emit 形状）+ D 步 GET 同源对照
+#   D  sync 完成后 GET 复核：帧到达即 store 已写（emit 在 store.set 后）→ lastSyncedAt 非 null
+#      （与 A 步空窗容忍形成两态口径对照：空窗 null / 同步后 ISO 串）
+#
+# 环境注意：本 case 触发真实 provider 额度查询（慢路径 ~15s/轮）——B2 触发后帧在 ~15s 内到达，
+# wait timeout 45 覆盖；GET 本身读 store 秒回（耗时度量 DSL 无原语，归 ET 手感/UT）。
+case: quota_store_sync
+module: cases
+timeout: 150
+
+steps:
+  # 先订阅后触发（SSE 竞态防御）：无 session 依赖，topic 级订阅
+  - name: 订阅 provider_quota 广播流（group _all）
+    sse:
+      sub:
+        - { topic: provider_quota, group: _all, as: q }
+
+  # A — GET 秒回语义基线（容忍启动空窗：items 恒数组；lastSyncedAt 此刻可 null 不断言）
+  - name: A GET store 快照秒回（空窗口径容忍）
+    requests:
+      - GET /provider/quota
+    check:
+      - .items exists
+
+  # B1 — 烧穿启动空窗（首轮 sync 完成；错误 item 也进 store → 确定性）
+  - name: B1 等首轮同步落 store（poll GET 烧穿启动空窗）
+    poll:
+      request: GET /provider/quota
+      until: ".items[0] exists"
+      every: 2
+      timeout: 40
+
+  # B2 — POST sync 契约 + 30s 节流烧穿（每 2s 重触发直至 syncing:true 分支）
+  - name: B2 POST sync 触发增量（poll 烧穿节流至 syncing:true）
+    poll:
+      request: POST /provider/quota/sync
+      until: ".syncing == true"
+      every: 2
+      timeout: 45
+    check:
+      - .syncing == true
+      - .lastTriggeredAt exists
+
+  # C — SSE 帧到达（订阅早于触发；B2 触发的 sync 完成即 emit）
+  - name: C 等 provider_quota 帧到达
+    wait:
+      stream: q
+      until: "q.count(topic=provider_quota) >= 1"
+      timeout: 45
+    check:
+      - q.count(topic=provider_quota,group=_all) >= 1
+
+  # D — 帧后 GET 复核（emit 在 store.set 后 → lastSyncedAt 必非 null；与 A 空窗容忍对照）
+  - name: D sync 后 store 快照复核（lastSyncedAt 非 null）
+    requests:
+      - GET /provider/quota
+    check:
+      - .items[0] exists
+      - .lastSyncedAt exists

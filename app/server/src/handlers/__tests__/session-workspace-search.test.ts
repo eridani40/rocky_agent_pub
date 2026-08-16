@@ -4,8 +4,9 @@
  *       specs/tech/version_logs/v0.0.320/change_plan.md D10
  *
  * 覆盖 test-plan §2 必覆盖清单：
- *   搜索命中文件名 / 命中文件夹名 / ignore node_modules/.git / 200 上限截断 + truncated /
- *   空 q → 400 / 无匹配 → 200 空结果 / 大小写不敏感 / 405 / 404 session / symlink 目录不跟随
+ *   搜索命中文件名 / 命中文件夹名 / ignore node_modules/.git / 上限截断 + truncated /
+ *   空 q → 400 / 无匹配 → 200 空结果 / 大小写不敏感 / 405 / 404 session /
+ *   symlink 受控跟随（v0.0.360：链式授权 + realpath 防循环，翻转自旧「不跟随」断言）
  *
  * 文件系统隔离：tmpdir + mkdtemp + beforeEach/afterEach rm（no-mock fs，对齐 test-plan §2）。
  */
@@ -192,11 +193,11 @@ describe('GET /session/:id/workspace/search', () => {
     expect(await body(res)).toEqual({ files: [], dirs: [] });
   });
 
-  it('[安全] symlink 目录不跟随递归（目标出 workspace / 循环 → 不越权不卡死）', async () => {
+  it('[安全][v0.0.360] symlink 受控跟随（防循环；目标跟随=链式授权）', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'oobt-wssearch-out-'));
     try {
       writeFileSync(join(outside, 'secret-helper.txt'), 'secret');
-      // ws/link -> outside（workspace 外）
+      // ws/link -> outside（workspace 外；v0.0.360 起 workspace 内 symlink = 用户放置 = 授权 → 跟随）
       symlinkSync(outside, join(ws, 'link'));
       // ws/self -> ws（循环引用）
       symlinkSync(ws, join(ws, 'self'));
@@ -209,10 +210,10 @@ describe('GET /session/:id/workspace/search', () => {
       );
       expect(res.status).toBe(200);
       const parsed = await body(res);
-      // 只命中 workspace 内真实文件；symlink 目录本身不命中（link/self 目录名不含 helper）
+      // 授权跟随：出 workspace 目标目录内文件可搜到（经链接路径返回）
       expect(parsed.files).toContain('inside-helper.txt');
-      expect(parsed.files.some((p: string) => p.includes('secret-helper'))).toBe(false);
-      // 不卡死（循环 self 未导致无限递归）→ 已正常返回即证明
+      expect(parsed.files).toContain('link/secret-helper.txt');
+      // 不卡死（循环 self 经 realpath visited 去重）→ 已正常返回即证明
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

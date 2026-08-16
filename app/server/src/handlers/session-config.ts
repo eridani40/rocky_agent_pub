@@ -31,7 +31,20 @@ import type { LlmProviderConfig } from '../llm/provider-types';
 //   参考: services/model-resolver.ts + PRD 03 §2.1 表 + §5.1 错误体
 //   session-config 全部走 resolveModel（PRD §2.1 6 行 fallback 表）；resolveProviderModel
 //   仅作 session-provider-utils.ts 的 @internal 机械解析兜底。
-import { resolveModel } from '../services/model-resolver';
+//   [v0.0.349] 分支 2 全 dangling 降级复用 ModelNotConfiguredError（与分支 1 跑空同构，
+//   消费链 instanceof 识别 → HTTP 400 MODEL_NOT_CONFIGURED；api 21 §2.7-1）。
+import { resolveModel, ModelNotConfiguredError } from '../services/model-resolver';
+// [v0.0.347] 模型路由 resolve 双分支（D11/D12）：挂载查询 + 方案实体读取 + 候选链合成。
+//   store 层（T1 已实现）：getPlan / getPlaygroundPlanId；validation 层：fillCircuitDefaults（默认熔断参数）。
+import { getPlan, getPlaygroundPlanId } from '../services/model-routing-store';
+import {
+  fillCircuitDefaults,
+  isItemEnabled,
+  isItemTimeConditioned,
+  type RoutingItem,
+} from '../services/model-routing-validation';
+import { isReservedModelId } from '../services/model-validation';
+import type { AppConfigService } from '../config/app-config-service';
 import type { SessionConfig, StudioContext } from '../agent/context-types';
 // tool policy 单源：全部走 SessionTypePolicy.resolveToolSet（profile yaml 单源）。
 // 参考: specs/tech/agent/tools/[P0]tool_policy.md §4.1（config 层接线）
@@ -40,6 +53,9 @@ import type { SessionTypePolicy } from '../agent/session-type-policy';
 import { DEFAULT_MAX_ITERATIONS } from '../agent/agent-loop-lifecycle';
 // SessionKind 统一 session 身份维度
 import type { SessionKind, SessionContext } from '@app/shared';
+// [v0.0.347] academy 边界：academy 集成 = 非目标（tech spec L20/L266 本期仅 studio/playground）。
+//    academy 会话不得走 playground 挂载方案（绕过 classroom 三档模型链）。
+import { isAcademySessionKind } from '../academy/academy-context';
 // skill catalog 注入（arch §7.2）
 import { SkillResolver, builtinSkillRoot } from '../skills/resolver';
 import { SkillEnabledStore } from '../skills/enabled-store';
@@ -111,6 +127,115 @@ export function resolveEffort(
   if (sessionEffort === 'low' || sessionEffort === 'high' || sessionEffort === 'max') return sessionEffort;
   if (squadEffortDefault === 'low' || squadEffortDefault === 'high' || squadEffortDefault === 'max') return squadEffortDefault;
   return undefined;
+}
+
+/**
+ * [v0.0.347] 模型路由 resolve 双分支（D11/D12）——挂载查询 + 候选链合成（纯函数，无副作用）。
+ * 参考: specs/tech/agent/providers_and_models/[P0]model_routing.md §4
+ *
+ * - 挂载源：studio = squad.modelRoutingPlanId；playground = model_routing.default.playgroundPlanId
+ * - 有挂载且方案存在 → 合成候选链：
+ *     session 显式 modelId（非保留字）→ [session 模型(priority 0)] + 方案 items（临时合成，
+ *     不写回方案实体；熔断键 = planId + session 模型，享受方案熔断控制）
+ *     default/none/undefined（保留字）→ 方案 items 原序（priority 升序）
+ * - 无挂载 / 方案不存在（挂载悬空）→ undefined（走分支 1 现有 resolveModel 原链，零改动）
+ *
+ * @returns SessionConfig.modelRoutingPlan | undefined（undefined = 分支 1）
+ */
+export function resolveModelRoutingPlan(
+  deps: SessionHandlerDeps,
+  sessionPersist: { providerId?: string; modelId?: string },
+  isStudio: boolean,
+  studioContext: StudioSessionContext | undefined,
+  isAcademy = false,
+): SessionConfig['modelRoutingPlan'] | undefined {
+  // ① academy 边界：academy 集成 = 非目标（tech spec L20/L266 本期仅 studio/playground）。
+  //    academy 会话（isStudio=false）若走 playground 挂载会绕过 classroom 三档模型链 → 直接分支 1。
+  if (isAcademy) return undefined;
+  // ② 查挂载（每次 run 现拉无 cache）
+  const planId = isStudio
+    ? (studioContext!.squad as unknown as { modelRoutingPlanId?: string } | undefined)?.modelRoutingPlanId
+    : getPlaygroundPlanId(deps.appConfig);
+  if (!planId) return undefined;
+  // ③ 读方案实体（挂载悬空 = 方案已被删但引用未清 → 分支 1 兜底，不抛）
+  const plan = getPlan(deps.appConfig, planId);
+  if (!plan) return undefined;
+  // ④ 合成候选链
+  const explicit = isReservedModelId(sessionPersist.modelId) ? undefined : sessionPersist.modelId;
+  let items: RoutingItem[];
+  if (explicit !== undefined) {
+    // session 显式模型 → providerId 用持久 hint（有则直接用）；否则跨启用 provider 反查。
+    // 反查不到（模型不存在/禁用）→ 该显式模型不可用，退化为方案 items 原序（不合成，routing 也会跳过）。
+    const providerId = sessionPersist.providerId ?? findProviderIdForModel(deps.appConfig, explicit);
+    items = providerId
+      ? [synthesizeExplicitItem(providerId, explicit, plan.items), ...plan.items]
+      : [...plan.items];
+  } else {
+    items = [...plan.items];
+  }
+  // ⑤ 生效熔断参数（默认值填充后；方案 circuit 覆盖缺省用默认）
+  // [v0.0.353 T5 D8] 返回带 planName（方案实体已有；logical gen metadata 记录方案名）
+  return { planId, planName: plan.name, items, circuit: fillCircuitDefaults(plan.circuit) };
+}
+
+/**
+ * [v0.0.353 T1 D3] 合成 session 显式模型条目（priority 0 无条件插入候选链首位）。
+ * timeCondition 继承：方案内同 providerId+modelId 的启用条目中第一个带时间条件者
+ * （显式指定模型 ≠ 绕过该模型的调度时间窗）；无匹配 → 全天（不带 timeCondition）。
+ * 参考: specs/tech/version_logs/v0.0.353/model-routing-trace-correctness/change_plan.md D3
+ */
+function synthesizeExplicitItem(providerId: string, modelId: string, planItems: RoutingItem[]): RoutingItem {
+  const inheritFrom = planItems.find(
+    (it) =>
+      it.providerId === providerId &&
+      it.modelId === modelId &&
+      isItemEnabled(it) &&
+      isItemTimeConditioned(it),
+  );
+  return {
+    providerId,
+    modelId,
+    priority: 0,
+    enabled: true,
+    ...(inheritFrom?.timeCondition ? { timeCondition: inheritFrom.timeCondition } : {}),
+  };
+}
+
+/**
+ * [v0.0.347] 跨启用 provider 反查 modelId 所属 providerId（合成 priority 0 用）。
+ * @returns providerId | undefined（未命中任何启用 provider 的启用 model）
+ */
+function findProviderIdForModel(svc: AppConfigService, modelId: string): string | undefined {
+  for (const p of listEnabledProviders(svc)) {
+    if (Array.isArray(p.models) && p.models.some((m) => m && m.modelId === modelId && m.enabled !== false)) {
+      return p.id;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * [v0.0.347] 分支 2 client 构造：按候选链依次 buildLlmClient，取第一个能成功组装的候选。
+ * 方案校验（T1）保证 items 指向 enabled provider 的 enabled model，正常首候选即成功；
+ * 循环防御运行时 provider 被删/模型被禁（此时该候选在 routing 也会被跳过）。
+ * @returns 首可用候选的 providerId/modelId/client（三者同源对齐；SessionConfig.modelId 显示用）
+ */
+function buildClientFromCandidates(
+  deps: SessionHandlerDeps,
+  items: RoutingItem[],
+): { providerId: string; modelId: string; client: ReturnType<typeof buildLlmClient> } {
+  let lastErr: unknown;
+  for (const item of items) {
+    try {
+      const client = buildLlmClient(item.providerId, item.modelId, deps.appConfig, deps.pluginManager);
+      return { providerId: item.providerId, modelId: item.modelId, client };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error('model routing plan: no usable candidate to build client');
 }
 
 /**
@@ -218,35 +343,67 @@ export function buildSessionConfigFromDeps(
   academyClassroomModel?: { providerId?: string; modelId: string },
 ): SessionConfig {
   const isStudio = !!studioContext;
+  // [v0.0.347] 模型路由 resolve 双分支（D11/D12）：
+  //   分支 2（有挂载方案）→ 合成候选链产出 modelRoutingPlan，**不 resolveModel**（不隐式兜底 D4）；
+  //   client 用候选链第一个能组装的（routing 运行时按候选换模型，首候选仅作 SessionConfig.client 占位）。
+  //   分支 1（无挂载）→ 现有 resolveModel 原链（零改动）。
+  const modelRoutingPlan = resolveModelRoutingPlan(
+    deps, sessionPersist, isStudio, studioContext, isAcademySessionKind(kind),
+  );
   // 1. provider/model 解析（chat/compact 同链）
   //    sessionType 从 kind.biz 派生；studio squad 复合字段（modelDefaultProviderId）作 default 步 hint。
   //    **INV-A1**: resolver 不读 member.model（session 是 model 唯一运行配置读源）。
   //    **INV-A5 收窄**: studio 只读 squad.modelDefault，不再读 squad.summaryModelDefault（已整删）。
   //    @throws ModelNotConfiguredError fallback 链跑完仍无可用 modelId（caller 转 400 错误体）
-  const { providerId, modelId } = resolveModel({
-    appConfigService: deps.appConfig,
-    sessionType:
-      kind.biz === 'studio' ? 'studio'
-      : kind.biz === 'academy' ? 'academy'
-      : 'playground',
-    sessionModelId: sessionPersist.modelId,
-    sessionProviderId: sessionPersist.providerId, // 复合 hint（INV-B1）
-    ...(isStudio && studioContext!.squad !== undefined
-      ? {
-          squad: studioContext!.squad as {
-            modelDefault?: string;
-            modelDefaultProviderId?: string;
-          },
+  const resolved = modelRoutingPlan
+    ? null // 分支 2：不 resolveModel（方案优先，不隐式兜底 D4）
+    : resolveModel({
+        appConfigService: deps.appConfig,
+        sessionType:
+          kind.biz === 'studio' ? 'studio'
+          : kind.biz === 'academy' ? 'academy'
+          : 'playground',
+        sessionModelId: sessionPersist.modelId,
+        sessionProviderId: sessionPersist.providerId, // 复合 hint（INV-B1）
+        ...(isStudio && studioContext!.squad !== undefined
+          ? {
+              squad: studioContext!.squad as {
+                modelDefault?: string;
+                modelDefaultProviderId?: string;
+              },
+            }
+          : {}),
+        // academy 三档链第二档（classroom.defaultModel）；缺省 → 退化 session → app 默认
+        ...(kind.biz === 'academy' && academyClassroomModel !== undefined
+          ? { classroom: { defaultModel: academyClassroomModel } }
+          : {}),
+      });
+  // 2. 组装 LlmClient（分支 2 用候选链第一个能组装的；分支 1 用 resolveModel 结果）
+  // [v0.0.353 T4 根治版] 分支 2 时 SessionConfig.modelId/providerId 取 session 持久口径，
+  // 不再取首候选（禁止 run 启动前预选污染 wire body）。builtClient 仅用于取 client 占位
+  // + 检测「全候选不可用」，其 modelId 不再作为 SessionConfig.modelId 来源。
+  // [v0.0.349] 决策④：全候选 dangling → 降级 throw ModelNotConfiguredError。
+  const builtClient = modelRoutingPlan
+    ? (() => {
+        try {
+          return buildClientFromCandidates(deps, modelRoutingPlan.items);
+        } catch {
+          throw new ModelNotConfiguredError(
+            kind.biz === 'studio' ? 'studio' : kind.biz === 'academy' ? 'academy' : 'playground',
+            '方案内所有模型不可用（provider 已删除或模型已禁用），请编辑组合方案或检查 provider 配置',
+          );
         }
-      : {}),
-    // academy 三档链第二档（classroom.defaultModel）；缺省 → 退化 session → app 默认
-    ...(kind.biz === 'academy' && academyClassroomModel !== undefined
-      ? { classroom: { defaultModel: academyClassroomModel } }
-      : {}),
-  });
-
-  // 2. 组装 LlmClient
-  const client = buildLlmClient(providerId, modelId, deps.appConfig, deps.pluginManager);
+      })()
+    : {
+        providerId: resolved!.providerId,
+        modelId: resolved!.modelId,
+        client: buildLlmClient(resolved!.providerId, resolved!.modelId, deps.appConfig, deps.pluginManager),
+      };
+  const client = builtClient.client;
+  // [v0.0.353 T4 根治版] 分支 2 取消启动前预选污染：providerId/modelId 取 session 持久口径；
+  // 分支 1 仍使用 resolveModel 结果（resolved.providerId/modelId）。
+  const providerId = modelRoutingPlan ? (sessionPersist.providerId ?? '') : resolved!.providerId;
+  const modelId = modelRoutingPlan ? (sessionPersist.modelId ?? '') : resolved!.modelId;
 
   // [v0.0.279] effort 覆盖链解析（与 resolveModel 同处同时机——每次 run 现拉无 cache）：
   //   成员显式档（low/high/max）→ 用之；否则读团队 effortDefault（low/high/max）→ 用之；否则 undefined（厂商默认）。
@@ -338,6 +495,7 @@ export function buildSessionConfigFromDeps(
 
   // 8. 组装 SessionConfig
   return {
+    providerId,
     sessionId,
     systemPrompt,
     client,
@@ -346,6 +504,9 @@ export function buildSessionConfigFromDeps(
     workdir,
     maxIterations,
     skills,
+    // [v0.0.347] 模型路由方案注入（分支 2 才有；分支 1 = undefined → invoke 走现有路径）。
+    //   stage-llm 透传 CallLLMInput.routingPlan → InvokeContext.routingPlan → routingAttemptLoop。
+    ...(modelRoutingPlan !== undefined ? { modelRoutingPlan } : {}),
     // 生效的 llm_request config + 全部 provider（stage-llm 透传 invoke）。
     llmRequestConfig,
     allProviders,

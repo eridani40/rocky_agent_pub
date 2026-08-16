@@ -215,6 +215,11 @@ export class AutoNamingService {
         model: modelId,
         input: { messages: [], modelId, iteration: 0 } as never,
         startTime: new Date(),
+        // [v0.0.353 T3 A1 review fix] 与主链路 LoopObservability/port 对称：logical start 同标
+        // providerId/providerName=null + logicalView=true（真实 provider 在 port physical 子 span）
+        providerId: null,
+        providerName: null,
+        logicalView: true,
       });
       const port = createLangfuseObservabilityPort({ adapter, genHandle: gen, iteration: 0, step: 0, model: modelId });
       return { adapter, trace, gen, port };

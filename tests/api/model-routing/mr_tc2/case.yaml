@@ -1,0 +1,207 @@
+# mr_tc2 — [v0.0.347] 同模型条目约束专项：合法组合 / 停用豁免 / enabled 缺省 / 非法引用
+#
+# 覆盖契约：specs/api/overall/21-model-routing.md §2.2 校验表 + change_plan
+#           （validateModelRoutingPlan 全规则，PRD §2.8 UC-21/22/23 + 停用条目不占额度 D15）
+#  1. 合法组合：同模型 1 带时间（在上）+ 1 不带时间（在下）→ 200；GET 回读 hours 白名单落库
+#  2. 停用条目不占额度：同模型 2 无条件条目，其一 enabled=false → 合法通过（按启用条目统计）
+#  3. enabled 缺省兼容：条目不带 enabled 字段 → 通过（兼容层缺省 true）
+#  4. 非法引用：providerId/modelId 非已启用 provider 的合法 enabled model → 400
+#  5. priority 非法：priority=0 / 重复 → 400
+#  6. 2 带时间 / 2 不带 / 带时间在下 → 400（mr_tc1 已覆盖，本 case 不重复）
+#
+# 全确定性 HTTP 事务，零 LLM。teardown 删除方案。
+case: mr_tc2
+module: model-routing
+timeout: 60
+
+setup:
+  - name: 合法组合 PUT — 同模型 1 带时间（在上）+ 1 不带时间（在下）+ 第二模型
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc2-plan"
+          data:
+            id: "zz-mr-tc2-plan"
+            name: "zz-mr-tc2-plan"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                timeCondition: { hours: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23] }
+                enabled: true
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 2
+                enabled: true
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 3
+                enabled: true
+    check:
+      - .ok == true
+
+steps:
+  - name: GET 回读 — hours 白名单落库（小时格语义）+ 带时间条目在上
+    requests:
+      - GET /config/app?group=model_routing_plans
+    check:
+      - .items[] any .key == "zz-mr-tc2-plan"
+      - .items[] any .data.items[0].timeCondition.hours[0] == 2
+      - .items[] any .data.items[0].timeCondition.hours[21] == 23
+      - .items[] any .data.items[1].timeCondition absent
+
+  - name: 停用条目不占额度 — 同模型 2 无条件条目其一 enabled=false → 合法通过
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc2-plan-disabled"
+          data:
+            id: "zz-mr-tc2-plan-disabled"
+            name: "zz-mr-tc2-disabled"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 2
+                enabled: false
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 3
+                enabled: true
+    check:
+      - .ok == true
+
+  - name: enabled 缺省兼容 — 条目不带 enabled 字段 → 通过（兼容层缺省 true）
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc2-plan-noenabled"
+          data:
+            id: "zz-mr-tc2-plan-noenabled"
+            name: "zz-mr-tc2-noenabled"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 2
+    check:
+      - .ok == true
+
+  - name: 非法 model 引用 — provider 合法但 modelId 不存在 → 400
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc2-badmodel"
+          data:
+            id: "zz-mr-tc2-badmodel"
+            name: "badmodel"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "no-such-model-xyz"
+                priority: 1
+                enabled: true
+    check:
+      - .error ~= "model not found or disabled"
+
+  - name: 非法 provider 引用 — providerId 不存在 → 400
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc2-badprov"
+          data:
+            id: "zz-mr-tc2-badprov"
+            name: "badprov"
+            items:
+              - providerId: "01KZZZZZZZZZZZZZZZZZZZZZZZX"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+    check:
+      - .error ~= "model not found or disabled"
+
+  - name: priority=0 非法 → 400
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc2-badprio"
+          data:
+            id: "zz-mr-tc2-badprio"
+            name: "badprio"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 0
+                enabled: true
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 1
+                enabled: true
+    check:
+      - .error ~= "priority"
+
+  - name: priority 重复 → 400
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc2-dup-prio"
+          data:
+            id: "zz-mr-tc2-dup-prio"
+            name: "dup-prio"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 1
+                enabled: true
+    check:
+      - .error ~= "priority"
+
+teardown:
+  - name: 清理方案（mr_tc2 创建的 3 个合法方案）
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=zz-mr-tc2-plan
+        status: [200, 404]
+    check:
+      - .ok == true
+  - name: 清理停用豁免方案
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=zz-mr-tc2-plan-disabled
+        status: [200, 404]
+    check:
+      - .ok == true
+  - name: 清理 enabled 缺省方案
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=zz-mr-tc2-plan-noenabled
+        status: [200, 404]
+    check:
+      - .ok == true

@@ -73,6 +73,14 @@ export interface ExecuteRunCtx {
    * execute() 装配进每个 tool 调用的 ctx.childRegistry；缺省 undefined → 工具不注册子进程。
    */
   childRegistry?: ChildProcessRegistry;
+  /**
+   * [v0.0.354 T1] 增量结果回调：每个 result 确定后（push 进 results 的同时）立即调用。
+   * caller（executeAndEmit）注入 emit/span 逻辑，实现「成功一个发一个」的逐个 SSE 推送。
+   * - 7 条产出路径全覆盖（reject/not-registered/invalid-input/deny/ask-pending/interaction-pending/runTool 三态）
+   * - index = 该 result 在 toolCalls 中的下标（与 results 数组下标一致）
+   * - 抛错 fail-silent（对齐 writeToolLog）：回调异常绝不影响执行主流程与返回值
+   */
+  onResult?: (result: ToolResultBlock, index: number) => void;
 }
 
 /**
@@ -148,13 +156,26 @@ export class ToolExecutionEngine {
     // runId（落 PendingToolCall 用）；caller 未传则空串（悬挂队列字段完整性靠 caller）
     const runId = opts?.runId ?? '';
 
+    // [v0.0.354 T1] 统一产出 helper：push results + 每 result 立即调 onResult 回调（fail-silent）。
+    // 7 条产出路径（reject/not-registered/invalid-input/deny/ask-pending/interaction-pending/runTool）
+    // 全部走本 helper，保证「成功一个回调一个」；回调抛错绝不影响执行主流程（对齐 writeToolLog）。
+    const pushResult = (result: ToolResultBlock, index: number): void => {
+      results.push(result);
+      try {
+        opts?.onResult?.(result, index);
+      } catch {
+        // fail-silent：回调（emit/span）异常不冒泡进工具执行主流程
+      }
+    };
+
     // 串行：for...of + await，不并发（避免文件竞争/顺序依赖问题）
-    for (const call of toolCalls) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const call = toolCalls[i]!;
       // Layer C：allowedTools 白名单门控（agent_loop_base §2.2 + tool_execution_engine §3.1）。
       // allowedSet=undefined 表示全集（eager 默认）；非 undefined 时按白名单过滤。
       // 拒绝路径统一走 rejectToolCall，产 `[tool_not_allowed]` 文本（与未注册路径同 code）。
       if (allowedSet !== undefined && !allowedSet.has(call.name)) {
-        results.push(rejectToolCall(call, 'not in whitelist'));
+        pushResult(rejectToolCall(call, 'not in whitelist'), i);
         continue;
       }
       // resolve + validate 一次（HITL 钩子只在通过后才考虑：拒绝 / 未注册 / 参数错不进 HITL）。
@@ -162,12 +183,12 @@ export class ToolExecutionEngine {
       const tool = this.resolveTool(config.tools, call.name);
       if (!tool) {
         // 未注册路径统一拒绝 code（与白名单外路径同 `[tool_not_allowed]`，仅 reason 短语区分）
-        results.push(rejectToolCall(call, 'not registered'));
+        pushResult(rejectToolCall(call, 'not registered'), i);
         continue;
       }
       const validateErr = validateInput(tool.definition.inputSchema, call.arguments);
       if (validateErr) {
-        results.push(this.wrap(call, errorResult(`[${ToolErrorCode.INVALID_INPUT}] ${validateErr}`)));
+        pushResult(this.wrap(call, errorResult(`[${ToolErrorCode.INVALID_INPUT}] ${validateErr}`)), i);
         continue;
       }
       // 构造 ctx（在策略门和 HITL 钩子之前，两者都需要 ctx）
@@ -189,7 +210,7 @@ export class ToolExecutionEngine {
       if (tool.checkPermission) {
         const decision = safeCheckPermission(tool, call.arguments as ToolInput, ctx);
         if (decision.behavior === 'deny') {
-          results.push(this.wrap(call, errorResult(decision.reason)));
+          pushResult(this.wrap(call, errorResult(decision.reason)), i);
           continue;
         }
         if (decision.behavior === 'ask') {
@@ -201,7 +222,7 @@ export class ToolExecutionEngine {
             // ask 且未批准 + 非绿灯：构造 need_approval interaction，复用现有 pending 路径（INV-P5）
             const interaction = buildApprovalInteraction(call, decision);
             const { resultBlock, pendingCall } = buildPendingResult(call, interaction, config.sessionId, runId);
-            results.push(resultBlock);
+            pushResult(resultBlock, i);
             pending.push(pendingCall);
             continue;
           }
@@ -226,7 +247,7 @@ export class ToolExecutionEngine {
           config.sessionId,
           runId,
         );
-        results.push(resultBlock);
+        pushResult(resultBlock, i);
         pending.push(pendingCall);
         continue;
       }
@@ -234,7 +255,7 @@ export class ToolExecutionEngine {
       // [v0.0.130.hang] 三层超时解析（per-call > per-tool > engine 默认 30s，封顶 600s），
       // 只在真实 run 路径生效——HITL/deny/reject 均已在此行之前 continue，不受超时影响。
       const effectiveTimeoutMs = resolveEffectiveTimeout(call.arguments?.timeout, tool);
-      results.push(await this.runTool(call, tool, ctx, effectiveTimeoutMs));
+      pushResult(await this.runTool(call, tool, ctx, effectiveTimeoutMs), i);
     }
     return { results, pending };
   }

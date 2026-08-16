@@ -38,6 +38,8 @@ import {
   handleProviderCollection, handleProviderItem,
   handleModelCollection, handleModelItem,
 } from '../handlers/provider';
+// [v0.0.350] GET /provider/quota 聚合额度端点（决策⑦）；[v0.0.363] POST /provider/quota/sync 增量触发
+import { handleProviderQuota, handleProviderQuotaSync } from '../handlers/provider-quota';
 import { handleSkillRoute } from '../handlers/skill';
 import { handleSkillMarketRoute } from '../handlers/skill-market';
 import { handleMentionRoute, type MentionHandlerDeps } from '../handlers/mention';
@@ -46,6 +48,10 @@ import { handleHistorySearch } from '../handlers/history-search';
 import { handleConsolidationStatus } from '../handlers/consolidation-status';
 import { handleConsolidationRun } from '../handlers/consolidation-run';
 import { handleBootstrapStatus } from '../handlers/bootstrap-status';
+// [v0.0.347] 模型路由方案状态查询（红绿灯数据源）
+import { handleModelRoutingStatus } from '../handlers/model-routing-status';
+// [v0.0.347 T2] 真实熔断注册表（globalThis 单例；T1 的 EmptyCircuitRegistry 由 T2 替换）
+import { getCircuitBreakerRegistry } from '../llm/caller/circuit_breaker_registry';
 
 /**
  * 杂项路由组分发。命中返 Response；未命中返 null（主分发继续下个 group）。
@@ -133,6 +139,17 @@ export async function dispatchMiscRoutes(
   if (path === '/provider') {
     return handleProviderCollection(req, method, bs.appConfig, bs.pluginManager);
   }
+  // [v0.0.350] GET /provider/quota 聚合额度端点——MUST 置于 providerMatch 正则前
+  //（否则 id='quota' 被 :id 正则吞掉走 handleProviderItem → 404，S6）
+  // [v0.0.363] 语义变更：读 QuotaStore 秒回（空窗异步触发首轮不等待）——bs.quotaStore/quotaSyncService
+  if (path === '/provider/quota') {
+    return handleProviderQuota(method, bs.quotaStore, bs.quotaSyncService);
+  }
+  // [v0.0.363] POST /provider/quota/sync 触发增量同步（fire-and-forget 202）——同置于
+  // providerMatch 正则前（与 GET 同理防 :id 吞路径）
+  if (path === '/provider/quota/sync') {
+    return handleProviderQuotaSync(method, bs.quotaSyncService);
+  }
   const providerMatch = path.match(/^\/provider\/([^/]+)(\/model)?(\/([^/]+))?$/);
   if (providerMatch) {
     const id = providerMatch[1]!;
@@ -200,6 +217,16 @@ export async function dispatchMiscRoutes(
       return json(503, { error: 'consolidation adapter not available' });
     }
     return handleConsolidationRun(req, method, runDeps);
+  }
+
+  // [v0.0.347] GET /model-routing/plans/:planId/status —— 方案内模型熔断状态（红绿灯数据源，只读）
+  // T2 接线真实 CircuitBreakerRegistry（globalThis 单例）：快照即进程内存真实熔断态
+  const mrMatch = path.match(/^\/model-routing\/plans\/([^/]+)\/status$/);
+  if (mrMatch) {
+    if (method !== 'GET') {
+      return json(405, { error: 'Method Not Allowed' }, { allow: 'GET' });
+    }
+    return handleModelRoutingStatus(mrMatch[1], bs.appConfig, getCircuitBreakerRegistry());
   }
 
   return null;

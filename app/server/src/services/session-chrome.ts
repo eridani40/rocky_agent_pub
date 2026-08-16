@@ -11,6 +11,8 @@
 import type { BizType, Role, Derivation } from '@app/shared';
 // 保留字判定单一权威（'default'/'none'/空 → sessionModel null）
 import { isReservedModelId } from './model-validation';
+// 方案反查 + playground 挂载读取（复用既有函数，与 resolveModelRoutingPlan 同口径）
+import { getPlan, getPlaygroundPlanId } from './model-routing-store';
 
 /** chrome kind 闭合枚举（api 04a §2；派生规则 §3.1） */
 export type ChromeKind =
@@ -58,6 +60,8 @@ export interface SessionChromeView {
   sessionModel: { providerId: string; modelId: string } | null;
   /** 该 kind 的默认模型（picker「默认模型」项数据源）；未配置 → null */
   defaultModel: { providerId?: string; modelId: string } | null;
+  /** 该 kind 挂载的默认方案（picker「方案 · 名（默认）」数据源）；未挂载/方案被删 → null；academy 恒 null（同构字段恒在） */
+  defaultRoutingPlan: { planId: string; planName: string } | null;
   effort: 'default' | 'low' | 'high' | 'max' | null;
   approvalMode: 'normal' | 'greenlight' | null;
   /** studio: squad 全体成员投影（群聊 actor 解析用）；其他 kind 恒 []（同构：字段恒在） */
@@ -118,10 +122,10 @@ export interface ChromeSessionSource {
 export interface SessionChromeSources {
   /** app_config 读取（playground defaultModel 数据源） */
   appConfig: { get(group: string, key: string): unknown };
-  /** squad 实体读取（studio defaultModel + tag 数据源） */
+  /** squad 实体读取（studio defaultModel + tag + 挂载方案数据源） */
   squadStore: {
     getSquad(squadId: string): Promise<
-      { name?: string; modelDefault?: string; modelDefaultProviderId?: string } | undefined
+      { name?: string; modelDefault?: string; modelDefaultProviderId?: string; modelRoutingPlanId?: string } | undefined
     >;
   };
   /** squad 成员列表（studio members 投影 + 对端 role 数据源） */
@@ -182,6 +186,8 @@ export async function buildSessionChrome(
     : { providerId: session.providerId ?? '', modelId: session.modelId! };
 
   let defaultModel: SessionChromeView['defaultModel'] = null;
+  // [v0.0.357] 默认方案投影（picker「方案 · 名（默认）」数据源；与 resolveModelRoutingPlan 同口径）
+  let defaultRoutingPlan: SessionChromeView['defaultRoutingPlan'] = null;
   let tag = '';
   let members: SessionChromeView['members'] = [];
 
@@ -198,6 +204,12 @@ export async function buildSessionChrome(
         modelId: squad.modelDefault,
         ...(squad.modelDefaultProviderId ? { providerId: squad.modelDefaultProviderId } : {}),
       };
+    }
+    // studio 方案投影：squad.modelRoutingPlanId + getPlan 反查 name；方案被删 → null（不 throw）
+    const studioPlanId = squad?.modelRoutingPlanId;
+    if (studioPlanId) {
+      const plan = getPlan(deps.appConfig as never, studioPlanId);
+      if (plan) defaultRoutingPlan = { planId: studioPlanId, planName: plan.name };
     }
     if (squad?.name) {
       if (kind === 'studio_group') {
@@ -220,6 +232,12 @@ export async function buildSessionChrome(
     // playground：app_config.default_models.default.chat（modelId only）
     const dm = deps.appConfig.get('default_models', 'default') as { chat?: string } | undefined;
     if (dm?.chat) defaultModel = { modelId: dm.chat };
+    // playground 方案投影：model_routing.default.playgroundPlanId + getPlan 反查 name；方案被删 → null（不 throw）
+    const pgPlanId = getPlaygroundPlanId(deps.appConfig as never);
+    if (pgPlanId) {
+      const plan = getPlan(deps.appConfig as never, pgPlanId);
+      if (plan) defaultRoutingPlan = { planId: pgPlanId, planName: plan.name };
+    }
   }
 
   return {
@@ -231,6 +249,7 @@ export async function buildSessionChrome(
     tag,
     sessionModel,
     defaultModel,
+    defaultRoutingPlan,
     effort: session.effort ?? null,
     approvalMode: session.approvalMode ?? null,
     members,

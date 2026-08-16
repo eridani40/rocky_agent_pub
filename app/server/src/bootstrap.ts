@@ -33,6 +33,9 @@ import type { EventHub, ReplayableEventBus } from './agent/event-hub';
 import type { SessionStore } from './agent/session-store';
 import type { SessionTaskLock } from './agent/session-task-lock';
 import type { AppTaskLock } from './agent/app-task-lock';
+// [v0.0.363] 全局额度 store + 同步服务（BootstrapResult 字段 → misc-routes handler）
+import type { QuotaStore } from './llm/quota-store';
+import type { QuotaSyncService } from './llm/quota-sync-service';
 import type { SseChannel } from './sse/sse-channel';
 import type { ConnectorManager } from './tools/browser/connector-manager';
 import type { BrowserInstanceManager } from './tools/browser/instance-manager';
@@ -92,6 +95,8 @@ import { TrainingEngine as TrainingEngineImpl } from './academy/training-engine'
 import { createAcademyLlmPort } from './academy/llm-caller-adapter';
 // [v0.0.223] TodoStore 实例化（独立 store，仿 CronPersistenceAdapter；fsRoot=dataDir 经 resolveDataDir 展开）
 import { TodoStore as TodoStoreImpl } from './agent/todo/todo-store';
+// [v0.0.361 §1.2 T3] ReminderQueueStore — reminder queue 消费侧单例（injector drain/clearAll 数据源）
+import { ReminderQueueStore } from './agent/system-reminder-queue';
 // [v0.0.296] bash engine 配置注入（bash_seatbelt 开关）
 import { setBashEngineConfigReader } from './tools/bash-engine';
 
@@ -144,6 +149,10 @@ export interface BootstrapResult {
    * 写路径显式 broadcast）。router 透传给 squad-routes → SquadHandlerDeps（写路径 broadcast）。
    */
   squadMetaBroadcaster: SquadMetaBroadcaster;
+  /** [v0.0.363] 全局额度 store（GET /provider/quota 读秒回） */
+  quotaStore: QuotaStore;
+  /** [v0.0.363] 全局额度同步服务（5min 周期 + POST /provider/quota/sync 增量触发） */
+  quotaSyncService: QuotaSyncService;
   /** SSE 桥后端对象（GET /sse / subscribe / unsubscribe） */
   sseChannel: SseChannel;
   /**
@@ -384,7 +393,7 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
 
   // Phase 6 装配（EventHub + ReplayableEventBus + SseChannel + SSE test interceptor）。
   // 纯 move 到 bootstrap-bus-phase.ts（v0.0.156 结构性拆分）。
-  const { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, squadMetaBus, sseChannel } =
+  const { hub, bus, sessionStatusBus, sessionMetaBus, appTaskBus, panoramaBus, squadMetaBus, providerQuotaBus, sseChannel } =
     await bootstrapBusPhase(logWriter);
 
   // workdir=<DATA_DIR>/workspace（启动期建；handler 也会幂等 mkdir 防外部删）
@@ -403,12 +412,18 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
   // 不触发 session_meta broadcast（session_event.md §3a.4）。
   const todoStore = new TodoStoreImpl({ fsRoot: dataDir, statusBus: sessionStatusBus });
 
+  // [v0.0.361 §1.2 T3] ReminderQueueStore — per-session 有序 reminder 队列（同 todoStore 模式：
+  // fsRoot=dataDir 早建，agent-phase 产出 contextEngine 后 setReminderQueueStore 注入）。
+  // T4 写入方（todo/presence/state-machine 等 queue.write 点）经 getReminderQueueStore 取同一单例
+  // ——per-sid mutex 必须单实例内互斥，故全局仅此一处实例化。
+  const reminderQueueStore = new ReminderQueueStore({ fsRoot: dataDir });
+
   // Phase 7 装配（SessionStore + SessionUnreadRuntime + SessionMetaBroadcaster + SessionTaskLock + AcademyStore）。
   // 纯 move 到 bootstrap-store-phase.ts（v0.0.156 结构性拆分）。
   // 关键时序（INV-C-1）：reconcileOnStartup 必须在 unreadRuntime.start 前——reconcile 期间
   // enabled=false 挡住 emit 不产未读（spec 不变量 4）。
-  const { store, unreadRuntime, sessionMetaBroadcaster, taskLock, appTaskLock, tokenUsageAggregator, academyStore, squadMetaBroadcaster } =
-    await bootstrapStorePhase(dataDir, sessionStatusBus, sessionMetaBus, squadMetaBus, sseChannel, logWriter);
+  const { store, unreadRuntime, sessionMetaBroadcaster, taskLock, appTaskLock, tokenUsageAggregator, academyStore, squadMetaBroadcaster, quotaStore, quotaSyncService } =
+    await bootstrapStorePhase(dataDir, sessionStatusBus, sessionMetaBus, squadMetaBus, sseChannel, logWriter, providerQuotaBus, appConfig, pluginManager);
 
   // Phase 8 装配（ToolEngine + ContextEngine + AgentManager + 三个 runner 注入）。
   // 纯 move 到 bootstrap-agent-phase.ts（v0.0.156 结构性拆分）。
@@ -428,6 +443,9 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
   });
   // [v0.0.223] TodoStore 注入 reminder 链（TodoReminderProvider 经 ctx.todoStore 读 session todo 进度）
   contextEngine.setTodoStore(todoStore);
+  // [v0.0.361 §1.2 T3] ReminderQueueStore 注入 reminder 消费侧（ingest 期构造 drain/clearAll
+  // closure 透传 injector；T4 写入方经 getReminderQueueStore 共享同一单例）
+  contextEngine.setReminderQueueStore(reminderQueueStore);
 
   // Phase 9 装配（SquadRuntime + BudgetAggregator + SchedulerEngine + bootScheduler）。
   // 纯 move 到 bootstrap-scheduler-phase.ts（v0.0.156 结构性拆分）。
@@ -503,6 +521,9 @@ export async function bootstrapBuiltinPlugins(dataDir: string): Promise<Bootstra
     panoramaBus,
     squadMetaBus,
     squadMetaBroadcaster,
+    // [v0.0.363] 全局额度 store + 同步服务（misc-routes provider/quota handler 注入）
+    quotaStore,
+    quotaSyncService,
     sseChannel,
     workspaceManager: searchResult.workspaceManager,
     connectorManager: connectorsResult.connectorManager,

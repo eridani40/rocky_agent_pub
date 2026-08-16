@@ -115,6 +115,12 @@
       "description": "__MSG_plugin.builtin.rocky_context.impl.team_roster.description__"
     },
     {
+      "implId": "session_states",
+      "point": "system_prompt_mapper",
+      "impl": "./prompt/session_states.ts",
+      "description": "__MSG_plugin.builtin.rocky_context.impl.session_states.description__"
+    },
+    {
       "implId": "parent_task",
       "point": "system_prompt_mapper",
       "impl": "./prompt/parent_task.ts",
@@ -297,24 +303,6 @@
     },
 
     {
-      "implId": "env",
-      "point": "system_reminder",
-      "impl": "./reminder/env.ts",
-      "description": "__MSG_plugin.builtin.rocky_context.impl.env.description__"
-    },
-    {
-      "implId": "time",
-      "point": "system_reminder",
-      "impl": "./reminder/time.ts",
-      "description": "__MSG_plugin.builtin.rocky_context.impl.time.description__"
-    },
-    {
-      "implId": "workspace",
-      "point": "system_reminder",
-      "impl": "./reminder/workspace.ts",
-      "description": "__MSG_plugin.builtin.rocky_context.impl.workspace.description__"
-    },
-    {
       "implId": "tool_error",
       "point": "system_reminder",
       "impl": "./reminder/tool_error.ts",
@@ -331,12 +319,6 @@
       "point": "system_reminder",
       "impl": "./reminder/squad_agents_status.ts",
       "description": "__MSG_plugin.builtin.rocky_context.impl.squad_agents_status.description__"
-    },
-    {
-      "implId": "squad_workspace",
-      "point": "system_reminder",
-      "impl": "./reminder/squad_workspace.ts",
-      "description": "__MSG_plugin.builtin.rocky_context.impl.squad_workspace.description__"
     },
     {
       "implId": "squad_task",

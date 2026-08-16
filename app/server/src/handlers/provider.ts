@@ -13,7 +13,7 @@
  */
 import { ulid } from '../config/ulid';
 import type { AppConfigService } from '../config/app-config-service';
-import type { Currency, ProtocolName } from '../llm/provider-types';
+import type { Currency, ProtocolName, ProviderName } from '../llm/provider-types';
 import type { PluginManager } from '../plugin/plugin-manager';
 // protocol metadata + 合法性校验拆到 helper
 import {
@@ -25,10 +25,28 @@ import {
 // re-export：api-client / handler 调用方仍可从 provider.ts 拿到 ProtocolMeta 类型
 export type { ProtocolMeta };
 
+/**
+ * [v0.0.350] provider name 白名单（决策⑤）：anthropic_compatible（通用，缺省兼容旧 client）
+ * + 4 native coding plan 类型（llm_anthropic plugin 各自 impl，同 anthropic 协议域）。
+ * POST 缺省 name → anthropic_compatible；POST/PUT name 白名单外 → 400。
+ */
+export const PROVIDER_NAME_WHITELIST: readonly ProviderName[] = [
+  'anthropic_compatible',
+  'kimi_coding_plan',
+  'glm_coding_plan',
+  'minimax_coding_plan',
+  'deepseek_api',
+];
+
+/** name 白名单校验（POST/PUT 共用） */
+function isAllowedProviderName(n: unknown): n is ProviderName {
+  return typeof n === 'string' && (PROVIDER_NAME_WHITELIST as readonly string[]).includes(n);
+}
+
 /** 响应/落盘的 ProviderInstance 形状（specs/api §5.2，简化版） */
 export interface ProviderInstance {
   id: string;
-  name: 'anthropic_compatible';
+  name: ProviderName;
   /** 1 provider : 1 protocol 锁定，必填 */
   protocolId: ProtocolName;
   label: string;
@@ -80,7 +98,8 @@ function json(status: number, body: unknown): Response {
  * （ET 观察 undefined/claude-mock-1）。出口对缺 id 的 record 生成 ULID 并回写，
  * 保证 UI model picker（providerId/modelId）永不显示 undefined（specs/ui §8）。
  */
-function listProviders(svc: AppConfigService): ProviderInstance[] {
+/** 取全部 provider（过滤 tombstone；防御性 id 补全）——provider-quota 聚合端点复用 */
+export function listProviders(svc: AppConfigService): ProviderInstance[] {
   const records = svc.listGroup(GROUP);
   const out: ProviderInstance[] = [];
   for (const r of records) {
@@ -125,13 +144,17 @@ export async function handleProviderCollection(
   } catch {
     return json(400, { error: 'invalid json body' });
   }
+  // [v0.0.350 决策⑤] name 白名单：缺省 anthropic_compatible（旧 client 向后兼容）；白名单外 400
+  const name = body.name === undefined ? 'anthropic_compatible' : body.name;
+  if (!isAllowedProviderName(name)) {
+    return json(400, { error: `name must be one of ${PROVIDER_NAME_WHITELIST.join(', ')}; got: ${String(body.name)}` });
+  }
   if (
-    body.name !== 'anthropic_compatible' ||
     typeof body.label !== 'string' ||
     typeof body.baseUrl !== 'string' ||
     typeof body.credentials?.key !== 'string'
   ) {
-    return json(400, { error: 'body requires name=anthropic_compatible, label, baseUrl, credentials.key' });
+    return json(400, { error: 'body requires label, baseUrl, credentials.key (name optional)' });
   }
   // protocolId 必填校验
   if (typeof body.protocolId !== 'string' || body.protocolId.length === 0) {
@@ -143,7 +166,7 @@ export async function handleProviderCollection(
   }
   const instance: ProviderInstance = {
     id: ulid(),
-    name: 'anthropic_compatible',
+    name,
     protocolId: body.protocolId,
     label: body.label,
     baseUrl: body.baseUrl,
@@ -191,10 +214,16 @@ export async function handleProviderItem(
   if (protocolChanged && pluginManager && !isValidProtocolId(pluginManager, body.protocolId!)) {
     return json(400, { error: `protocolId must be one of registered llm_protocol impls; got: ${body.protocolId}` });
   }
+  // [v0.0.350 决策⑤] name 可选：传则在白名单内才写入（已存 provider 切换类型通道）；不传不变
+  const nameChanged = body.name !== undefined;
+  if (nameChanged && !isAllowedProviderName(body.name)) {
+    return json(400, { error: `name must be one of ${PROVIDER_NAME_WHITELIST.join(', ')}; got: ${String(body.name)}` });
+  }
   // credentials.key === '***' 视为不修改
   const keyChanged = typeof body.credentials?.key === 'string' && body.credentials.key !== '***';
   const updated: ProviderInstance = {
     ...existing,
+    ...(nameChanged ? { name: body.name as ProviderName } : {}),
     protocolId: protocolChanged ? (body.protocolId as ProtocolName) : existing.protocolId,
     label: typeof body.label === 'string' ? body.label : existing.label,
     baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : existing.baseUrl,

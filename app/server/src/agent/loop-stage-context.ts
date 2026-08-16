@@ -224,7 +224,9 @@ async function ingestMainAndAssemble(
 ): Promise<void> {
   const { config, runKind, scopeId, wireContextEngine: ce, observability: obs, wireEmitCtx: emitCtx } = spec;
   // ingest（main: scopeId='default'，context-engine 注入 EP-selected store → store_sink 写库）
-  await ce.ingest(config, newMessages, scopeId, false);
+  // [v0.0.361 §1.4 T3] runState 透传：injector 读 useFullReminder decides full/incremental
+  //   （undefined looks true = run starts naturally full; injector sets false after consuming）
+  await ce.ingest(config, newMessages, scopeId, false, undefined, state);
   // clearReplay（让新消息的 replay 事件清掉，避免重复）
   emitCtx!.bus.clearReplay(groupKeyForRunKind(config.sessionId, runKind));
   // assemble 刷新 snapshot（base_builder 永远 rebuild 每轮从 transcript 取最新）

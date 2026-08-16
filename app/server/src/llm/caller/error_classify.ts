@@ -23,8 +23,12 @@ import { AnthropicErrorClassifier } from './adapters/anthropic';
 import { OpenAIErrorClassifier } from './adapters/openai';
 import { GLMErrorClassifier } from './adapters/glm';
 
-/** provider → classifier 单例缓存（无状态，跨调用复用） */
-const CLASSIFIERS: Record<ProviderRef, ProviderErrorClassifier> = {
+/**
+ * provider → classifier 单例缓存（无状态，跨调用复用）。
+ * [v0.0.350] Partial：ProviderName +4 native coding plan（anthropic wire）无独立 adapter——
+ * 缺省 undefined 走下方 ?? 兜底 = anthropic classifier（四渠道错误形态同 anthropic 域，实测背书）。
+ */
+const CLASSIFIERS: Partial<Record<ProviderRef, ProviderErrorClassifier>> = {
   anthropic_compatible: new AnthropicErrorClassifier(),
   openai_compatible: new OpenAIErrorClassifier(),
   glm: new GLMErrorClassifier(),
@@ -44,7 +48,7 @@ export function classify(
   provider: ProviderRef,
   ctx: ComputeHintsContext = { hasMultipleKeys: false, attempt: 1 },
 ): ClassifiedLlmError {
-  const classifier = CLASSIFIERS[provider] ?? CLASSIFIERS.anthropic_compatible;
+  const classifier = CLASSIFIERS[provider] ?? CLASSIFIERS.anthropic_compatible!;
   const result: ProviderClassifyResult = classifier.classifyProviderError(rawError);
   const hints = computeHints(result.category, ctx);
   return makeClassifiedError(result, hints, rawError);

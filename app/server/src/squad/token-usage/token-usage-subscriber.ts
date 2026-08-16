@@ -6,7 +6,8 @@
  *
  * 职责：
  *   - onUsageNotify(sid, view)：消费 SessionUsageView → 算 delta → upsertDelta
- *   - model 三级 fallback：session.providerId/modelId → squad.modelDefault/modelDefaultProviderId → '__unknown__'
+ *   - model 归属优先级链：registry 成功 target（运行时真实命中）→ session.providerId/modelId
+ *     → squad.modelDefault/modelDefaultProviderId → '__unknown__'（v0.0.359：registry 插头最高优先）
  *   - subagent 跳过（parentSessionId 非空——usage 已通过 accumulateUsage 递归 sub 上报 parent）
  *   - 首见记 0（不灌历史累计，§4 不变量）
  *   - fire-and-forget 错误隔离（写入失败不阻塞主对话，§4 不变量 + PRD P10）
@@ -27,6 +28,8 @@ import type { TokenUsageStatStore, TokenUsageDelta } from '../../persistence/tok
 import type { SessionUsageView } from '../../agent/session-store-types';
 import type { SessionStore } from '../../agent/session-store';
 import { SessionSchema } from '../../agent/schema_defs';
+// [v0.0.359 T1] 成功 target registry（model 归属最高优先：运行时真实命中 physical model）
+import { getSuccessTarget } from '../../llm/caller/success-target-registry';
 
 /** model 解析需要的 squad 读取接口（最小契约，UT 可 mock；subscriber 只读 3 个字段） */
 export interface SquadReader {
@@ -137,12 +140,16 @@ class TokenUsageSubscriber {
       // 无 squadId/memberId → 非 studio session，跳过（token 统计是 squad 功能）
       if (!squadId || !memberId) return;
 
-      // model 三级 fallback + timezone 都需读 squad，一次 fetch 复用（避免重复 disk IO）
+      // model 归属优先级链 + timezone 都需读 squad，一次 fetch 复用（避免重复 disk IO）
+      // [v0.0.359 T1] 优先级链插头：registry 成功 target（运行时真实命中 physical model，
+      // 覆盖一切「实际调用过」的 session）> session/squad 配置侧三级 fallback（registry miss
+      // 时兜底：进程重启后/旧 session 补记/测试注入路径——零回归，原样保留）
+      const successTarget = getSuccessTarget(sid);
       const sessionProviderId = (rec as { providerId?: string }).providerId;
       const sessionModelId = (rec as { modelId?: string }).modelId;
       const squad = await this.deps.squadReader.getSquad(squadId);
-      let providerId = sessionProviderId;
-      let modelId = sessionModelId;
+      let providerId = successTarget?.providerId ?? sessionProviderId;
+      let modelId = successTarget?.modelId ?? sessionModelId;
       if ((!providerId || !modelId) && squad) {
         // fallback squad.modelDefault/modelDefaultProviderId
         providerId = providerId ?? (squad as { modelDefaultProviderId?: string }).modelDefaultProviderId;

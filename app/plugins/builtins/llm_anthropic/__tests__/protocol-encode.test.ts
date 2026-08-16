@@ -299,9 +299,9 @@ describe('AnthropicMessagesProtocol.encode tools (BUG-007)', () => {
   });
 });
 
-// v0.0.52 cache_control spec 对齐（[P0]cache_control.md §3.2 bp#2 落点 + §3.3 reminder 过滤）
-describe('cache_control bp#2 落点 + reminder wire 过滤 (v0.0.52)', () => {
-  it('bp#2 落在最后非 reminder block，不落 reminder（reminder 在末）', () => {
+// [v0.0.361 T5] 三断点体系 + 历史块保留（change_plan §1.3 B'：删 wire 层 drop + bp#2 避让扫描）
+describe('cache_control bp#2 固定末位 + reminder 历史块保留 (v0.0.361 T5)', () => {
+  it('bp#2 固定落最末 message 最末 block（reminder 在末时落 reminder 上，不再避让）', () => {
     const p = new AnthropicMessagesProtocol('anthropic_messages', {});
     const wire = p.encode(
       makeRequest({
@@ -322,10 +322,11 @@ describe('cache_control bp#2 落点 + reminder wire 过滤 (v0.0.52)', () => {
     const lastMsg = wire.messages[wire.messages.length - 1]!;
     const q2 = lastMsg.content.find((b) => b['text'] === 'q2');
     const reminder = lastMsg.content.find((b) => b['text'] === '[system_reminder]环境');
-    // bp#2 应落在 q2（非 reminder），不落 reminder block
-    expect(q2!['cache_control']).toEqual({ type: 'ephemeral' });
-    expect(reminder!['cache_control']).toBeUndefined();
-    // wire block 不带 isSystemReminder 字段（LLM 零侵入）
+    // [v0.0.361 T5] bp#2 固定打最末 block——reminder 在末时落 reminder 上（历史块
+    // append-only 保留后 reminder 也是稳定前缀的一部分，落此不致下轮 miss）
+    expect(reminder!['cache_control']).toEqual({ type: 'ephemeral' });
+    expect(q2!['cache_control']).toBeUndefined();
+    // wire block 不带 isSystemReminder 字段（LLM 零侵入，encodeContentBlock 只映射 text）
     expect(reminder!['isSystemReminder']).toBeUndefined();
   });
 
@@ -344,9 +345,8 @@ describe('cache_control bp#2 落点 + reminder wire 过滤 (v0.0.52)', () => {
     expect(lastMsg.content[0]!['cache_control']).toEqual({ type: 'ephemeral' });
   });
 
-  it('bp#2 跨 message 边界反向扫（末 message 全是 reminder 时落到前一 message）', () => {
+  it('末 message 全是 reminder：bp#2 仍落最末（reminder）block，不跨 message 反扫', () => {
     const p = new AnthropicMessagesProtocol('anthropic_messages', {});
-    // 最末 user 只有 reminder → bp#2 落到前一条 assistant 的 block
     const wire = p.encode(
       makeRequest({
         messages: [
@@ -359,17 +359,17 @@ describe('cache_control bp#2 落点 + reminder wire 过滤 (v0.0.52)', () => {
         ],
       }),
     ) as { messages: Array<{ role: string; content: Array<Record<string, unknown>> }> };
+    // [v0.0.361 T5] 避让扫描已删：bp#2 恒定最末 message 最末 block（本例 = reminder）
     const reminderMsg = wire.messages[wire.messages.length - 1]!;
-    // 最末 message 的 reminder 不带 cache_control
-    expect(reminderMsg.content[0]!['cache_control']).toBeUndefined();
-    // bp#2 落在前一条 assistant 的 'a-stable'
+    expect(reminderMsg.content[0]!['cache_control']).toEqual({ type: 'ephemeral' });
+    // 前一条 assistant 不带 cache_control（跨 message 反扫已删）
     const assistantMsg = wire.messages[wire.messages.length - 2]!;
     expect(assistantMsg.role).toBe('assistant');
     expect(assistantMsg.content[0]!['text']).toBe('a-stable');
-    expect(assistantMsg.content[0]!['cache_control']).toEqual({ type: 'ephemeral' });
+    expect(assistantMsg.content[0]!['cache_control']).toBeUndefined();
   });
 
-  it('过滤：非最末 user message drop 所有 reminder block', () => {
+  it('历史块保留：非最末 message 的 reminder 全保留进 wire（drop 已删）', () => {
     const p = new AnthropicMessagesProtocol('anthropic_messages', {});
     const wire = p.encode(
       makeRequest({
@@ -393,15 +393,15 @@ describe('cache_control bp#2 落点 + reminder wire 过滤 (v0.0.52)', () => {
         ],
       }),
     ) as { messages: Array<{ role: string; content: Array<Record<string, unknown>> }> };
-    // 历史 user 的 reminder 被 drop（只剩「历史问题」）
+    // 历史 user 的 reminder 保留（append-only，不再 drop）
     const firstUser = wire.messages[0]!;
-    expect(firstUser.content.map((b) => b['text'])).toEqual(['历史问题']);
-    // 最末 user 只保留最末一个 reminder（r2）
+    expect(firstUser.content.map((b) => b['text'])).toEqual(['历史问题', '[reminder old]']);
+    // 最末 user 的多个 reminder 也全保留（只留最末一个的旧契约已删）
     const lastUser = wire.messages[2]!;
-    expect(lastUser.content.map((b) => b['text'])).toEqual(['当前问题', '[r2]']);
+    expect(lastUser.content.map((b) => b['text'])).toEqual(['当前问题', '[r1]', '[r2]']);
   });
 
-  it('过滤：最末 user message 多 reminder 只保留最末一个 + wire 无 isSystemReminder 字段', () => {
+  it('最末 user message 多 reminder 全保留 + wire 无 isSystemReminder 字段', () => {
     const p = new AnthropicMessagesProtocol('anthropic_messages', {});
     const wire = p.encode(
       makeRequest({
@@ -417,7 +417,11 @@ describe('cache_control bp#2 落点 + reminder wire 过滤 (v0.0.52)', () => {
         ],
       }),
     ) as { messages: Array<{ content: Array<Record<string, unknown>> }> };
-    expect(wire.messages[0]!.content.map((b) => b['text'])).toEqual(['hi', '[r2]']);
+    // [v0.0.361 T5] 全保留：r1 r2 都在（旧「只留最末一个」契约删除）
+    expect(wire.messages[0]!.content.map((b) => b['text'])).toEqual(['hi', '[r1]', '[r2]']);
+    // bp#2 落最末 block（r2）
+    const blocks = wire.messages[0]!.content;
+    expect(blocks[blocks.length - 1]!['cache_control']).toEqual({ type: 'ephemeral' });
     // 所有 wire block 均不带 isSystemReminder 字段（encode 零侵入）
     for (const b of wire.messages[0]!.content) {
       expect(b['isSystemReminder']).toBeUndefined();

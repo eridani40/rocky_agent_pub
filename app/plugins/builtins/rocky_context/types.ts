@@ -173,6 +173,20 @@ export interface IngestCtx {
    * forked 路径含 runId（per-run buffer 隔离）；default 缺省。
    */
   opts?: StoreCallOpts;
+  /**
+   * [v0.0.361 §1.4 T3] full reminder 开关（RunState 透传；ContextEngine.ingest 注入）。
+   * undefined 视同 true（run 首天然 full）；full 分支消费后 injector 置 false。
+   * 缺席（UT fixture / forked scope）→ injector 视 full（§1.4 forked 恒 full）。
+   */
+  runState?: { useFullReminder?: boolean };
+  /**
+   * [v0.0.361 §1.2 T3] incremental 消费：按序读 queue value + 清空（closure，防 handler 持 store）。
+   */
+  queueDrain?: (sessionId: string) => Promise<string[]>;
+  /**
+   * [v0.0.361 §1.2 T3] full 消费：清空 queue（full 已涵盖最新态，pending 作废）。
+   */
+  queueClearAll?: (sessionId: string) => Promise<void>;
 }
 
 /** 契约接口（各 EP impl 实现） */

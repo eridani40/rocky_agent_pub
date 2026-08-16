@@ -1,0 +1,239 @@
+# mr_tc1 — [v0.0.347] 方案库 CRUD：创建/读取/编辑 + 同模型约束 400 + DELETE 解除挂载
+#
+# 覆盖契约：specs/api/overall/21-model-routing.md §2.1/§2.2/§2.3 + change_plan
+#           （validateModelRoutingPlan / model-routing-store.deletePlan / kv-config DELETE 白名单）
+#  1. PUT 新建方案（合法 2 条目）→ 200 ok；GET 整组回读落库（key=data 形状）
+#  2. 违规 PUT（同模型 2 带时间 / 带时间在下 / 2 不带时间）→ 400 + 明确 message，不落盘
+#  3. 编辑 = PUT 全量覆盖（同模型 1 带时间 + 1 无条件合法组合）
+#  4. DELETE 方案 → 解除 squad + playground 挂载（detached 清单）→ 挂载方回退默认
+#  5. DELETE 不存在方案 → 404；DELETE 非白名单 group → 405
+#
+# 全确定性 HTTP 事务，零 LLM。provider/model 用 test.env 提交的非机密 id
+# （TEST_PROVIDER_ID=minimax / TEST_FALLBACK_PROVIDER_ID=volcengine，先例 si1 case 硬编码）。
+# teardown 解散 squad + 删方案。
+case: mr_tc1
+module: model-routing
+timeout: 60
+
+setup:
+  - name: 新建合法方案（minimax priority1 + volcengine priority2，无条件）
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc1-plan"
+          data:
+            id: "zz-mr-tc1-plan"
+            name: "zz-mr-tc1-plan"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 2
+                enabled: true
+            createdAt: 1755200000000
+    check:
+      - .ok == true
+
+steps:
+  - name: GET 整组回读 — 方案落库（key=data 形状）
+    requests:
+      - GET /config/app?group=model_routing_plans
+    check:
+      - .items[] any .key == "zz-mr-tc1-plan"
+      - .items[] any .data.items[0].modelId == "MiniMax-M3"
+      - .items[] any .data.items[1].priority == 2
+
+  - name: 违规 PUT 同模型 2 带时间 → 400 + 明确 message
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc1-bad1"
+          data:
+            id: "zz-mr-tc1-bad1"
+            name: "bad1"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                timeCondition: { hours: [0, 1, 2] }
+                enabled: true
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 2
+                timeCondition: { hours: [3, 4, 5] }
+                enabled: true
+    check:
+      - .error ~= "time-condition items"
+
+  - name: 违规 PUT 带时间条目排在不带时间下面 → 400（提示必须在上）
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc1-bad2"
+          data:
+            id: "zz-mr-tc1-bad2"
+            name: "bad2"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 2
+                timeCondition: { hours: [0, 1, 2] }
+                enabled: true
+    check:
+      - .error ~= "must be above"
+
+  - name: 违规 PUT 同模型 2 不带时间 → 400
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc1-bad3"
+          data:
+            id: "zz-mr-tc1-bad3"
+            name: "bad3"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 2
+                enabled: true
+    check:
+      - .error ~= "unconditional items"
+
+  - name: 违规 PUT 不落盘 — GET 整组不含 bad1/bad2/bad3
+    requests:
+      - GET /config/app?group=model_routing_plans
+    check:
+      - .items[] all .key != "zz-mr-tc1-bad1"
+      - .items[] all .key != "zz-mr-tc1-bad2"
+      - .items[] all .key != "zz-mr-tc1-bad3"
+
+  - name: 编辑方案 = PUT 全量覆盖（同模型 1 带时间 + 1 无条件合法，带时间在上）
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc1-plan"
+          data:
+            id: "zz-mr-tc1-plan"
+            name: "zz-mr-tc1-plan-edit"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                timeCondition: { hours: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23] }
+                enabled: true
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 2
+                enabled: true
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 3
+                enabled: true
+    check:
+      - .ok == true
+
+  - name: 建 squad（为挂载引用 + 删除解除验证）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "zz-mr-tc1-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "zz-mr-tc1-leader"
+    save:
+      squad_id: .id
+    check:
+      - .id exists
+
+  - name: squad 挂载方案（PATCH modelRoutingPlanId）
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}
+        body:
+          modelRoutingPlanId: "zz-mr-tc1-plan"
+    check:
+      - .modelRoutingPlanId == "zz-mr-tc1-plan"
+
+  - name: playground 挂载方案（PUT model_routing group）
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing"
+          key: "default"
+          data:
+            playgroundPlanId: "zz-mr-tc1-plan"
+    check:
+      - .ok == true
+
+  - name: DELETE 方案 — 解除 squad + playground 挂载（detached 清单）
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=zz-mr-tc1-plan
+    check:
+      - .ok == true
+      - .detached[] any ~= "squad:"
+      - .detached[] any == "playground"
+
+  - name: squad 回读 — modelRoutingPlanId 已清空（回退默认模型）
+    requests:
+      - GET /squad/{squad_id}
+    check:
+      - .modelRoutingPlanId absent
+
+  - name: playground 回读 — playgroundPlanId 已清空（兼容 value:{} 与 404 两种实现）
+    requests:
+      - method: GET
+        path: /config/app?group=model_routing&key=default
+        status: [200, 404]
+    check:
+      - .value.playgroundPlanId absent
+
+  - name: DELETE 不存在方案 → 404
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=01KZZZZZZZZZZZZZZZZZZZZZZZX
+        status: [404]
+    check:
+      - .error exists
+
+  - name: DELETE 非白名单 group（providers）→ 405
+    requests:
+      - method: DELETE
+        path: /config/app?group=providers&key=01KVJMPG2EZ1078MCT9JH4J5HG
+        status: [405]
+    check:
+      - .error exists
+
+teardown:
+  - name: 解散 squad（清理）
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+        status: [200, 404]
+    check:
+      - .deleted == true

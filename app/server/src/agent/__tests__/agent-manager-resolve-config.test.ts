@@ -64,6 +64,7 @@ function newConfig(sid: string): SessionConfig {
     systemPrompt: '',
     client: { stream: vi.fn(), call: vi.fn(), contextWindow: 100000 } as never,
     modelId: 'mock-model',
+    providerId: 'mock-provider',
   };
 }
 

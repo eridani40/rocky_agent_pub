@@ -54,6 +54,9 @@
     "providers": {
       "label": "Providers"
     },
+    "model_routing_plans": {
+      "label": "Model Routing Plans"
+    },
     "web_search": {
       "label": "Web Search"
     },
@@ -92,6 +95,72 @@
     },
     "consolidation": {
       "label": "Consolidation"
+    }
+  },
+  "modelRouting": {
+    "list": {
+      "create": "New Plan",
+      "rename": "Rename",
+      "copy": "Duplicate",
+      "delete": "Delete",
+      "loading": "Loading...",
+      "empty": "No model routing plans yet. Click \"New Plan\" to create one.",
+      "modelsCount": "{{count}} models",
+      "mountedTo": "Mounted to {{names}}",
+      "unmounted": "Not mounted",
+      "moreActions": "More actions"
+    },
+    "editor": {
+      "addItem": "Add Model Item",
+      "enabled": "Enabled",
+      "circuitTitle": "Circuit Breaker (Advanced)",
+      "circuitFailureThreshold": "Failure Threshold",
+      "circuitSuccessThreshold": "Success Threshold",
+      "circuitTimeoutSeconds": "Timeout (s)",
+      "circuitErrorRateThreshold": "Error Rate Threshold",
+      "circuitMinRequests": "Min Window Samples",
+      "degradeOrder": "Fallback order (drag to reorder; number = priority)",
+      "timeCondition": "Time restriction",
+      "defaultHint": "Default {{value}}"
+    },
+    "validate": {
+      "nameRequired": "Plan name is required",
+      "itemsRequired": "At least one model item is required",
+      "itemModelRequired": "Each item must select a provider and model",
+      "sameModelMax2": "Same model allows at most 2 enabled items (1 with time + 1 without)",
+      "sameModel2Time": "Same model cannot have 2 time-condition items",
+      "sameModel2NoTime": "Same model cannot have 2 unconditional items",
+      "timeAboveUnconditional": "Time-condition item must be above unconditional item",
+      "itemModelInvalid": "Invalid item found: the model has been deleted or disabled. Please reselect the model."
+    },
+    "status": {
+      "normal": "Normal",
+      "abnormal": "Abnormal",
+      "observing": "Observing",
+      "normalTitle": "Model is healthy",
+      "abnormalTitle": "Model is temporarily unavailable, retry in Xs",
+      "observingTitle": "Model is being observed (probe recovery)"
+    },
+    "delete": {
+      "title": "Delete Plan",
+      "body": "Delete plan \"{{name}}\"? Squads / playgrounds mounted to it will fall back to default model.",
+      "ok": "Delete",
+      "cancel": "Cancel",
+      "detachedHint": "Removed plan reference from {{count}} mount(s)"
+    },
+    "time": {
+      "popoverHeader": "Select available hours (drag for ranges / click cells) · Dark = hour available",
+      "unselected": "None selected",
+      "clearSchedule": "Clear schedule",
+      "confirm": "Confirm",
+      "errEmpty": "Select at least 1 hour (none = invalid)",
+      "errFull": "All 24 hours = always available; use \"Clear schedule\" instead"
+    },
+    "deleteItem": {
+      "title": "Delete routing item?",
+      "body": "Delete {{name}} (item {{index}})? This action cannot be undone.",
+      "ok": "Delete",
+      "cancel": "Cancel"
     }
   },
   "userMemory": {
@@ -359,5 +428,12 @@
       "confirm_ok": "Confirm Import",
       "confirm_cancel": "Cancel"
     }
+  },
+  "modelOrPlan": {
+    "groupModels": "Models",
+    "groupPlans": "Plans",
+    "placeholder": "Select a model or plan",
+    "emptyPlans": "No plans yet",
+    "planPrefix": "Plan"
   }
 }

@@ -25,6 +25,7 @@ import {
   type ConsolidationData,
 } from './app-settings-config-defs';
 import { persistGroup, loadAppConfig, type LlmRequestData, type SessionData } from './app-settings-persist';
+import { getPlaygroundMount, savePlaygroundMount } from './model-routing-api';
 
 /** default_models record data 形状（从 config-defs re-export，保持外部 import 路径兼容） */
 export type { DefaultModelsData } from './app-settings-config-defs';
@@ -34,6 +35,12 @@ export interface UseAppSettingsConfigResult {
   kvGroups: Record<string, GroupInfo>;
   defaultModelsDraft: DefaultModelsData;
   handleDefaultModelsChange: (key: 'chat', value: string | undefined) => void;
+  /** [v0.0.347 T6] playground 方案挂载 draft（model_routing/default.playgroundPlanId；null=未挂载） */
+  mountDraft: string | null;
+  /** [v0.0.347 T6 决策㉛ 严格互斥] 编辑挂载 draft（planId=null=清除；写 planId 时同步清 dmDraft.chat——双向清，至多一个有值） */
+  handleMountChange: (planId: string | null) => void;
+  /** [v0.0.349 BUG-004] 删方案后服务端已解绑 playground 挂载 → 本地 draft+snapshot 同步清（对齐真值，不产 dirty） */
+  clearPlaygroundMountState: (clearedPlanId: string) => void;
   /** consolidation/default draft（v0.0.151.t2_consolidate）；改字段走泛型 handleKeyChange('consolidation', key, value) */
   consolidationDraft: ConsolidationData;
   handleKeyChange: (groupId: string, key: string, next: unknown) => void;
@@ -86,6 +93,9 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
   // default_models snapshot + draft
   const [dmSnapshot, setDmSnapshot] = useState<DefaultModelsData>({});
   const [dmDraft, setDmDraft] = useState<DefaultModelsData>({});
+  // [v0.0.347 T6] playground 方案挂载 snapshot + draft（playgroundPlanId；null=未挂载）
+  const [mountSnapshot, setMountSnapshot] = useState<string | null>(null);
+  const [mountDraft, setMountDraft] = useState<string | null>(null);
   // llm_request 完整 snapshot（read-modify-write：保存时 PUT 完整 data，不丢其他子字段）
   const [llmFullSnapshot, setLlmFullSnapshot] = useState<LlmRequestData | null>(null);
   // session 完整 snapshot（read-modify-write：保存时 PUT 完整 data，不丢其他子字段）
@@ -118,6 +128,16 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
         setDmDraft(structuredCloneSafe(r.defaultModels));
         setLlmFullSnapshot(r.llmFull);
         setSessionFullSnapshot(r.sessionFull);
+        // [v0.0.347 T6] 挂载读取（model_routing/default.playgroundPlanId；失败不阻断 tab 其余配置）
+        try {
+          const mount = await getPlaygroundMount();
+          if (!cancelled) {
+            setMountSnapshot(mount);
+            setMountDraft(mount);
+          }
+        } catch {
+          /* 挂载读失败 → 保持 null（等同未挂载展示） */
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -148,9 +168,33 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
         }
         return next;
       });
+      // [v0.0.347 T6 决策㉛ 严格互斥] 选模型（写 chat 具体值）→ 同步清挂载 draft（双向清，至多一个有值）
+      if (value !== undefined) setMountDraft(null);
     },
     [],
   );
+
+  /** [v0.0.347 T6 决策㉛ 严格互斥] 编辑挂载 draft（写 planId → 同步清 dmDraft.chat；两字段至多一个有值） */
+  const handleMountChange = useCallback((planId: string | null) => {
+    setMountDraft(planId);
+    if (planId !== null) {
+      setDmDraft((prev) => {
+        const next = { ...prev };
+        delete next.chat;
+        return next;
+      });
+    }
+  }, []);
+
+  /**
+   * [v0.0.349 BUG-004] 删方案回调：服务端 DELETE 已解绑该方案的 playground 挂载（detached 含
+   * 'playground'）→ 本地 mountDraft/mountSnapshot 匹配则同步清 null。draft+snapshot 成对清，
+   * dirty 不亮（对齐服务端真值，非用户编辑）；planId 不匹配 → no-op（不动编辑中的其他挂载）。
+   */
+  const clearPlaygroundMountState = useCallback((clearedPlanId: string) => {
+    setMountSnapshot((prev) => (prev === clearedPlanId ? null : prev));
+    setMountDraft((prev) => (prev === clearedPlanId ? null : prev));
+  }, []);
 
   /** 编辑某 KV key → 更新 draft + kvGroups 受控展示 */
   const handleKeyChange = useCallback(
@@ -186,6 +230,8 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
           const sHas = 'chat' in dmSnapshot;
           if (dHas !== sHas) return true;
           if (dmDraft.chat !== dmSnapshot.chat) return true;
+          // [v0.0.347 T6] 挂载 draft 变更计入本 group dirty（决策㉙：保存按钮单一入口）
+          if (mountDraft !== mountSnapshot) return true;
         } else if (gid === 'llm_request') {
           if (shallowDiff(draft.llm_request ?? {}, snapshot.llm_request ?? {})) return true;
         } else if (shallowDiff(draft[gid] ?? {}, snapshot[gid] ?? {})) {
@@ -194,7 +240,10 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
       }
       return false;
     },
-    [draft, snapshot, dmDraft, dmSnapshot],
+    // [v0.0.349 BUG-003] mountDraft/mountSnapshot 参与比对必须入 deps：真机时序下
+    // saveTab 收尾 setMountSnapshot 后若 deps 不变，闭包停留在旧 mountSnapshot（null）
+    // → 首存后 dirty 残留 true（需二次保存才收敛）；详见 states/v0.0.347/bugs/BUG-003
+    [draft, snapshot, dmDraft, dmSnapshot, mountDraft, mountSnapshot],
   );
 
   /** 保存当前 tab 全部 dirty group（委托 persistGroup 提交，按结果更新 snapshot） */
@@ -205,6 +254,12 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
       setError(null);
       setSaving(true);
       try {
+        // [v0.0.347 T6 决策㉛ 先清后写·转模型/未设向] 挂载清 PUT 先行（先清挂载再写 chat——
+        // 中途失败落「双空」合法态，永不落「双设」非法态）
+        if (tab === 'session' && mountDraft !== mountSnapshot && mountDraft === null) {
+          await savePlaygroundMount(null);
+          setMountSnapshot(null);
+        }
         for (const gid of gids) {
           const r = await persistGroup({
             groupId: gid,
@@ -222,6 +277,12 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
           if (r.newSessionSnapshot) setSnapshot((p) => ({ ...p, session: r.newSessionSnapshot! }));
           if (r.newConsolidationSnapshot) setSnapshot((p) => ({ ...p, consolidation: { ...r.newConsolidationSnapshot! } }));
         }
+        // [v0.0.347 T6 决策㉛ 先清后写·转方案向后行] chat 清已在 loop 内 default_models PUT 先行，
+        //   挂载写 PUT 收尾（先清后写；两 PUT 独立弱一致）
+        if (tab === 'session' && mountDraft !== mountSnapshot && mountDraft !== null) {
+          await savePlaygroundMount(mountDraft);
+          setMountSnapshot(mountDraft);
+        }
         // flash saved 反馈（1.5s）
         setSavedFlash(true);
         if (savedTimer.current) clearTimeout(savedTimer.current);
@@ -232,7 +293,9 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
         setSaving(false);
       }
     },
-    [draft, dmDraft, llmFullSnapshot, sessionFullSnapshot],
+    // [v0.0.349 BUG-003] 先清后写两处读写 mountDraft/mountSnapshot → 必须入 deps：
+    // 闭包过时会导致真机时序下误判「挂载未写」二次 PUT，且收尾 setMountSnapshot 不触发收敛
+    [draft, dmDraft, llmFullSnapshot, sessionFullSnapshot, mountDraft, mountSnapshot],
   );
 
   /** 取消：重置当前 tab draft 到 snapshot */
@@ -265,9 +328,12 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
       });
       if (gids.includes('default_models')) {
         setDmDraft(structuredCloneSafe(dmSnapshot));
+        // [v0.0.347 T6] 取消时挂载 draft 回 snapshot
+        setMountDraft(mountSnapshot);
       }
     },
-    [snapshot, dmSnapshot],
+    // [v0.0.349 BUG-003] mountSnapshot 参与回读 → 入 deps（同 stale closure 防线）
+    [snapshot, dmSnapshot, mountSnapshot],
   );
 
   // consolidation draft 派生（Record<string,unknown> 形态 → 落回 ConsolidationData 类型，缺省回退默认值）
@@ -281,6 +347,9 @@ export function useAppSettingsConfig(): UseAppSettingsConfigResult {
     kvGroups,
     defaultModelsDraft: dmDraft,
     handleDefaultModelsChange,
+    mountDraft,
+    handleMountChange,
+    clearPlaygroundMountState,
     consolidationDraft,
     handleKeyChange,
     dirtyOfTab,

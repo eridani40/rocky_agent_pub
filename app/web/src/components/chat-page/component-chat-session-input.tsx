@@ -158,18 +158,19 @@ export function ComponentChatSessionInput({
       {caps.approvalPicker && (
         <InputApprovalModePicker
           approvalMode={chrome.approvalMode}
-          disabled={sessionRunning}
+          disabled={false}
           onChange={onApprovalModeChange}
         />
       )}
       {caps.effortPicker && (
-        <InputEffortPicker effort={chrome.effort} disabled={sessionRunning} onChange={onEffortChange} />
+        <InputEffortPicker effort={chrome.effort} disabled={false} onChange={onEffortChange} />
       )}
       <InputModelPicker
         model={chrome.sessionModel ?? { providerId: '', modelId: 'default' }}
         defaultModelId={chrome.defaultModel?.modelId ?? ''}
         defaultModelProviderId={chrome.defaultModel?.providerId}
-        disabled={sessionRunning}
+        defaultPlan={chrome.defaultRoutingPlan ?? null}
+        disabled={false}
         onChange={onModelChange}
       />
       <button

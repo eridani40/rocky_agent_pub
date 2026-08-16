@@ -1,6 +1,6 @@
 # 技术设计文档规范（OKF 版）
 
-> tech specs 用 **OKF**（Open Knowledge Format）组织：`specs/tech/` 是一个 OKF 知识库，每个子系统目录是一个 KB。
+> tech specs 用 **OKF**（Open Knowledge Format）组织：`${SPECS_DIR}/tech/` 是一个 OKF 知识库，每个子系统目录是一个 KB。
 > OKF 方法本身（业务无关）见 `.rocky/skills/okf-skill/`；本文是 tech specs **怎么用 OKF** 的消费规范。
 > 三层叠加：`convention.md`（格式：命名/ID/时间）+ 本规范（目录组织 + index/log + frontmatter）+ `docs_guide.md`（单文件怎么写，§2 必备章节）。
 
@@ -9,7 +9,7 @@
 ## 1. 知识库布局（每个子系统目录 = 一个 KB）
 
 ```
-specs/tech/
+${SPECS_DIR}/tech/
 ├── index.md                          # 顶层总起（子系统导航）
 ├── <子系统>/                          # 一个 KB
 │   ├── index.md                      # 子系统总起（5 章，§2）
@@ -63,7 +63,7 @@ title: Squad 工具收敛
 priority: P0        # P0|P1|P2，唯一权威（§5）
 status: active      # active | draft | deprecated
 updated: 2026-06-30 # 每次改必更
-since: v0.0.33.2    # 可选：首次引入版本（替代正文"哪版引入"）
+since: v1.2.0    # 可选：首次引入版本（替代正文"哪版引入"）
 related: [x.md]     # 可选：相对路径链接（坏链容忍）
 ---
 ```

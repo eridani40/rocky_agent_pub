@@ -1,0 +1,191 @@
+# mr_tc5 — [v0.0.353] timezone 调度：旧形状兼容 + 非法 timezone 400 + 时间窗口过滤触发次候选 + trace 真实 provider/model
+#
+# 覆盖契约：specs/api/overall/21-model-routing.md §2.2（TimeCondition.timezone 校验）+ §2.6（status）
+#           + tech [P0]model_routing.md §routingAttemptLoop ①时间过滤
+#           + change_plan D1（timezone IANA 校验/缺省 Asia/Shanghai）D2（按 timezone 取小时）D3（显式 model 继承 timeCondition）D4（physical gen 真实 target）
+#  四个测试面（test-plan §3.2 规格；P-B 经 BUG 复盘重构为 enabled:false 构造）：
+#   P-A1 旧形状兼容：PUT 方案 timeCondition 不带 timezone → 200（缺省 Asia/Shanghai，禁默认 UTC 突变）
+#   P-A2 非法 timezone 硬拒：PUT "Not/AZone" → 400 + error 含 timezone
+#   P-B  enabled:false 条目跳过触发次候选：主候选 minimax enabled=false（②enabled 检查跳过，不入候选
+#        不消耗尝试）。BUG 复盘根因：hours 空数组 = 全天等价无条件（length>0 守卫短路 includes，
+#        spec/validation/UT/UI 四层一致的有意设计）非「恒不匹配」——原空数组构造致断言反转；时间过滤
+#        语义已由 UT 64 例闭环，AT 层放弃可接受（bug-analyst 报告 + leader 裁决路 A）
+#   P-C  trace 三层语义（oracle，Langfuse；D4 physical 真实 target + D8 logical 记生效路由方案
+#        planId/planName + D9 被跳过候选成对 gen llm-{N}-skip-{M} metadata.skipped/reason）：
+#        physical .model == deepseek-v4-pro + .metadata.providerId；logical .metadata.routingPlan.{planId,planName}；
+#        skip gen .name ~= skip + .metadata.{skipped:true, reason:disabled}（MiniMax enabled:false 那条）
+#
+# 黑盒主断言（不依赖 Langfuse 凭证）：GET status → minimax 条目 totalRequests == 0（enabled:false
+# 跳过「不入候选不消耗尝试」tech §routingAttemptLoop ②）+ deepseek 条目 totalRequests >= 1。
+# ⚠️ POST /squad modelDefault 必填但不可留 MiniMax（残留会合成 enabled:true 显式 p0 条目绕过
+# enabled:false → 断言反转，BUG 复盘链路）→ 挂载 PATCH 带 modelDefault:"" 显式清空（21 §2.5
+# T6 前端 canonical 写策略）。⚠️ 清空 sentinel 语义区分：modelDefault 用空串 ""（UI 实证
+# component-manage-tab.tsx:110-112 发 modelDefault:''；spec 21 §2.5:114）；modelRoutingPlanId
+# 用 null（mr_tc3 先例）。错套 null → 产品 6 字段 null 穿透 500（BUG-mr-tc5-step04，产品侧
+# 缺口另行立项）。squad 只剩 planId → 纯方案链路由。
+#
+# 真调 LLM（deepseek 一轮）；429/529/503 框架自动 skip；oracle 缺凭证自动 skip 不算 fail（主断言已闭环）。
+# teardown 解散 squad + 删方案（池 provider 不删）。
+# ⚠️ providerId 硬编码 = data.id（非池文件名/外层 id）：minimax 01KVJMPG2EZ1078MCT9JH4J5HG /
+#    deepseek 01KW6CPB0BRHQXH2B9P8QR82MG（mr_tc1/4 同款先例）。
+case: mr_tc5_timezone_schedule
+module: model-routing
+timeout: 240
+
+setup: []
+
+steps:
+  - name: P-A1 旧形状兼容 — PUT 方案 timeCondition 不带 timezone → 200（缺省 Asia/Shanghai）
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc5-plan"
+          data:
+            id: "zz-mr-tc5-plan"
+            name: "zz-mr-tc5-plan"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                timeCondition:
+                  hours: [9, 10, 11]
+                enabled: true
+              - providerId: "01KW6CPB0BRHQXH2B9P8QR82MG"
+                modelId: "deepseek-v4-pro"
+                priority: 2
+                enabled: true
+            createdAt: 1755200000000
+    check:
+      - .ok == true
+
+  - name: P-A2 非法 timezone 硬拒 — PUT "Not/AZone" → 400 + error 含 timezone
+    requests:
+      - method: PUT
+        path: /config/app
+        status: [400]
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc5-plan"
+          data:
+            id: "zz-mr-tc5-plan"
+            name: "zz-mr-tc5-plan"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                timeCondition:
+                  hours: [9, 10, 11]
+                  timezone: "Not/AZone"
+                enabled: true
+              - providerId: "01KW6CPB0BRHQXH2B9P8QR82MG"
+                modelId: "deepseek-v4-pro"
+                priority: 2
+                enabled: true
+            createdAt: 1755200000000
+    check:
+      - .error ~= "timezone"
+
+  - name: P-B 前置 — PUT 终版方案：主候选 minimax enabled=false（跳过不入候选）+ 次候选 deepseek 无条件
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc5-plan"
+          data:
+            id: "zz-mr-tc5-plan"
+            name: "zz-mr-tc5-plan"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: false
+              - providerId: "01KW6CPB0BRHQXH2B9P8QR82MG"
+                modelId: "deepseek-v4-pro"
+                priority: 2
+                enabled: true
+            createdAt: 1755200000000
+    check:
+      - .ok == true
+
+  - name: 建 squad（modelDefault=MiniMax-M3 仅过 POST 必填校验；挂载时显式清空防 p0 显式条目合成）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "zz-mr-tc5-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "zz-mr-tc5-leader"
+    save:
+      squad_id: .id
+      sid: .members[0].sessionId
+    check:
+      - .id exists
+      - .members[0].sessionId exists
+
+  - name: 挂载方案 + 显式清空 modelDefault（T6 canonical 写策略；squad 只剩 planId → 纯方案链，防显式条目绕过 enabled:false）
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}
+        body:
+          modelDefault: ""
+          modelRoutingPlanId: "zz-mr-tc5-plan"
+    check:
+      - .modelRoutingPlanId == "zz-mr-tc5-plan"
+      - .modelDefault == ""
+
+  - name: P-B 主链路 — leader 发消息（真调 LLM）：enabled:false 跳过 minimax → run 落 deepseek 正常完成
+    run:
+      content: "请回复「OK」两个字母，不要调用任何工具，直接回复即可。"
+    check:
+      - .state == "idle"
+
+  - name: P-B 黑盒主断言 — GET status：minimax 条目 0 请求（enabled:false 跳过未入候选）+ deepseek 条目 >=1 请求
+    requests:
+      - GET /model-routing/plans/zz-mr-tc5-plan/status
+    check:
+      - .planId == "zz-mr-tc5-plan"
+      - .items[0].modelId == "MiniMax-M3"
+      - .items[0].totalRequests == 0
+      - .items[1].modelId == "deepseek-v4-pro"
+      - .items[1].totalRequests >= 1
+      - .items[] all .circuitState == "closed"
+
+  - name: P-C oracle — Langfuse trace：physical 真实 target + logical routingPlan + skipped 候选记录（D4/D8/D9；缺凭证自动 skip）
+    oracle:
+      langfuse:
+        timeout: 45
+        ready_when: '.observations[] any .model == "deepseek-v4-pro"'
+    check:
+      # D4 physical gen 真实 provider/model（「调用谁记录谁」）
+      - .observations[] any .model == "deepseek-v4-pro"
+      - .observations[] any .metadata.providerId == "01KW6CPB0BRHQXH2B9P8QR82MG"
+      # D8 logical gen 记生效路由方案（planId+planName；logicalView 标识逻辑层，model 字段仅 session 口径补充）
+      - .observations[] any .metadata.logicalView == true
+      - .observations[] any .metadata.routingPlan.planId == "zz-mr-tc5-plan"
+      - .observations[] any .metadata.routingPlan.planName == "zz-mr-tc5-plan"
+      # D9 被跳过候选成对 gen（name=llm-{N}-skip-{M}；MiniMax enabled:false → reason=disabled，metadata.skipped=true + input.skippedCandidate）
+      - .observations[] any .name ~= "skip"
+      - .observations[] any .metadata.skipped == true
+      - .observations[] any .metadata.reason == "disabled"
+      - .observations[] any .input.skippedCandidate.modelId == "MiniMax-M3"
+
+teardown:
+  - name: 解散 squad
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+        status: [200, 404]
+    check:
+      - .deleted == true
+
+  - name: 删除方案
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=zz-mr-tc5-plan
+        status: [200, 404]
+    check:
+      - .ok == true

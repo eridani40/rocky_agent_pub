@@ -19,10 +19,23 @@ export type { PluginScope, PluginScopeMeta };
  */
 export type ProtocolName = 'anthropic_messages';
 
+/**
+ * [v0.0.350] provider 类型 id（决策⑤；与 server ProviderName union 同构）。
+ * anthropic_compatible = 通用（缺省兼容）；其余 4 个 = native coding plan 类型
+ * （POST/PUT name 白名单 5 值；额度总览仅 4 native 参与——api 02-llm-chat.md 1.8 §5.2/§5.6）。
+ */
+export type ProviderName =
+  | 'anthropic_compatible'
+  | 'kimi_coding_plan'
+  | 'glm_coding_plan'
+  | 'minimax_coding_plan'
+  | 'deepseek_api';
+
 /** provider 实例（响应形状，credentials 已脱敏 ***）—— 与 server ProviderInstance 同构 */
 export interface ProviderInstance {
   id: string;
-  name: 'anthropic_compatible';
+  /** [v0.0.350] 类型放宽 ProviderName union（旧响应缺省视为通用 anthropic_compatible） */
+  name: ProviderName;
   /** [v0.0.53] 1 provider : 1 protocol 锁定，必填（迁自 ModelInstance.protocolId，单一事实源） */
   protocolId: ProtocolName;
   label: string;
@@ -341,15 +354,16 @@ export async function loadProvidersAndProtocols(base?: string): Promise<{
   return { items: r.items ?? [], protocols: r.protocols ?? [] };
 }
 
-/** POST /provider —— 创建 provider 实例（ui §5） */
+/** POST /provider —— 创建 provider 实例（ui §5；[v0.0.350] name 可选透传，缺省 anthropic_compatible） */
 export async function createProvider(
-  body: { label: string; baseUrl: string; apiKey: string; protocolId: ProtocolName },
+  body: { label: string; baseUrl: string; apiKey: string; protocolId: ProtocolName; name?: ProviderName },
   base?: string,
 ): Promise<ProviderInstance> {
   const r = await req<{ provider: ProviderInstance }>('/provider', {
     method: 'POST',
     body: JSON.stringify({
-      name: 'anthropic_compatible',
+      // [v0.0.350] 类型透传（决策⑤；缺省通用向后兼容——后端白名单校验）
+      name: body.name ?? 'anthropic_compatible',
       // [v0.0.53] protocolId 必填（缺 → 后端 400）
       protocolId: body.protocolId,
       label: body.label,
@@ -368,10 +382,43 @@ export async function deleteProvider(id: string, base?: string): Promise<void> {
   }, base);
 }
 
-/** PUT /provider/:id —— 更新 provider 实例（label/baseUrl/enabled/apiKey/protocolId）（v0.0.7 + v0.0.53 protocolId） */
+// —— [v0.0.350] GET /provider/quota 额度聚合（api 02-llm-chat.md 1.8 §5.6）——
+
+/** 额度桶（5 小时 / 周两桶；usedPercent = 已用百分比） */
+export interface QuotaTier {
+  window: 'five_hour' | 'weekly';
+  usedPercent: number;
+  resetsAt?: string;
+}
+
+/** 单渠道额度/余额快照（统一形状，四渠道解析器唯一输出契约——决策⑧） */
+export interface QuotaSnapshot {
+  providerId: string;
+  providerLabel: string;
+  implId: ProviderName;
+  kind: 'quota' | 'balance';
+  tiers?: QuotaTier[];
+  membership?: string;
+  balance?: { currency: string; total: number; granted?: number; toppedUp?: number };
+  isAvailable?: boolean;
+  error?: { kind: 'auth' | 'business' | 'network' | 'timeout'; message: string };
+  fetchedAt: number;
+}
+
+/** GET /provider/quota —— 读全局额度 store 秒回（[v0.0.363] T1 契约：store 权威源；空窗 {items:[], lastSyncedAt:null}；单渠道失败 item.error 不炸整体） */
+export async function fetchProviderQuota(base?: string): Promise<{ items: QuotaSnapshot[]; lastSyncedAt: number | null }> {
+  return req<{ items: QuotaSnapshot[]; lastSyncedAt: number | null }>('/provider/quota', undefined, base);
+}
+
+/** POST /provider/quota/sync —— 触发增量同步（[v0.0.363] T1 契约：202 fire-and-forget；inFlight/30s 节流在 server 挡叠加；结果经 SSE provider_quota 帧到达） */
+export async function syncProviderQuota(base?: string): Promise<void> {
+  await req('/provider/quota/sync', { method: 'POST' }, base);
+}
+
+/** PUT /provider/:id —— 更新 provider 实例（label/baseUrl/enabled/apiKey/protocolId/name）（v0.0.7 + v0.0.53 + [v0.0.350] name） */
 export async function updateProvider(
   id: string,
-  body: { label?: string; baseUrl?: string; enabled?: boolean; apiKey?: string; protocolId?: ProtocolName },
+  body: { label?: string; baseUrl?: string; enabled?: boolean; apiKey?: string; protocolId?: ProtocolName; name?: ProviderName },
   base?: string,
 ): Promise<ProviderInstance> {
   const r = await req<{ provider: ProviderInstance }>(
@@ -384,6 +431,8 @@ export async function updateProvider(
         enabled: body.enabled,
         // [v0.0.53] 可选 protocolId（修改 protocol = 换接入点风格）
         ...(body.protocolId ? { protocolId: body.protocolId } : {}),
+        // [v0.0.350] 可选 name（类型切换通道，决策⑤；不传不写保持兼容）
+        ...(body.name ? { name: body.name } : {}),
         ...(body.apiKey ? { credentials: { key: body.apiKey } } : {}),
       }),
     },
@@ -450,7 +499,7 @@ export async function deleteModel(
  */
 export async function saveProviderWithModels(
   snapshot: ProviderInstance | null,
-  draft: { id?: string; label: string; baseUrl: string; apiKey: string; enabled: boolean; protocolId: ProtocolName; models: ModelInstance[] },
+  draft: { id?: string; label: string; baseUrl: string; apiKey: string; enabled: boolean; protocolId: ProtocolName; models: ModelInstance[]; name?: ProviderName },
   base?: string,
 ): Promise<ProviderInstance> {
   // provider 字段 diff（apiKey === '***' 视为未改，与后端脱敏一致）
@@ -461,18 +510,22 @@ export async function saveProviderWithModels(
     snapshot.enabled !== draft.enabled ||
     // [v0.0.53] protocolId 变更也算 provider dirty
     snapshot.protocolId !== draft.protocolId ||
+    // [v0.0.350] name（类型）变更也算 provider dirty（决策⑤：PUT 才会发出）
+    (snapshot.name ?? 'anthropic_compatible') !== (draft.name ?? 'anthropic_compatible') ||
     (draft.apiKey && draft.apiKey !== '***' && draft.apiKey !== snapshot.credentials.key);
 
   // 1) provider 本体：新建 POST / 已存且变 → PUT
   let providerId = snapshot?.id ?? '';
   if (snapshot === null) {
     const created = await createProvider(
-      // [v0.0.53] 新建必传 protocolId（避免后端 400）
-      { label: draft.label, baseUrl: draft.baseUrl, apiKey: draft.apiKey, protocolId: draft.protocolId },
+      // [v0.0.53] 新建必传 protocolId（避免后端 400）；[v0.0.350] name 透传（缺省通用兼容）
+      { label: draft.label, baseUrl: draft.baseUrl, apiKey: draft.apiKey, protocolId: draft.protocolId, name: draft.name },
       base,
     );
     providerId = created.id;
   } else if (providerChanged) {
+    // [v0.0.350] name（类型）变才透传（PUT 可选通道）
+    const nameChanged = (snapshot.name ?? 'anthropic_compatible') !== (draft.name ?? 'anthropic_compatible');
     await updateProvider(snapshot.id, {
       label: draft.label,
       baseUrl: draft.baseUrl,
@@ -480,6 +533,7 @@ export async function saveProviderWithModels(
       apiKey: draft.apiKey,
       // [v0.0.53] 若 protocolId 变则传（PUT 可选）
       ...(snapshot.protocolId !== draft.protocolId ? { protocolId: draft.protocolId } : {}),
+      ...(nameChanged ? { name: draft.name } : {}),
     }, base);
   }
 

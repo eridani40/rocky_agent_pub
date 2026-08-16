@@ -130,6 +130,11 @@ export interface SquadDetail {
    * 后端 toDetail 回显 ?? 'default' → 恒有值（UI 下拉初始态可直用）。
    */
   effortDefault: 'default' | 'low' | 'high' | 'max';
+  /**
+   * [v0.0.347] 挂载的模型路由方案 id（optional；无字段 = 未挂载，走默认模型）。
+   * 挂载后 squad.modelDefault 仍保留（解除挂载回退默认 + session default 合成）。
+   */
+  modelRoutingPlanId?: string;
   leaderId: string;
   memberIds: string[];
   members: Member[];
@@ -182,6 +187,8 @@ export interface PatchSquadBody {
   enableGroupChat?: boolean;
   /** [v0.0.279] 团队默认推理强度（undefined=不改；显式 'default' 也落盘） */
   effortDefault?: 'default' | 'low' | 'high' | 'max';
+  /** [v0.0.347] 挂载/解除模型路由方案（undefined=不改；null=解除挂载；非空=挂载） */
+  modelRoutingPlanId?: string | null;
   timezone?: string;
   /** [v0.0.116] squad 级心跳配置（undefined=不改/null=清空回默认） */
   heartbeatConfig?: SquadHeartbeatConfig | null;

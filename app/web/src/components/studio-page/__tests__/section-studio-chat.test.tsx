@@ -65,6 +65,7 @@ function mkChrome(over: Partial<SessionChromeView> = {}): SessionChromeView {
     tag: 'Squad A · mate',
     sessionModel: null,
     defaultModel: null,
+    defaultRoutingPlan: null,
     effort: null,
     approvalMode: null,
     members: [

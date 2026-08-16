@@ -63,7 +63,7 @@ Studio 是 squad 团队管理入口（nav-rail 顶部业务区第 2 项「Studio
 点侧栏 squad 行选中 squad → 主区切 seats 路由态，进入**团队首页单页中枢**。SeatsPanel 头部三 tab（首页/管理/自动工作）**首页内联切换内容**。
 
 - **头部（常驻）**：团队名（15px/600）+ 在线数 badge（绿字圆点 `--presence-online`）+ 三 tab（下划线式：激活 `border-b-2 border-b-fg`；本地 activeTab state 切主体，不改 mainView）。
-- **数据**：现有 store（SquadDetail）+ `getBudgetUsage(id)` 一次挂载 GET（tokenUsed；limit=-1/失败 → null 降级不显示或「—」）；presence 派生自 `useStudioUnreadMeta().stateMap`（SSE 驱动）；`member.currentWork.text` 状态行。**后端零新增端点**。
+- **数据**：现有 store（SquadDetail）+ `getBudgetUsage(id)` 一次挂载 GET（tokenUsed；limit=-1/失败 → null 降级不显示或「—」）；presence 派生自 `useStudioUnreadMeta().stateMap`（**[v0.0.348] 四层 hydration**：onInit 同步订阅 `session_meta _all` 在前 + `GET /session?biz=studio` 冷启动补水 + `mergeFromSessions` 竞态仲裁（内部 metaMap sid→updatedAt，更新者胜、GET 后到不回退先到新帧）+ `onResumed` 断连重连校正——仅 SSE 增量在订阅冷启动/断连窗口丢帧后会永久错态，v0.0.165 删初始拉取引入的回归）；`member.currentWork.text` 状态行。**后端零新增端点**（biz 过滤为既有契约）。
 
 ### 3.1 首页 tab（缺省，双列指挥台 + 第二栏全景内嵌）
 
@@ -86,9 +86,10 @@ grid `296px + 1fr` 两列：
 
 ### 3.2 管理 tab（ManageTab 内联）
 
-- **squad 元信息编辑**：name / description / modelDefault（PATCH /squad/:id）。modelDefault 用 `chat/ModelPicker`（`studio.squad.select-default-model` actionKey）。
+- **squad 元信息编辑**：name / description / 默认模型或方案（PATCH /squad/:id）。**[v0.0.347 T6] 默认模型/方案合并单 select**：用 `common/ModelOrPlanPicker`（`studio.squad.select-default-model` actionKey，ns=studio；严格互斥二选一，方案优先初值；控件契约见 `common/component-model-or-plan-picker.md`）。
 - **[v0.0.344] model select 加宽**：`component-manage-tab.tsx` 传 `triggerClassName="w-full whitespace-nowrap overflow-hidden text-ellipsis"`——trigger 宽度跟随容器（对齐同区域 INPUT/Dropdown），长模型名（minimax-xxx/deepseek-xxx）完整显示。`triggerClassName` 是 `ModelPicker` 的 [v0.0.344] 新可选 prop：消费方覆盖 trigger 宽度 className；**缺省 `??` 保持 v0.0.72 UIFix2 的 `w-[180px] whitespace-nowrap overflow-hidden text-ellipsis`**（trigger 尺寸稳定防布局跳动，存量消费方零影响）。
 - **默认推理强度（v0.0.279，effortDefault）**：modelDefault 下方加 effortDefault 下拉（Dropdown 原语 `component-shared-selector`，4 档 default/low/high/max，state 初始 = `detail.effortDefault`——后端回显 ?? 'default' 恒有值）；dirty 判定 `effortDefault !== detail.effortDefault`（改档可 save / 改回不可）；save patch 恒带 effortDefault（显式 'default' 也落盘，对齐后端 PATCH `!== undefined` + 显式落盘语义）。团队默认覆盖链：成员显式档（low/high/max）→ 用之；否则团队 effortDefault（low/high/max）→ 用之；否则 undefined（厂商默认，encode 不注入）——详见 `specs/tech/agent/providers_and_models/[P0]llm_protocol_interface.md §3.8`。i18n：`studio:manageTab.effortDefaultLabel` + `studio:manageTab.effortOptions.{default|low|high|max}`（en/zh 双语）。
+- **模型路由方案挂载（v0.0.347 T6 起，并入合并 select）**：原「模型路由方案（挂载）」独立下拉已**移除**——方案选择并入默认模型/方案合并单 select（`ModelOrPlanPicker` 下组「方案」，数据源 = `listModelRoutingPlans()`）。**严格互斥（22:22 拍板）**：pick 是方案 → save patch `{modelRoutingPlanId: planId, modelDefault: '', modelDefaultProviderId: ''}`（显式清空非省略）；pick 是模型 → `{modelDefault, modelDefaultProviderId, modelRoutingPlanId: null}`（清挂载）；初值 = 方案优先（存量双设呈现方案对齐 resolve 真值，触碰即收敛）。后端 PATCH 载荷双非空 → 400 `mutually exclusive`（防 API 误用）。dirty 判定 = pick 复合对比（模型比 providerId+modelId、方案比 planId、null 比双空）。**academy 会话不渲染**（方案挂载仅 studio/playground 生效）。i18n：`modelOrPlan.*` 5 keys（modelOrPlan 与 app-dev-config ns 同构）；既有 `routingPlanLabel`/`routingPlanNone` 保留（别处消费）。组件契约 `common/component-model-or-plan-picker.md`；方案库编辑在 app 设置 models tab `section-model-routing-plans.md`。
 - **`[v0.0.237 removed]`** 原 charter 编辑器（4 字段 form + history）已随 charter 全链路移除——管理 tab 不再有 charter section。
 - **危险操作区（team 硬删除/解散）**：底部删除按钮 + 二次确认弹层（复用 ModalShell）。须**输入完整队名匹配**才启用「确认删除」（防误删）；确认 → `DELETE /squad/:id`（硬删：member session + 历史 + 调度全物理清、不可逆；工作产出保留——workspaces/交付/temp/outputs/reports 原地不动，详 `11a-squad-endpoints.md §1.5`）→ 从 sidebar 移除 + 切走选中。
 

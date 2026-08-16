@@ -3,20 +3,20 @@ type: design
 title: Cache Control (Prompt Caching Breakpoint)
 priority: P0
 status: active
-updated: 2026-08-07
+updated: 2026-08-15
 since: v0.0.3
 related: [[P0]llm_protocol_interface.md, anthropic_impl.md, ../context/[P0]system_reminder.md]
 ---
 
 # Cache Control (Prompt Caching Breakpoint)
 
-> 管什么：prompt cache 的**显式 breakpoint 注入策略**（canonical → wire encode 时）+ **历史 reminder 的 wire 层过滤**——把稳定段 cache 在 breakpoint 之前、动态段放 breakpoint 之后，让每轮变化的 reminder 不破前缀 cache。
+> 管什么：prompt cache 的**显式 breakpoint 注入策略**（canonical → wire encode 时，三断点体系）——稳定段锚定在 breakpoint 之前，本轮新块落 bp#2 之后；历史 reminder 块 append-only 全保留（v0.0.361），前缀命中不依赖 wire 过滤。
 > 不管什么：reminder 是否持久化进 transcript（→ `../context/[P0]system_reminder.md`，context 层 ingest 决定）、HTTP 调用与缓存命中 token 计费（→ `[P0]llm_client_interface.md` / `session_usage`）。
-> 所属层：**protocol encode 层**（canonical → wire 时注入 + 过滤），与 context 层 reminder 持久化**两层独立**（见 §5）。
+> 所属层：**protocol encode 层**（canonical → wire 时注入断点），与 context 层 reminder 持久化**两层独立**（见 §5）。
 
 ## 1. 定位
 
-cache_control 是 `LlmProtocol.encode` 的内部策略：把 canonical 请求翻译成 wire body 时，决定**哪些 content block 加 `cache_control:{type:"ephemeral"}` breakpoint**、**哪些历史 block 在 wire 层 drop**。目标：最大化 prompt cache 命中率（省钱省 token），同时允许每轮变动的 reminder 不破坏稳定段 cache。
+cache_control 是 `LlmProtocol.encode` 的内部策略：把 canonical 请求翻译成 wire body 时，决定**哪些位置注入 `cache_control:{type:"ephemeral"}` breakpoint**。目标：最大化 prompt cache 命中率（省钱省 token）。**三断点体系（v0.0.361）**：system 末（bp#1）+ tools 末（bp#T）+ messages 末（bp#2）——三层各自锚定缓存边界；历史 reminder 块**全保留进 wire**（不再 drop，见 §3.3）。
 
 Anthropic Messages API 的 prompt caching 有**两种命中机制**（互斥，见 §2），本项目走**显式 cache_control breakpoint** 路线（非隐式 prefix-only）。本文件是 protocol 层的**目标契约**；现状代码偏差见 §6（v0.0.52 改代码对齐）。
 
@@ -34,62 +34,61 @@ Anthropic prompt caching 有两个互斥的命中机制，**理解二者区别�
 
 - **机制**：显式在 content block 上标 `cache_control:{type:"ephemeral"}`，**breakpoint 之前**的内容被 Anthropic 缓存（最多 4 个 breakpoint）；breakpoint 之前稳定 → cache 命中；breakpoint 之后动态 → 不影响前缀 cache。
 - **约束**：breakpoint 落点要保证「之前稳定」。
-- **对本项目的优势**：reminder 可以**不进历史 wire**（encode 时 drop 历史 reminder block），breakpoint 落在 reminder 之前的稳定段——历史段稳定（cache 命中）+ 末尾 reminder 段动态（不破 cache）。
+- **对本项目的优势**：三断点（§3）各自锚定稳定段边界（system/tools/messages）；历史 reminder 块 append-only 字节稳定，bp#2 前缀 = 稳定历史 + 本轮新块 → 每轮命中上一轮缓存条目，只有新块计费。
 
 ### 2.3 两场景互斥（关键决策依据）
 
 > **reducer 过滤历史 reminder 是错误方案**（破坏隐式 implicit）：过滤后 wire 内容序列与上轮 cache key 不一致，永远 miss。
-> **正确做法是显式 breakpoint 路线下 wire 层过滤**：因为显式缓存不依赖「整个 prefix 字节一致」，breakpoint 之前的稳定段即使内容序列微调（drop 了历史 reminder）也能命中——只要 breakpoint 之前的稳定段本身跨 turn 一致。
+> **显式 breakpoint 路线下 wire 层无过滤**（v0.0.361 起）：历史 reminder 块 append-only 进 wire（transcript 持久化 = wire 保留，两层一致）；bp#2 固定打 messages 末 block，前缀命中不依赖「drop 历史」维持稳定。
 
-本项目选**显式 breakpoint 路线**（§3），对应 wire 层过滤历史 reminder；transcript 仍持久化 reminder（fallback 隐式缓存保留），两层独立（见 §5）。
+本项目选**显式 breakpoint 三断点路线**（§3）；旧「drop 历史 reminder」机制已于 v0.0.361 删除（裁决记录见 version_logs/v0.0.361/change_log.md §wire 语义）。
 
-## 3. 我们的处理机制（显式 breakpoint，目标契约）
+## 3. 我们的处理机制（显式三断点体系，目标契约）
 
-`LlmProtocol.encode`（canonical → wire）时，对**支持 cache_control 的协议**执行以下三步：
+`LlmProtocol.encode`（canonical → wire）时，对**支持 cache_control 的协议**在三个位置注入 breakpoint（**Anthropic 上限 4 断点，三断点合规**）：
 
 ### 3.1 bp#1：system prompt 末 content block
 
 system prompt 转成 content block array（string 自动转），给**最后一个 system block** 加 `cache_control:{type:"ephemeral"}`。
 
-- **理由**：system prompt 跨 turn 稳定（身份/规则/工具/skills，见 `../context/[P0]system_prompt.md`），是最稳定的 cache 段。
+- **理由**：system prompt 跨 turn 稳定（身份/规则/工具/skills + session_states 静态段，见 `../context/[P0]system_prompt.md`），是最稳定的 cache 段。
 - **落点**：顶层 `system` 参数的 content array 末 block（anthropic 落点 `top_level`，见 protocol §3.5）。
 
-### 3.2 bp#2：最后一个非 reminder 的 content block
+### 3.1b bp#T：tools 末位 tool（v0.0.361 新增）
 
-**跨所有 wire messages 从末尾向前扫，找第一个 `isSystemReminder !== true` 的 content block**，给它加 `cache_control:{type:"ephemeral"}`。
+encodeTools 产出 wire tools 数组后，给**末位 tool** 加 `cache_control:{type:"ephemeral"}`。
 
-- **关键**：breakpoint 必须**落在 reminder 之前**的稳定段——不是「最后一条 message 的末 block」（若末 block 是 reminder，bp 落 reminder 上 → 下轮该 reminder 内容变 → cache miss）。
-- **搜索规则**：wire messages 数组从末尾向前扫（跨 message 边界），命中第一个非 reminder block 即停。该 block 通常是 user 正文 / tool_result / assistant 回复（业务对话的最末稳定内容）。
-- **`isSystemReminder` 字段**：block 级标记，由 context ingest 注入（见 `../context/[P0]system_reminder.md §4`）；encode 读 canonical block 时识别此标记，**写 wire block 时丢弃此字段**（不进 wire，LLM 零侵入）。
+- **理由**：tools 定义跨 turn 稳定（工具集在 run/session 级不变）；三断点体系要求 tools 层独立锚定——system 段变更（session states 刷新/summary 重建）→ bp#T 命中 tools+messages 前缀；tools 变更 → bp#1/bp#2 命中 system+messages。三层各自锚定 = 任一层变化不拖垮其余两层缓存。
+- **现状来源**：老板 20:34 终版补丁（代码实证 encodeTools 旧为纯映射无注入 → 本版新增）。
 
-### 3.3 过滤历史 reminder（wire 层 drop）
+### 3.2 bp#2：最末 message 的最末 content block
 
-encode 各 message 时，按「是否最后一条 message」分支（**[修正 2026-07-22] 口径从「最末 user message」改为「最末 message」**，role 不限——发送给 LLM 的最后一条永远是 user/tool，wire 上映射后都是 user）：
+**固定打最末 message 的最末 content block**（不做反向扫描、不避让 reminder）。
 
-- **非最末 message**：drop 所有 `isSystemReminder=true` 的 block（历史 reminder 不进 wire）。
-- **最末 message**：drop 除**最后一个 reminder block** 之外的所有 `isSystemReminder=true` block（保留当轮 reminder 发给 LLM）。
+- **理由（v0.0.361 wire 语义裁决）**：历史 reminder 块进 transcript 后**字节不变（append-only）** → bp#2 前缀 = 稳定历史 + 本轮新块 → 每轮命中上一轮缓存条目，只有新块计费。旧「避让扫描找最后非 reminder block」机制已删——每轮重渲染累积视图（drop 方案的对照面）反导致最末块每轮重写 → 前缀分叉 miss，cache_creation 1.25x 重算，比现状更贵。
+- **`isSystemReminder` 字段**：块级标记保留（前端 DEFAULT_BLOCK_FILTER 契约，`../context/[P0]system_reminder.md §4`）；encode 写 wire block 时仍丢弃此字段（不进 wire，LLM 零侵入）。
 
-**修正动机（prod trace 01KY2M2JY81B5P2AGPQRMVE46N 实证）**：旧口径「最末 canonical user message」在 tool 密集 loop 里把 reminder 钉死在历史深处的 user 消息上（该 trace 钉在 msg#1 长达 13 步，内容冻结在 ingest 时刻）；新 user/a2a 消息到达时旧位置 reminder 被 retroactive drop → 已发送前缀在深位置变化 → 隐式 prompt cache（控不了断点，只能逐字节持有已发消息）整段崩（单步 cache_read 掉 128、命中率 0.2%；同 trace 另有 8 处同机制尾部分歧）。新口径下历史 reminder 全 drop，**保留/drop 只发生在尾部**（reminder 恒为所在 message 的末块，被 drop 时前缀损失≈零）。
+### 3.3 历史 reminder 全保留（wire 层无过滤，v0.0.361）
 
-要点：
+**encode 不再过滤历史 reminder**：全部 `isSystemReminder=true` 的 block 照常进 wire（历史 full 块 + 增量块 = run 内状态演进轨迹，LLM 可追溯）。
 
-- **保留最末 reminder**：当前 turn 的 reminder 仍要发给 LLM（环境/时间/工具错误等上下文 LLM 需要看见）。v0.0.274 起最末 message 可为 tool_result（`role:'tool'`，wire 映射为 user）——tool 循环中当轮 tool_result 携带的 reminder 同样保留发给 LLM（LLM 在工具循环中后期也看到最新团队状态）。
-- **drop 历史 reminder**：历史 reminder 在 wire 层不再发（避免历史段不稳 + 节省 token）；transcript 仍持久化（context 层，见 §5），不丢数据。v0.0.274 起 tool 消息也注入 reminder，**wire 层非最末 tool 消息的 reminder 同样被 drop**——LLM 上下文每轮只见最末一个聚合 reminder（不堆积）。
-- **过滤时机**：必须在 encode（canonical → wire）层做，**不能在 assemble reducer 做**——assemble 改的是 canonical transcript（破坏隐式缓存 fallback + 违反「transcript 完整」语义），encode 改的是 wire 一次性产物（每轮重新生成，不影响 transcript）。
+- **旧机制（drop 历史 + 保留最末）已删除**：drop 维持的「尾部动态、历史稳定」在 append-only 语义下天然成立，无需过滤；历史块累积由 compact/summary 天然吸收。
+- **transcript 与 wire 一致**：context 层持久化的 reminder = wire 发送的 reminder（两层同内容，无「transcript 有 wire 无」分叉）。
 
 ### 3.4 效果
 
 | 段 | 内容 | 稳定性 | cache |
 |---|---|---|---|
-| system（bp#1 前） | 身份/规则/工具/skills | 跨 turn 极稳 | 命中 |
-| 历史 message（bp#2 前） | 历史对话（去 reminder） | 跨 turn 稳定（追加新 message 不改旧） | 命中 |
-| 最末 user message（bp#2 后） | user 正文 + 当轮 reminder | 每 turn 变 | 不命中（动态段） |
+| system（bp#1 前） | 身份/规则/工具/skills/session_states 静态段 | 跨 turn 极稳 | 命中 |
+| tools（bp#T 前） | 工具定义 | run/session 级稳定 | 命中 |
+| 历史 message（bp#2 前） | 历史对话（含历史 reminder 块，append-only） | 跨 turn 稳定（追加不改旧） | 命中 |
+| 最末 message（bp#2 后） | 本轮新块（user 正文/当轮 reminder） | 每 turn 变 | 不命中（动态段） |
 
-整体：稳定段（bp#1 + bp#2 之前）跨 turn 命中 cache，动态段（bp#2 之后的当轮 reminder）每轮变但不破前缀 cache。
+整体：三断点各自锚定稳定段；bp#2 前缀 = 稳定历史 + 本轮新块 → 每轮命中上一轮缓存条目，只有新块计费。
 
 ## 4. cache_control 是 anthropic_messages protocol encode 专属
 
-cache_control breakpoint（`cache_control:{type:"ephemeral"}`）是 **Anthropic Messages API 特有 wire 字段**，其注入 + 过滤逻辑（§3 三步）在 `anthropic_messages` protocol impl 的 encode（`encodeAnthropicMessages`）内部，**不抽到公共 LlmProtocol 接口**。
+cache_control breakpoint（`cache_control:{type:"ephemeral"}`）是 **Anthropic Messages API 特有 wire 字段**，其三断点注入逻辑（§3）在 `anthropic_messages` protocol impl 的 encode（`encodeAnthropicMessages` + `encodeTools`）内部，**不抽到公共 LlmProtocol 接口**。
 
 | 协议 | cache 机制 | 落点 |
 |---|---|---|
@@ -106,10 +105,10 @@ cache_control breakpoint（`cache_control:{type:"ephemeral"}`）是 **Anthropic 
 
 | protocol cache 能力 | reminder 注入策略 | 为什么 |
 |---|---|---|
-| **支持 cache_control**（Anthropic，当前唯一）| user + tool_result 都注入（v0.0.274 起）| bp#2 落在最后非 reminder block（§3.2），reminder 恒在 cache 段外（动态段）；wire 层每轮只见最末一个（§3.3）→ 密度天然收敛，注入不破缓存 |
+| **支持 cache_control**（Anthropic，当前唯一）| user + tool_result 都注入（v0.0.274 起）| 三断点锚定（bp#T/bp#2）+ 历史 reminder 块 append-only 全保留（§3.2/§3.3）→ bp#2 前缀每轮命中上一轮条目，注入不破缓存 |
 | **不支持 cache_control**（未来 openai_chat_completions 等）| 无显式 breakpoint，只有隐式 prefix matching → reminder 频繁注入会崩隐式 cache → 需密度控制预案 | 预案 A：**清理 run 内非首个 reminder**（run 开始只留第一个，后续全 drop）；预案 B：**每 10 个保留第一个**（保持密度上限，兼顾 LLM 看到近期团队状态） |
 
-**三层自洽性（老板确认）**：tool 上加 reminder（context 层 ingest）+ 清理保留最末（protocol 层 wire）+ cache 截止 reminder 前（bp#2 落点）三者自洽——Anthropic 下注入密度由 wire 层天然收敛，不需要额外密度控制；只有不支持 cache_control 的 protocol 才需要显式密度预案（预案 A/B 在**该 protocol 的 encode 内部**实现，不污染 context 层 ingest，也不动 anthropic encode）。
+**三层自洽性（v0.0.361 语义）**：tool 上加 reminder（context 层 ingest）+ 历史块 append-only 全保留（protocol 层 wire）+ 三断点锚定（bp#1/bp#T/bp#2）三者自洽——Anthropic 下注入密度不影响缓存（每轮只有新块计费），不需要额外密度控制；只有不支持 cache_control 的 protocol 才需要显式密度预案（预案 A/B 在**该 protocol 的 encode 内部**实现，不污染 context 层 ingest，也不动 anthropic encode）。
 
 **未来扩展锚点**：新增 protocol 时，在 `LlmProtocol` 接口（`../providers_and_models/[P0]llm_protocol_interface.md`）加 `supportsCacheControl` 能力标志 → 各 protocol 的 encode 按能力标志分派密度策略：支持 → 沿用 Anthropic 模式（注入 + wire 收敛）；不支持 → 应用预案 A/B。当前 anthropic_messages 不抽公共能力位（本 spec §4 前述），该标志仅对未来多 protocol 场景有约束力。
 
@@ -126,20 +125,21 @@ reminder 的处理跨两层，**两层职责正交、互不干扰**：
 - wire 只发必要内容（protocol 层职责）——cache 命中率最大化 + token 节省。
 - 一层改动不破另一层：protocol 层过滤 wire 不影响 transcript；context 层 ingest 改 reminder 形态（如改 block 结构）只要 encode 能识别 `isSystemReminder` 标记就能继续过滤。
 
-## 6. 代码对齐状态（v0.0.52 已落地）
+## 6. 代码对齐状态（v0.0.361 已落地）
 
-> 本 spec 的 §3 三步机制已全部落地于 `app/plugins/builtins/llm_anthropic/protocol-encode.ts`（`encodeAnthropicMessages` 内；v0.0.191 起 impl 物理迁 plugin 目录）。v0.0.52 之前的两项偏差（bp#2 落最后 block 而非最后非 reminder block + 历史 reminder 未在 wire 过滤）已修复。
+> 本 spec §3 三断点机制已全部落地于 `app/plugins/builtins/llm_anthropic/protocol-encode.ts`（`encodeAnthropicMessages` + `encodeTools` 内；v0.0.191 起 impl 物理迁 plugin 目录）。v0.0.361 删除旧避让扫描（`injectLastNonReminderCacheControl`）与 encodeMessage drop 逻辑，改为三断点 + 历史块全保留。
 
 逐项对齐（`protocol-encode.ts` ↔ spec 条款）：
 
 | spec 条款 | 代码实现 | 状态 |
 |---|---|---|
 | §3.1 bp#1（system 末 block）| `encodeAnthropicMessages` 内 `body['system'] = [{ type:'text', text, cache_control:{type:'ephemeral'} }]` | ✅ |
-| §3.2 bp#2（跨 messages 反向扫第一个非 reminder block）| `injectLastNonReminderCacheControl(encoded, reminderFlags)`：双循环从末尾向前，`flags[bi]===true` 跳过 reminder block，命中第一个非 reminder block 注入并 return | ✅ |
-| §3.3 过滤历史 reminder（非最末 message 全 drop；最末 message 只保留最末一个）| `encodeMessage(m, isLastMessage)`：`lastKeptReminderIdx`（非最末 message=-1 全 drop；最末 message=最末 reminder 索引），单遍 `isRem && i !== lastKeptReminderIdx` drop | ✅ |
+| §3.1b bp#T（tools 末位 tool）| `encodeTools` 末位 tool 注入 `cache_control:{type:'ephemeral'}`（v0.0.361 新增；原纯映射无注入） | ✅ |
+| §3.2 bp#2（最末 message 最末 block 固定落位）| encode messages 后给末位 message 末位 block 注入；无反向扫描、无避让（v0.0.361 删 `injectLastNonReminderCacheControl`） | ✅ |
+| §3.3 历史 reminder 块全保留 | encode 各 message 一视同仁，无 `isLastMessage` 分支、无 reminder drop（v0.0.361 删 `encodeMessage` 的 `lastKeptReminderIdx` 过滤） | ✅ |
 | §3.2 `isSystemReminder` 不进 wire（零侵入）| `encodeContentBlock` text 分支只取 `{type:'text', text: b.text}`，丢弃 `isSystemReminder` 字段 | ✅ |
-| §4 anthropic encode 专属（不动 `LlmProtocol` 接口）| 逻辑全在 `encodeAnthropicMessages` 内；无 `supportsCacheControl` 能力位 | ✅ |
-| §5 两层独立（不动 context 层 / transcript 持久化）| encode 只读 canonical block 标记做一次性 wire 过滤，不写回 transcript | ✅ |
+| §4 anthropic encode 专属（不动 `LlmProtocol` 接口）| 逻辑全在 `encodeAnthropicMessages` + `encodeTools` 内；无 `supportsCacheControl` 能力位 | ✅ |
+| §5 两层独立（不动 context 层 / transcript 持久化）| encode 只做 wire 一次性组装（注入断点、剥标记），不改写 canonical、无「transcript 有 wire 无」分叉 | ✅ |
 
 > 历史偏差根因（v0.0.8 引入 reminder 时 encode 未同步 reminder 标记 + bp#2 仍按「最后 block」落点）已记录在 `log.md` v0.0.52 条目，不在正文保留版本史。
 >
@@ -149,7 +149,7 @@ reminder 的处理跨两层，**两层职责正交、互不干扰**：
 
 | 零件 | 归属 |
 |---|---|
-| cache_control breakpoint 注入策略（落点 + ttl）+ 历史 reminder wire 层过滤 | 本文（cache_control）✅ |
+| cache_control breakpoint 注入策略（三断点落点 + ttl）| 本文（cache_control）✅ |
 | `LlmProtocol.encode` 契约 + 多模态编码 + role 转换 | `[P0]llm_protocol_interface.md` |
 | anthropic_messages impl encode 落地（§3 三步的代码实现） | `anthropic_impl.md §4` |
 | reminder 持久化（ingest 注入 + transcript 完整性）+ `isSystemReminder` 标记定义 | `../context/[P0]system_reminder.md` |
@@ -158,11 +158,11 @@ reminder 的处理跨两层，**两层职责正交、互不干扰**：
 
 ## 8. 核心设计原则（跨文件不变量）
 
-1. **两层独立**——reminder 持久化归 context 层（ingest），cache_control breakpoint + wire 过滤归 protocol 层（encode）。一层改不破另一层；transcript 完整 + wire 精简同时成立。
-2. **显式 breakpoint 路线**——选 cache_control breakpoint（非隐式 prefix-only），因为只有显式 breakpoint 才允许「wire 层 drop 历史 reminder」（隐式路线 drop 内容序列就破坏 prefix 一致性）。
-3. **bp 落点不落 reminder**——bp#2 必须落在「最后一个非 reminder block」，落在 reminder 上 = 下轮 cache miss（reminder 内容每轮变）。
-4. **encode 层过滤，不进 assemble**——wire 过滤是 encode（canonical → wire 一次性产物）职责，assemble reducer 改 canonical transcript 会破坏隐式 fallback + 违反 transcript 完整语义。
-5. **anthropic_messages encode 专属**——cache_control 是 Anthropic 特有 wire 字段，注入 + 过滤逻辑在 `encodeAnthropicMessages` 内，不抽公共 LlmProtocol 能力位；其他 protocol 各自 encode 决定 cache 机制（不实现则自然全传 fallback）。
+1. **两层独立**——reminder 持久化归 context 层（ingest），cache_control 三断点注入归 protocol 层（encode）。一层改不破另一层；transcript 与 wire 同内容（append-only，无过滤分叉）。
+2. **显式 breakpoint 三断点路线**——system 末（bp#1）/ tools 末（bp#T）/ messages 末（bp#2）三层各自锚定稳定段；历史 reminder 块 append-only 字节稳定，无需 wire 过滤维持命中。
+3. **bp#2 固定末位**——最末 message 最末 block 固定落位，不做避让扫描：历史块跨 turn 字节不变 → bp#2 前缀 = 稳定历史 + 本轮新块，每轮命中上一轮条目。
+4. **encode 层组装，不进 assemble**——断点注入是 encode（canonical → wire 一次性产物）职责，assemble reducer 改 canonical transcript 才破坏缓存与完整语义。
+5. **anthropic_messages encode 专属**——cache_control 是 Anthropic 特有 wire 字段，注入逻辑在 `encodeAnthropicMessages` + `encodeTools` 内，不抽公共 LlmProtocol 能力位；其他 protocol 各自 encode 决定 cache 机制（不实现则自然全传 fallback）。
 
 ---
 

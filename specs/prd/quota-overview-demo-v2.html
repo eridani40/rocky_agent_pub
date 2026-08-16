@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Provider 列表折叠 + 额度总览 v2 · 静态 Demo</title>
+<!--
+  静态演示（老板拍板用，确认后转 PRD/正式改造）
+  视觉 token 对齐 app/web/src/styles/tokens.css（v0.0.165 银灰体系，light-only）
+  数据快照写死 2026-08-15（周六）08:53，时间进度 = (周期−剩余)/周期 按此时刻实算
+  结构预留：月度额度档当前无数据不展示，tier 模块可直接复用扩档
+-->
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; background:#fafafa; color:#0a0a0a; font:14px/1.5 -apple-system,BlinkMacSystemFont,'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-family:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace; }
+  .page { max-width:660px; margin:0 auto; padding:36px 20px 64px; }
+  h1 { font-size:18px; font-weight:700; margin:0 0 6px; }
+  .meta { font-size:12px; color:#71717a; margin:0 0 6px; }
+  .caption { font-size:12px; font-weight:600; color:#71717a; margin:28px 0 8px; }
+  .frame { border:1px dashed #d4d4d8; border-radius:10px; padding:16px 14px 8px; }
+  .grp { display:flex; align-items:baseline; gap:8px; margin:28px 0 10px; }
+  .grp h2 { font-size:13px; font-weight:600; color:#3f3f46; margin:0; }
+  .grp .cnt { font-size:11px; color:#a1a1aa; }
+  .note { border:1px solid #e4e4e7; border-radius:8px; padding:10px 12px; font-size:12px; color:#52525b; margin:0 0 10px; background:#fff; }
+  /* —— 卡容器（同 provider-list-card 语言：surface-2 + border + r10 + hover border-strong）—— */
+  .card, .lcard { background:#f4f4f5; border:1px solid #e4e4e7; border-radius:10px; margin-bottom:8px; }
+  .card { padding:14px 18px; }
+  .lcard { display:flex; align-items:center; gap:12px; padding:16px 20px; cursor:pointer; }
+  .card:hover, .lcard:hover { border-color:#a1a1aa; }
+  .chead { display:flex; align-items:center; gap:10px; }
+  .logo { width:32px; height:32px; border-radius:8px; background:#dcfce7; color:#16a34a; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .logo.off { background:#e4e4e7; color:#a1a1aa; }
+  .llogo { width:40px; height:40px; border-radius:10px; background:#dcfce7; color:#16a34a; font-weight:700; font-size:20px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .llogo.off { background:#e4e4e7; color:#a1a1aa; }
+  .cinfo { flex:1; min-width:0; }
+  .clabel { font-size:14px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .csub { font-size:11px; color:#71717a; margin-top:2px; }
+  .dot { margin:0 6px; color:#a1a1aa; }
+  .chev { color:#71717a; flex:none; display:flex; }
+  /* —— 徽标（同 app 徽标语言：9px mono bold uppercase）—— */
+  .bdg { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; border-radius:4px; padding:2px 6px; white-space:nowrap; }
+  .bdg-on   { background:#dcfce7; color:#16a34a; }
+  .bdg-off  { background:#e4e4e7; color:#71717a; }
+  .bdg-plan { background:#dcfce7; color:#16a34a; }
+  .bdg-low  { background:#fee2e2; color:#dc2626; }
+  .bdg-fast { background:#fef3c7; color:#b45309; }
+  /* —— 折叠入口 / 添加入口 —— */
+  .fold { display:flex; align-items:center; justify-content:center; gap:6px; border:1px dashed #d4d4d8; border-radius:10px; padding:10px; font-size:12px; color:#71717a; cursor:pointer; background:transparent; }
+  .fold:hover { border-color:#a1a1aa; color:#52525b; }
+  .fold.open { border-style:solid; }
+  /* —— 额度档模块：双横柱（上=已用，下=时间进度）—— */
+  .tier { margin-top:14px; }
+  .thead { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px; }
+  .tname { font-size:12px; font-weight:600; color:#3f3f46; display:flex; align-items:center; gap:8px; }
+  .treset { font-size:11px; color:#71717a; }
+  .trow { display:grid; grid-template-columns:32px 1fr 44px; align-items:center; gap:8px; margin-top:5px; }
+  .tlab { font-size:11px; color:#71717a; }
+  .bar { height:6px; border-radius:3px; background:#e4e4e7; overflow:hidden; }
+  .fill { height:100%; border-radius:3px; }
+  .f-used { background:#18181b; }
+  .f-used.fast { background:#f59e0b; }
+  .f-time { background:#a1a1aa; }
+  .tval { font-size:11px; color:#3f3f46; text-align:right; }
+  .tval.fast { color:#b45309; font-weight:700; }
+  /* —— 异常态 / 余额 —— */
+  .err { margin-top:12px; font-size:12px; color:#dc2626; }
+  .lastok { font-size:11px; color:#a1a1aa; margin-top:2px; }
+  .amount { margin-left:auto; font-size:16px; font-weight:700; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Provider 列表折叠 + 额度总览 v2 · 静态 Demo</h1>
+  <p class="meta">数据快照 2026-08-15（周六）08:53 写死 · 仅演示，老板确认后转 PRD/正式改造</p>
+
+  <!-- ============ 一、Provider 列表（默认只显启用，停用折叠） ============ -->
+  <p class="caption">① Provider 列表 — 状态一：默认（收起）</p>
+  <div class="frame">
+    <div class="lcard"><div class="llogo">K</div><div class="cinfo"><div class="clabel">Kimi Coding Plan <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://api.kimi.com/coding<span class="dot">·</span>1 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <div class="lcard"><div class="llogo">智</div><div class="cinfo"><div class="clabel">智谱 GLM Coding Plan <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://open.bigmodel.cn/api/anthropic<span class="dot">·</span>3 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <div class="lcard"><div class="llogo">M</div><div class="cinfo"><div class="clabel">MiniMax Coding Plan <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://api.minimaxi.com/anthropic<span class="dot">·</span>2 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <div class="lcard"><div class="llogo">D</div><div class="cinfo"><div class="clabel">DeepSeek（按量付费） <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://api.deepseek.com/anthropic<span class="dot">·</span>1 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <button class="fold">已停用 (2) <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+  </div>
+
+  <p class="caption">② Provider 列表 — 状态二：点击「已停用 (2)」展开后</p>
+  <div class="frame">
+    <div class="lcard"><div class="llogo">K</div><div class="cinfo"><div class="clabel">Kimi Coding Plan <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://api.kimi.com/coding<span class="dot">·</span>1 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <div class="lcard"><div class="llogo">智</div><div class="cinfo"><div class="clabel">智谱 GLM Coding Plan <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://open.bigmodel.cn/api/anthropic<span class="dot">·</span>3 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <div class="lcard"><div class="llogo">M</div><div class="cinfo"><div class="clabel">MiniMax Coding Plan <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://api.minimaxi.com/anthropic<span class="dot">·</span>2 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <div class="lcard"><div class="llogo">D</div><div class="cinfo"><div class="clabel">DeepSeek（按量付费） <span class="bdg bdg-on">启用</span></div><div class="csub mono">https://api.deepseek.com/anthropic<span class="dot">·</span>1 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <button class="fold open">已停用 (2) <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+    <div style="height:8px"></div>
+    <div class="lcard"><div class="llogo off">智</div><div class="cinfo"><div class="clabel">智谱 GLM · 旧渠道 <span class="bdg bdg-off">停用</span></div><div class="csub mono">https://open.bigmodel.cn/api/anthropic<span class="dot">·</span>5 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+    <div class="lcard"><div class="llogo off">O</div><div class="cinfo"><div class="clabel">OpenRouter <span class="bdg bdg-off">停用</span></div><div class="csub mono">https://openrouter.ai/api/v1<span class="dot">·</span>12 个模型</div></div><span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+  </div>
+
+  <!-- ============ 二、额度总览 v2（分组 + 每档双柱，无展开详情） ============ -->
+  <div class="grp"><h2>套餐额度</h2><span class="cnt">4 渠道</span></div>
+  <div class="note">双柱读法：上柱＝<b>已用</b>，下柱＝<b>时间进度</b>（＝(周期−剩余)/周期，如 5 小时档剩 1.2 小时 → (5−1.2)/5＝76%）。上柱超过下柱＝消耗快于时间，标 <span class="bdg bdg-fast">⚠ 消耗偏快</span>。</div>
+
+  <!-- kimi：真实值。5h 档重置 13:22 → 时间进度 (08:53−08:22)/5h＝10%，已用 3%＝健康；本周档已用 39% > 时间 26% ＝烧快示例 -->
+  <div class="card">
+    <div class="chead"><div class="logo">K</div><div class="cinfo"><div class="clabel">Kimi Coding Plan <span class="bdg bdg-plan">套餐</span></div><div class="csub mono">https://api.kimi.com/coding</div></div></div>
+    <div class="tier">
+      <div class="thead"><span class="tname">5 小时额度</span><span class="treset mono">重置 周四 13:22 · 剩 4 小时 29 分</span></div>
+      <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:3%"></div></div><span class="tval mono">3%</span></div>
+      <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:10%"></div></div><span class="tval mono">10%</span></div>
+    </div>
+    <div class="tier">
+      <div class="thead"><span class="tname">本周额度 <span class="bdg bdg-fast">⚠ 消耗偏快</span></span><span class="treset mono">重置 周四 13:38 · 剩 5 天 4 小时</span></div>
+      <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used fast" style="width:39%"></div></div><span class="tval mono fast">39%</span></div>
+      <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:26%"></div></div><span class="tval mono">26%</span></div>
+    </div>
+  </div>
+
+  <!-- glm：造值 21% / 68%。5h 档重置 11:47 → 时间 42%（很省）；本周档重置 周一 00:00 → 时间 77%，68% ＝量大但未快于时间 -->
+  <div class="card">
+    <div class="chead"><div class="logo">智</div><div class="cinfo"><div class="clabel">智谱 GLM Coding Plan <span class="bdg bdg-plan">套餐</span></div><div class="csub mono">https://open.bigmodel.cn/api/anthropic</div></div></div>
+    <div class="tier">
+      <div class="thead"><span class="tname">5 小时额度</span><span class="treset mono">重置 周六 11:47 · 剩 2 小时 54 分</span></div>
+      <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:21%"></div></div><span class="tval mono">21%</span></div>
+      <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:42%"></div></div><span class="tval mono">42%</span></div>
+    </div>
+    <div class="tier">
+      <div class="thead"><span class="tname">本周额度</span><span class="treset mono">重置 周一 00:00 · 剩 1 天 15 小时</span></div>
+      <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:68%"></div></div><span class="tval mono">68%</span></div>
+      <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:77%"></div></div><span class="tval mono">77%</span></div>
+    </div>
+  </div>
+
+  <!-- minimax：造值。每日档重置 23:59 → 时间 37%，已用 12%；本周档重置 周三 15:20 → 时间 39%，已用 25%（均健康） -->
+  <div class="card">
+    <div class="chead"><div class="logo">M</div><div class="cinfo"><div class="clabel">MiniMax Coding Plan <span class="bdg bdg-plan">套餐</span></div><div class="csub mono">https://api.minimaxi.com/anthropic</div></div></div>
+    <div class="tier">
+      <div class="thead"><span class="tname">每日额度</span><span class="treset mono">重置 周六 23:59 · 剩 15 小时 06 分</span></div>
+      <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:12%"></div></div><span class="tval mono">12%</span></div>
+      <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:37%"></div></div><span class="tval mono">37%</span></div>
+    </div>
+    <div class="tier">
+      <div class="thead"><span class="tname">本周额度</span><span class="treset mono">重置 周三 15:20 · 剩 4 天 6 小时</span></div>
+      <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:25%"></div></div><span class="tval mono">25%</span></div>
+      <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:39%"></div></div><span class="tval mono">39%</span></div>
+    </div>
+  </div>
+
+  <!-- 月度额度档：当前无数据不展示（tier 模块可直接复用扩档） -->
+
+  <!-- 凭证失效示例：auth 错误态，不画柱，保留上次成功值语义 -->
+  <div class="card">
+    <div class="chead"><div class="logo off">备</div><div class="cinfo"><div class="clabel">智谱 GLM · 备用 <span class="bdg bdg-plan">套餐</span></div><div class="csub mono">https://open.bigmodel.cn/api/anthropic</div></div></div>
+    <div class="err">凭证已失效，请检查 API Key</div>
+    <div class="lastok">上次成功获取：昨天 18:42</div>
+  </div>
+
+  <div class="grp"><h2>充值余额</h2><span class="cnt">2 渠道</span></div>
+  <!-- deepseek 真实值 -->
+  <div class="card">
+    <div class="chead"><div class="logo">D</div><div class="cinfo"><div class="clabel">DeepSeek（按量付费）</div><div class="csub mono">https://api.deepseek.com/anthropic</div></div><span class="amount mono">¥ 9,118.81</span></div>
+  </div>
+  <!-- 余额不足示例 -->
+  <div class="card">
+    <div class="chead"><div class="logo">M</div><div class="cinfo"><div class="clabel">MiniMax · 按量付费 <span class="bdg bdg-low">余额不足</span></div><div class="csub mono">https://api.minimaxi.com/anthropic</div></div><span class="amount mono">¥ 12.40</span></div>
+  </div>
+</div>
+</body>
+</html>

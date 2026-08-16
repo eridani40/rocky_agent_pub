@@ -1,7 +1,7 @@
 /**
  * anthropic_messages 协议 encode 入口（canonical → wire body）
  * 参考: specs/tech/agent/providers_and_models/[P0]llm_protocol_interface.md §3.5/§4
- *       specs/tech/agent/providers_and_models/anthropic_impl.md §4（cache control 2bp）
+ *       specs/tech/agent/providers_and_models/anthropic_impl.md §4（cache control 三断点体系，[v0.0.361]）
  *       specs/research/v0.0.3-anthropic-protocol.md §1（request body 形状）
  *
  * 入参约定：request.messages 假定**已是 logical 视图**（sender 已展平入首块
@@ -11,15 +11,17 @@
  *
  * v0.0.191：impl 物理迁入 plugin（原主干 app/server/src/llm/protocol-encode.ts）。
  * 纯函数 helper 已拆到 ./protocol-encode-helpers.ts（参照 rocky_context/assemble 范式）。
- * wire 行为逐字节不变，UT 守护（含本版本刚修 reminder 过滤口径「最末 message」+
- * cache_control bp#2「最后非 reminder block」）。
  *
- * cache control（[P0]cache_control.md §3，prompt caching 显式 breakpoint 路线）：
- *   每次 encode 注入 2 个 cache_control breakpoint，最大化缓存命中：
- *     1. system prompt：encode 时转 content block array（若原始是 string），给最后一个 block 加 cache_control（bp#1）
- *     2. 跨所有 message 从末尾向前扫第一个非 reminder block：加 cache_control（bp#2，spec §3.2）
- *   并在 encode 各 message 时做 wire 层 reminder 过滤（spec §3.3）：历史 reminder 全 drop、
- *   只有最末 message 保留其最末一个 reminder。ttl 默认 ephemeral（Anthropic 默认 5 分钟）。
+ * [v0.0.361 T5] wire 层 reminder 过滤 + bp#2 避让扫描删除（change_plan §1.3 B' 裁决）：
+ *   历史 reminder 块 append-only 全保留进 wire；bp#2 固定打最末 message 最末 block。
+ *
+ * cache control（[P0]cache_control.md §3，[v0.0.361] 三断点体系——老板 20:34 终版）：
+ *   每次 encode 注入 3 个 cache_control breakpoint（Anthropic 上限 4，合规）：
+ *     1. bp#1：system prompt 末 block（encode 转 content block array，若原始是 string）
+ *     2. bp#T：tools 末位 tool（encodeTools 内注入——tools session 级稳定）
+ *     3. bp#2：最末 message 的最末 block（固定落位，不反向扫避让）
+ *   历史块进 transcript 后字节不变（append-only）→ bp#2 前缀 = 稳定历史 + 本轮新块
+ *   → 每轮命中上一轮缓存条目，只有新块计费。ttl 默认 ephemeral。
  */
 import type { CanonicalRequest, WireBody } from '../../../server/src/llm/protocol';
 import {
@@ -27,7 +29,7 @@ import {
   encodeMessage,
   encodeTools,
   extractSystemText,
-  injectLastNonReminderCacheControl,
+  injectLastMessageCacheControl,
   mergeAdjacentSameRole,
 } from './protocol-encode-helpers';
 
@@ -46,8 +48,8 @@ const EFFORT_WIRE_MAP: Record<'low' | 'high' | 'max', string> = {
 /**
  * 把 canonical 请求编码为 anthropic /v1/messages 的 wire body。
  * 纯函数：不碰网络、不读 config；字段名映射在内部硬编码。
- * 注入 2 个 cache_control breakpoint（system 末 block bp#1 + 跨 message 最末非 reminder block bp#2，
- * spec §3）+ wire 层 reminder 过滤（spec §3.3，历史 reminder 不进 wire）。
+ * 注入 3 个 cache_control breakpoint（system 末 bp#1 + tools 末 bp#T + 最末 message
+ * 最末 block bp#2，[v0.0.361] 三断点体系）+ 历史 reminder 块全保留（不 drop）。
  *
  * request.tools 必须映射到 wire `tools` 字段，否则真实 LLM 看不到工具。
  *   ToolDefinition.inputSchema → anthropic `input_schema`（字段名映射）。
@@ -65,29 +67,19 @@ export function encodeAnthropicMessages(request: CanonicalRequest): WireBody {
   const systemText = extractSystemText(messages);
   const nonSystem = messages.filter((m) => m.role !== 'system');
 
-  // 最末 message 索引（role 不限）：发送给 LLM 的最后一条永远是 user/tool（wire 上映射后都是
-  // user）。[修正] reminder 保留口径从「最末 canonical user message」改为「最末 message」——
-  // 旧口径在 tool 密集 loop 里把 reminder 钉死在历史深处的 user 消息上，指针移动时旧位置
-  // reminder 被 retroactive drop → 已发送前缀在深位置变化 → 隐式 prompt cache（无法控断点，
-  // 只能逐字节持有已发消息）整段崩。新口径：历史 reminder 全 drop，只有最末 message 保留，
-  // drop 只发生在尾部（reminder 恒为所在 message 末块，前缀损失≈零）。
-  const lastMsgIdx = nonSystem.length - 1;
-
-  // 编码 messages：role 映射 tool→user + wire 层 reminder 过滤（§3.3：只留最末 message 的）。
-  // reminderFlags 平行标记每个保留 wire block 是否原为 reminder，供 bp#2 跳过（spec §3.2）。
-  const encoded: Array<Record<string, unknown>> = [];
-  const reminderFlags: boolean[][] = [];
-  nonSystem.forEach((m, idx) => {
-    const r = encodeMessage(m, idx === lastMsgIdx);
-    encoded.push({ role: r.role, content: r.content });
-    reminderFlags.push(r.flags);
+  // 编码 messages：role 映射 tool→user。[v0.0.361 T5] reminder 过滤已删——
+  // 历史 reminder 块 append-only 全保留进 wire（transcript 字节不变 → 前缀稳定）。
+  const encoded: Array<Record<string, unknown>> = nonSystem.map((m) => {
+    const r = encodeMessage(m);
+    return { role: r.role, content: r.content };
   });
-
-  // bp#2 必须在 merge 前：reminder 标记仅 pre-merge 可读；merge 只拼 content、不改顺序。
-  injectLastNonReminderCacheControl(encoded, reminderFlags);
 
   // BUG-002：role 映射后合并相邻同 role，保证 wire 严格 user/assistant 交替。
   const wireMessages = mergeAdjacentSameRole(encoded);
+
+  // [v0.0.361 T5] bp#2 固定落位（merge 后）：最末 wire message 最末 block。
+  // merge 可能拼接同 role content，落位以 wire 终态为准（不再依赖 pre-merge flags）。
+  injectLastMessageCacheControl(wireMessages);
 
   const body: WireBody = {
     model: modelId,

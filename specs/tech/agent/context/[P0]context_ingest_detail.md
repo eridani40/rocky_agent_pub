@@ -3,7 +3,7 @@ type: interface
 title: Context Engine — ingest 详解
 priority: P0
 status: active
-updated: 2026-07-05
+updated: 2026-08-15
 since: v0.0.8
 ---
 
@@ -80,7 +80,7 @@ interface IngestCtx {
 |---|---|---|---|
 | `query_truncate` | 1 | `{ queryTruncateChars: 8000 }` | 截断过长的 user query message（超阈值原文 offload 为 raw） |
 | `tool_result_truncate` | 2 | `{ toolResultTruncateChars: 25000 }` | 截断过大的 tool_result（超阈值 offload 为 tool_result）；过长 tool call 参数同理 |
-| `system_reminder_injector` | 3 | —（reminder provider 各自 config） | 跑 `system_reminder` provider 链，聚合 reminder，**只针对 ingest 最后一条且必须是 user message**，追加 reminder content block 到其 content 末尾（持久化进 transcript；见 `system_reminder.md`） |
+| `system_reminder_injector` | 3 | —（reminder provider 各自 config） | 跑 `system_reminder` provider 链聚合 reminder，追加 text block 到**最后一条触发 message**（user/tool/a2a，v0.0.274 放宽；v0.0.361 双模式：full 轮=时间固定段+动态 provider 链全量+queueClearAll，incremental 轮=时间固定段+queueDrain 增量行）的 content 末尾，持久化进 transcript；见 `system_reminder.md` |
 | `store_sink` ★ v0.0.49 D15 | 4 | — | **default + forked 都 active 的 sink**（chain 尾，v0.0.66）：`ctx.store.appendMessages(ctx.config.sessionId, messages)` 写 store；store 由 `session_store` EP 按 scope 选 impl（default 写持久 transcript / forked 写内存数组），同 impl 透传不同 store 实现；`ctx.store` 空 → no-op（UT 未注入的防御性 fallback） |
 | ~~`buffer_sink`~~ | — | — | **[v0.0.66] 已退役**（manifest 不再登记）：原 forked 专属 sink `ctx.buffer.push(...)` 写 buffer；由 `store_sink` + `session_store` EP（forked 选 `in_memory_session_store`）取代 |
 

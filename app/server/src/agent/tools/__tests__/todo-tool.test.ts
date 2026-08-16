@@ -31,7 +31,7 @@ beforeEach(() => {
 afterEach(() => { fs.rmSync(tmpRoot, { recursive: true, force: true }); });
 
 /** 构造 rtc（sessionDeps.todoStore 注入 + selfSessionId） */
-function makeRtc(over: { sessionId?: string; todoStore?: TodoStore | null } = {}): AgentToolRuntimeContext {
+function makeRtc(over: { sessionId?: string; todoStore?: TodoStore | null; dataDir?: string | null } = {}): AgentToolRuntimeContext {
   return {
     parentSessionId: 'PARENT-1',
     parentRunId: 'r',
@@ -43,7 +43,11 @@ function makeRtc(over: { sessionId?: string; todoStore?: TodoStore | null } = {}
     selfName: 'self',
     agentManager: {} as never,
     store: {} as never,
-    sessionDeps: { todoStore: over.todoStore === undefined ? store : over.todoStore } as never,
+    sessionDeps: {
+      todoStore: over.todoStore === undefined ? store : over.todoStore,
+      // [v0.0.361 T4] reminder queue 写入根（null → 模拟缺省 no-op 路径）
+      ...(over.dataDir === null ? {} : { dataDir: over.dataDir ?? tmpRoot }),
+    } as never,
   };
 }
 
@@ -277,5 +281,85 @@ describe('todo selfSessionId 索引 + 错误码', () => {
     const { isError, text } = await run(rtc, { action: 'list' });
     expect(isError).toBe(true);
     expect(text).toMatch(/todoStore not injected/);
+  });
+});
+
+// ============================================================
+// [v0.0.361 T4] reminder queue 写入（change_plan §1.5/§2 样例 A）
+// ============================================================
+describe('todo reminder queue 写入', () => {
+  /** 读 reminder_queue.json entries */
+  function readQueue(sid: string): Array<{ key: string; value: string }> {
+    const p = path.join(tmpRoot, 'sessions', sid, 'reminder_queue.json');
+    if (!fs.existsSync(p)) return [];
+    return (JSON.parse(fs.readFileSync(p, 'utf8')) as { entries: Array<{ key: string; value: string }> }).entries;
+  }
+
+  it('add_item → todo:{itemId} 渲染行 `[todo] item「X」→ {status}`（仅本 session）', async () => {
+    const rtc = makeRtc();
+    const { parsed } = await run(rtc, { action: 'add_item', desc: '落四件套' });
+    const itemId = (parsed as { itemId: string }).itemId;
+    expect(readQueue('SESS-1').map((e) => [e.key, e.value])).toEqual([
+      [`todo:${itemId}`, '[todo] item「落四件套」→ not_started'],
+    ]);
+    expect(readQueue('OTHER')).toEqual([]);
+  });
+
+  it('update_item → 同 key 删旧追新（状态变化覆盖）', async () => {
+    const rtc = makeRtc();
+    const { parsed } = await run(rtc, { action: 'add_item', desc: 'X' });
+    const itemId = (parsed as { itemId: string }).itemId;
+    await run(rtc, { action: 'update_item', itemId, patch: { status: 'in_progress' } });
+    const q = readQueue('SESS-1');
+    expect(q).toHaveLength(1);
+    expect(q[0]).toMatchObject({ key: `todo:${itemId}`, value: '[todo] item「X」→ in_progress' });
+  });
+
+  it('add_step / update_step → item + step 双层渲染行', async () => {
+    const rtc = makeRtc();
+    const { parsed } = await run(rtc, { action: 'add_item', desc: '落四件套' });
+    const itemId = (parsed as { itemId: string }).itemId;
+    const { parsed: addStep } = await run(rtc, { action: 'add_step', itemId, desc: '写 change_plan' });
+    const stepId = (addStep as { stepId: string }).stepId;
+    await run(rtc, { action: 'update_step', itemId, stepId, patch: { status: 'done' } });
+    const q = readQueue('SESS-1');
+    // add_item + add_step + update_step 三条（不同 key 不去重：step 行 key 也是 todo:{itemId}，同 key 覆盖）
+    expect(q.map((e) => e.key)).toEqual([`todo:${itemId}`]);
+    expect(q[0]!.value).toBe('[todo] item「落四件套」step「写 change_plan」→ done');
+  });
+
+  it('delete_item → 「已删除」行（§1.2 删除语义：显式文本非 tombstone）', async () => {
+    const rtc = makeRtc();
+    const { parsed } = await run(rtc, { action: 'add_item', desc: '旧任务' });
+    const itemId = (parsed as { itemId: string }).itemId;
+    await run(rtc, { action: 'delete_item', itemId });
+    const q = readQueue('SESS-1');
+    expect(q).toHaveLength(1);
+    expect(q[0]).toMatchObject({ key: `todo:${itemId}`, value: '[todo] item「旧任务」已删除' });
+  });
+
+  it('cleanup_finished → 每个 done/skipped item 各一条「已删除」行', async () => {
+    const rtc = makeRtc();
+    await run(rtc, { action: 'add_item', desc: 'A' });
+    await run(rtc, { action: 'add_item', desc: 'B' });
+    await run(rtc, { action: 'add_item', desc: 'C' });
+    const list = (await run(rtc, { action: 'list' })).parsed as Array<{ id: string; desc: string }>;
+    for (const it of list) {
+      if (it.desc !== 'C') await run(rtc, { action: 'update_item', itemId: it.id, patch: { status: 'done' } });
+    }
+    await run(rtc, { action: 'cleanup_finished' });
+    const q = readQueue('SESS-1');
+    const deleted = q.map((e) => e.value);
+    expect(deleted).toContain('[todo] item「A」已删除');
+    expect(deleted).toContain('[todo] item「B」已删除');
+    expect(deleted).not.toContain(expect.stringContaining('item「C」已删除') as unknown as string);
+  });
+
+  it('dataDir 缺省 → 变化行 no-op（工具主路径不受影响）', async () => {
+    const rtc = makeRtc({ dataDir: null });
+    const { isError, parsed } = await run(rtc, { action: 'add_item', desc: 'X' });
+    expect(isError).toBe(false);
+    expect((parsed as { itemId: string }).itemId).toBeTruthy();
+    expect(readQueue('SESS-1')).toEqual([]);
   });
 });

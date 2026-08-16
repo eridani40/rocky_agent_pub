@@ -30,7 +30,11 @@
         "description": "Anthropic LLM built-in plugin (provider auth + messages protocol translation)",
         "impl": {
           "anthropic_compatible": { "description": "Anthropic-compatible API auth and model metadata (API Key / base URL / model list)" },
-          "anthropic_messages": { "description": "Anthropic Messages API request/response protocol translation (body shaping + path/contentType)" }
+          "anthropic_messages": { "description": "Anthropic Messages API request/response protocol translation (body shaping + path/contentType)" },
+          "kimi_coding_plan": { "description": "Kimi Coding Plan subscription (Anthropic protocol + 5-hour/weekly quota query)" },
+          "glm_coding_plan": { "description": "Zhipu GLM Coding Plan subscription (Anthropic protocol + 5-hour/weekly quota query)" },
+          "minimax_coding_plan": { "description": "MiniMax Coding Plan subscription (Anthropic protocol + 5-hour/weekly quota query)" },
+          "deepseek_api": { "description": "DeepSeek pay-as-you-go (Anthropic protocol + account balance query)" }
         }
       },
       "zhipu_web_search": {
@@ -111,6 +115,7 @@
           "memory_group": { "description": "[v0.0.205] System prompt group-level shared memory fragment (.rocky/memory/ under the squad shared workspace, L0 injection; stable tier; priority 400)" },
           "squad_role": { "description": "[v0.0.33.3] Squad role spec fragment (leader/mate/squad_chat.md fixed fragment; empty for subagent/standalone; priority 950 stable; replaces member.systemPrompt as identity body)" },
           "team_roster": { "description": "[v0.0.33.2] Squad team roster fragment (invisible to subagents; stable tier; memberIds → name + role + sessionId)" },
+          "session_states": { "description": "[v0.0.361] Session states static section (env / workspace / team-drive path into system prompt; logic migrated from retired env/workspace/squad_workspace reminder providers)" },
           "parent_task": { "description": "[v0.0.33.2] Parent task fragment (subagent only; stable tier; spawn input task)" },
           "tier_sort": { "description": "System prompt reducer: sort fragments by tier (identity > rules > others)" },
           "dedup": { "description": "System prompt reducer: dedupe fragments (last write wins per key)" },
@@ -148,13 +153,9 @@
           "role_merge": { "description": "Assemble reducer: merge adjacent same-role messages (consecutive user/assistant merged)" },
           "snip_handler": { "description": "Assemble reducer: handle snip markers (placeholder at compaction boundary)" },
           "append_passthrough": { "description": "[v0.0.40 D1=B] Forked-scope-only reducer: pass buffer through as-is without rebuild/head-tail/summary (disabled in default scope)" },
-          "env": { "description": "System reminder: environment info (OS / shell / cwd and other runtime context)" },
-          "time": { "description": "System reminder: current time (current date for LLM time awareness)" },
-          "workspace": { "description": "System reminder: workspace state (current workspace / grep context)" },
           "tool_error": { "description": "System reminder: tool error hint (guidance when tool invocation fails)" },
           "todo": { "description": "System reminder: todo list (todo progress tracking hint)" },
           "squad_agents_status": { "description": "[v0.0.273] Squad unified all-member status reminder (dispatches by leader/mate/squad/subagent; lists all members running/idle + presence; SquadChat row gated by enableGroupChat; replaces reachable_agents + squad_team_status)" },
-          "squad_workspace": { "description": "[v0.0.111] Squad team workspace reminder (leader + mate; injects team drive root <dataDir>/squads/<squadId>; coexists with personal workspace)" },
           "squad_task": { "description": "[v0.0.240] Squad task reminder (leader sees all active tasks / mate sees owner=me ∪ blocking-me; task = panorama builtin entity; archived excluded; emitted every round, dedup-reduced)" },
           "threshold_should_compact": {
             "description": "[v0.0.40] Compact predicate: (totalTokens + maxOutputTokens) / tokenLimit > compactRatio (default 0.6) → true; proactive compaction, not wall-bump",

@@ -21,8 +21,9 @@ import { Icon } from './studio-icons';
 
 const PIN_KEY = 'studio.squadPins';
 
-/** 读 pin 列表（JSON string[]；损坏 → [] 不 crash） */
-function readPins(): string[] {
+/** 读 pin 列表（JSON string[]；损坏 → [] 不 crash）。
+ *  [bugfix 2026-08-15] 导出：page-studio 挂载默认选中需感知置顶（默认选中=列表视觉第一行）。 */
+export function readPins(): string[] {
   try {
     const raw = localStorage.getItem(PIN_KEY);
     if (!raw) return [];

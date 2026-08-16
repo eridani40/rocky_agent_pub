@@ -10,8 +10,8 @@
  *     leader/subagent/非 squad/旁路 run → 不注入（零通知）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { truncateText, formatMateExitNotify } from '../mate-exit-notify';
-import type { ContentBlock } from '../../message/types';
+import { truncateText, formatMateExitNotify, hasRecentLeaderReport } from '../mate-exit-notify';
+import type { ContentBlock, Message } from '../../message/types';
 import type { StopReason } from '../agent-event-types';
 
 describe('truncateText — 前后各 limit 截断', () => {
@@ -95,9 +95,9 @@ describe('formatMateExitNotify — block 过滤 + 渲染', () => {
     }
   });
 
-  it('[v0.0.338 M1] interrupted → 退出原因行追加「（由用户中断，如需要可向用户查证）」且原值保留', () => {
+  it('[v0.0.338 M1] interrupted → 退出原因行追加「（由用户主动中断，无需处理）」且原值保留', () => {
     const result = formatMateExitNotify({ ...base, stopReason: 'interrupted' });
-    expect(result).toContain('退出原因: interrupted（由用户中断，如需要可向用户查证）');
+    expect(result).toContain('退出原因: interrupted（由用户主动中断，无需处理）');
     expect(result).toContain('退出原因: interrupted'); // 原枚举值保留
   });
 
@@ -134,6 +134,93 @@ describe('formatMateExitNotify — block 过滤 + 渲染', () => {
   });
 });
 
+// ── [v0.0.362] hasRecentLeaderReport run-end 汇报去重判定（纯函数六面） ──
+const LEADER_SID = '01LEADER_SID_0001';
+
+/** 造一条 assistant 消息（blocks 为 content） */
+function asstMsg(blocks: ContentBlock[], i: number): Message {
+  return { id: `m-${i}`, sessionId: 'sess-mate', role: 'assistant', content: blocks };
+}
+
+/** 造 send_message tool_call block（target 三形态可变） */
+function sendCall(id: string, target: unknown): ContentBlock {
+  return { type: 'tool_call', id, name: 'send_message', arguments: { target, content: [{ type: 'text', text: '汇报' }] } };
+}
+
+/** 造普通轮（无 send_message，如 read 工具） */
+function otherCall(id: string): ContentBlock {
+  return { type: 'tool_call', id, name: 'read', arguments: { filePath: '/tmp/a' } };
+}
+
+describe('hasRecentLeaderReport — [v0.0.362] run-end 汇报去重判定', () => {
+  it('命中跳过：字符串 target="parent"（mate 的 parent 即 leader）', () => {
+    const msgs = [asstMsg([sendCall('t1', 'parent')], 1)];
+    expect(hasRecentLeaderReport(msgs, undefined, LEADER_SID)).toBe(true);
+  });
+
+  it('命中跳过：字符串 target === leaderSid 显式 sessionId', () => {
+    const msgs = [asstMsg([sendCall('t1', LEADER_SID)], 1)];
+    expect(hasRecentLeaderReport(msgs, undefined, LEADER_SID)).toBe(true);
+  });
+
+  it('命中跳过：AgentRef 形态 target.sessionId === leaderSid', () => {
+    const msgs = [asstMsg([sendCall('t1', { type: 'agent', sessionId: LEADER_SID, name: 'Darvin' })], 1)];
+    expect(hasRecentLeaderReport(msgs, undefined, LEADER_SID)).toBe(true);
+  });
+
+  it('未命中照发：窗口内无 send_message（仅其他工具）', () => {
+    const msgs = [asstMsg([otherCall('t1')], 1), asstMsg([{ type: 'text', text: 'done' }], 2)];
+    expect(hasRecentLeaderReport(msgs, undefined, LEADER_SID)).toBe(false);
+  });
+
+  it('未命中照发：send_message target 指向他人（sid 不等 / AgentRef sid 不等）', () => {
+    const msgs = [
+      asstMsg([sendCall('t1', '01OTHER_SID_0002')], 1),
+      asstMsg([sendCall('t2', { type: 'agent', sessionId: '01OTHER_SID_0003' })], 2),
+    ];
+    expect(hasRecentLeaderReport(msgs, undefined, LEADER_SID)).toBe(false);
+  });
+
+  it('窗口边界：命中调用在第 4 轮（超出 3 轮窗口）→ 不命中', () => {
+    const msgs = [
+      asstMsg([sendCall('t0', 'parent')], 1), // 第 1 轮：命中调用（将被滑出窗口）
+      asstMsg([{ type: 'text', text: 'r2' }], 2),
+      asstMsg([{ type: 'text', text: 'r3' }], 3),
+      asstMsg([{ type: 'text', text: 'r4' }], 4),
+    ];
+    expect(hasRecentLeaderReport(msgs, undefined, LEADER_SID)).toBe(false);
+  });
+
+  it('lastAssistantContent 伪消息参与窗口：末轮 send_message 不在 snapshot 时仍命中', () => {
+    // snapshot 3 轮均无 send_message；末轮（不在 snapshot）有 → 伪消息补位后命中
+    const msgs = [asstMsg([{ type: 'text', text: 'r1' }], 1), asstMsg([{ type: 'text', text: 'r2' }], 2), asstMsg([{ type: 'text', text: 'r3' }], 3)];
+    expect(hasRecentLeaderReport(msgs, [sendCall('t9', 'parent')], LEADER_SID)).toBe(true);
+  });
+
+  it('伪消息把第 1 轮命中调用滑出窗口：3 snapshot 轮 + 伪消息 → 窗口=后 3，第 1 轮不命中', () => {
+    const msgs = [
+      asstMsg([sendCall('t0', 'parent')], 1), // 第 1 轮（滑出）
+      asstMsg([{ type: 'text', text: 'r2' }], 2),
+      asstMsg([{ type: 'text', text: 'r3' }], 3),
+    ];
+    const last: ContentBlock[] = [{ type: 'text', text: 'final' }]; // 伪消息无 send_message
+    expect(hasRecentLeaderReport(msgs, last, LEADER_SID)).toBe(false);
+  });
+
+  it('snapshot null（防御）→ 未命中照发', () => {
+    expect(hasRecentLeaderReport(null, [sendCall('t1', 'parent')], LEADER_SID)).toBe(false);
+    expect(hasRecentLeaderReport(undefined, undefined, LEADER_SID)).toBe(false);
+  });
+
+  it('user/tool 消息不参与窗口（只数 assistant 轮）', () => {
+    const msgs = [
+      { id: 'u1', sessionId: 's', role: 'user', content: [sendCall('t1', 'parent')] as ContentBlock[] } as Message,
+      { id: 'r1', sessionId: 's', role: 'assistant', content: [{ type: 'text', text: 'ok' }] } as Message,
+    ];
+    expect(hasRecentLeaderReport(msgs, undefined, LEADER_SID)).toBe(false);
+  });
+});
+
 // ── buildRunDeps 装配条件（R2 触发过滤：谁装配谁触发） ──
 // mock RunLifecyclePort：断言 buildRunDeps 注入 mateExitNotify 标记（RunLifecyclePort 触发行为在 run-lifecycle-port.test.ts 直测）
 // 注意：bun --bun 下 vi.mock 相对路径字面量不生效（C2 修复）——须用 require('path').resolve(__dirname, ...)
@@ -146,7 +233,6 @@ import type { SessionTypePolicy } from '../session-type-policy';
 import type { ResolvedSessionProfile } from '../session-type-profile-loader';
 import { SessionKind } from '@app/shared';
 import type { SessionConfig } from '../context-types';
-import type { Message } from '../../message/types';
 import type { ReplayableEventBus } from '../event-bus';
 import type { ContextEngine } from '../context-engine';
 import type { SessionStore } from '../session-store';

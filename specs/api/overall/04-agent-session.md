@@ -528,7 +528,7 @@ q: string;   // 搜索关键词（非空；空 → 400）
 interface WorkspaceSearchResponse {
   files: string[];        // 文件名匹配的全路径（相对 workspaceDir，POSIX 风格，如 "src/app.ts"）
   dirs: string[];         // 文件夹名匹配的全路径（相对 workspaceDir，如 "src/components"）
-  truncated?: boolean;    // files+dirs 合计达 200 上限截断时 true（前端提示「结果过多」）
+  truncated?: boolean;    // files+dirs 合计达 100 上限截断时 true（前端提示「结果过多」；SEARCH_LIMIT=100 单一源）
 }
 ```
 
@@ -538,9 +538,9 @@ interface WorkspaceSearchResponse {
 3. query `q` 缺失 / 空串（trim 后）→ `400` `{ error: 'q required' }`。
 4. 取 `session.workspaceDir` 缺失 → `500`。
 5. `realpathSync(workspaceDir)` → realRoot（异常 → 500）；`whitelistResolve(realRoot, '')` 校验根可读（复用 tree 安全面）。
-6. 递归遍历（BFS/DFS 均可）：**跳过 `node_modules` / `.git` 目录**（复用 `session-workspace.ts` IGNORED_NAMES 集合）；symlink 目录**跟随**（与 tree 语义一致：workspace 内 symlink = 授权）——但**不跟随到 workspace 外**（目录递归时遇 symlink→dir 目标在 workspace 外 → 跳过该 symlink，防循环/越权）；symlink→file 可列入 files。
+6. 递归遍历（BFS/DFS 均可）：**跳过 `node_modules` / `.git` 目录**（复用 `session-workspace.ts` IGNORED_NAMES 集合）；symlink 目录**受控跟随**（v0.0.360 起与 tree 链式授权同模型：workspace 内 symlink = 用户放置 = 授权，目标可在 workspace 外）；realpath visited 防循环（祖先/自指/环归一后同路径 → 跳过）；broken symlink 跳过；symlink→file 可列入 files。
 7. 匹配规则：`basename(path)` 大小写不敏感 substring 包含 q。文件命中 → `files.push(relPath)`；目录命中 → `dirs.push(relPath)`（**不递归其下层**——前端拿到 dir 后展示该目录展开内容，后端只返 dir 路径本身）。
-8. 上限：files+dirs 合计 **200 条**；超限截断 + `truncated: true`（超限后停止继续遍历）。
+8. 上限：files+dirs 合计 **100 条**（`SEARCH_LIMIT=100` 单一源，v0.0.324 从 200 下调）；超限截断 + `truncated: true`（超限后停止继续遍历）。
 9. 无匹配 → `200 { files: [], dirs: [] }`（非 404）。
 
 **示例**：
@@ -549,7 +549,7 @@ curl "http://127.0.0.1:3710/session/01KV.../workspace/search?q=helper"
 # → 200 {"files":["src/utils/helper.ts"],"dirs":["src/components"],"truncated":false}
 ```
 
-> 该端点属确定性搜索契约，AT 覆盖见 `tests/api/workspace/workspace_search_tc3/case.yaml`（v0.0.320 新增 3 条 AT：file version / save 409 / search，均真实调 API）。
+> 该端点属确定性搜索契约，AT 覆盖见 `tests/api/workspace/workspace_search_tc3/case.yaml`（v0.0.320 新增 3 条 AT：file version / save 409 / search，均真实调 API）。v0.0.360 symlink 跟随语义由 UT 覆盖（handler 层 session-workspace-search.test.ts），AT case 不新增（既有 workspace_search_tc3 搜索行为回归即可）。
 
 ### 2.6.9 `GET /session/:id/workspace/stat?path=` — workspace 文件大小判定（v0.0.339 新增）
 
@@ -687,7 +687,7 @@ interface PostMessageBody {
 
 > **[v0.0.15] `activate` 测试专用守卫**：`activate=false` 仅在 `NODE_ENV=test` 时生效；生产环境忽略（始终 activate）。AT 测试用此构造「多条消息在 inbox 排队」确定性场景（不依赖 LLM 速度维持 run），保证 cancel POST 在任何时序下都能命中仍在 inbox 的排队消息。生产 API 不暴露 skip-activate 行为。
 
-**run 进度**：前端**不**从这个端点拿流式响应；改通过 `POST /sse/subscribe { topic:"agent_loop", group:"session_id:<sid>_amt:current" }` 订阅，经 SSE 收 `run_start` / `message_*` / `tool_*` / `run_end`（见 §4）。`_amt:current` 为主对话 mode（v0.0.16，agent_interface.md §4）；forked 旁路 mode（summary / memory_extract）使用 `_amt:<modeKey>` 各自独立 group，不污染主对话流。
+**run 进度**：前端**不**从这个端点拿流式响应；改通过 `POST /sse/subscribe { topic:"agent_loop", group:"session_id:<sid>_amt:main" }` 订阅，经 SSE 收 `run_start` / `message_*` / `tool_*` / `run_end`（见 §4）。`_amt:main` 为主对话 runKind（v0.0.204 由 `current` 改名，闭合枚举 main/summary/consolidate）；forked 旁路 run（summary / consolidate）使用 `_amt:<runKind>` 各自独立 group，不污染主对话流。
 
 **错误**：`404` session 不存在；`400` `content` 空；`400` `providerId` 提供但不命中；`400` `{code, message, detail}` **model 未配置**（详见下条 error shell）。
 
@@ -851,7 +851,7 @@ interface PendingToolCall {
 **SSE 帧格式**（每帧一条 `data:` 行，JSON payload）：
 
 ```
-data: {"topic":"agent_loop","group":"session_id:01KV..._amt:current","data":<AgentEvent>,"timestamp":"2026-06-21T...","subId":"01J..."}
+data: {"topic":"agent_loop","group":"session_id:01KV..._amt:main","data":<AgentEvent>,"timestamp":"2026-06-21T...","subId":"01J..."}
 ```
 
 - `data` = `AgentEvent`（见 `specs/tech/agent/agent_interface_and_loop/[P0]agent_event.md` §8，topic=`agent_loop`）。逐事件 payload 字段以该 tech 文档为权威源，本 API 文档不重复展开。
@@ -868,7 +868,7 @@ data: {"topic":"agent_loop","group":"session_id:01KV..._amt:current","data":<Age
 ```typescript
 interface SubscribeBody {
   topic: string;            // "agent_loop"（v0.0.8）/ "session_panel"（v0.0.12）/ "session_meta"（v0.0.27 加）
-  group: string;            // "session_id:<sid>_amt:current"（v0.0.16：主对话 = `_amt:current`，forked = `_amt:<modeKey>`）/ "_all"（v0.0.27：session_meta 共享广播 group）
+  group: string;            // "session_id:<sid>_amt:main"（主对话 = `_amt:main`，v0.0.204 由 `current` 改名；forked = `_amt:<runKind>`）/ "_all"（v0.0.27：session_meta 共享广播 group）
   /** [v0.0.88] 订阅唯一 id（前端 subscribe() 内部生成 ULID）；后端帧携带此 id 下行，前端按 id 路由到 handler。必填（旧客户端不传 → 后端生成 ULID 兜底）。**1 次订阅 = 1 个 sub id**——不用 component id，组件多订阅各生成独立 subId 不撞车。 */
   subId?: string;
 }
@@ -876,7 +876,7 @@ interface SubscribeBody {
 
 **幂等**：同 (topic,group,subId) 重复订阅不重复登记（hub `subs` key=`${topic}:${group}` 去重；channel `subscribers` key=subId 去重）。同 (topic,group) 不同 subId 视为多订阅（channel `groupSubs[key] = Set<subId>`，refcount +1）。
 
-> **[v0.0.12] session_panel topic**：放开 `session_panel` 订阅以收 `session_status_update`（运行态变更，见 `specs/tech/agent/session/[P0]session_event.md` §3）。前端进入会话时双订阅：`agent_loop:<sid>_amt:current`（流式消息，v0.0.16 加 `_amt:current` 主对话 mode）+ `session_panel:<sid>`（state/running/currentRunId 实时更新，session 级无 modeKey）。
+> **[v0.0.12] session_panel topic**：放开 `session_panel` 订阅以收 `session_status_update`（运行态变更，见 `specs/tech/agent/session/[P0]session_event.md` §3）。前端进入会话时双订阅：`agent_loop:<sid>_amt:main`（流式消息，主对话 group 后缀 `_amt:main`，v0.0.204 由 `current` 改名）+ `session_panel:<sid>`（state/running/currentRunId 实时更新，session 级无 modeKey）。
 >
 > **[v0.0.27] session_meta topic（广播，会话列表订阅）**：放开 `session_meta` 订阅以收 `session_meta_update`（session 完整最新 meta 视图，承载「session 变了」的通知——含 unread 红点实时出现/消失、running/title/workspaceDir 等所有 meta 字段变更）。**[v0.0.55]** `summaryTask` 持久化字段从 Session 删除（compact 进度改由 SessionTaskLock 内存态承载）。**[v0.0.78.bug]** SSE `summary_task_update` 事件恢复推送（SessionTaskLock CAS 成功后 emit；此前 v0.0.55 误删导致 CompactBtn spinner 信号丢失）；`SessionMetaView.summaryTask` 字段恢复为 optional（broadcaster 不填，前端从单独事件取，见 specs/tech/agent/session/[P0]session_event.md §3a.3）。
 > - **group = `_all`（共享广播 group）**：所有 session 的 meta 变更都 emit 到这一个 group；会话列表 subscribe `(session_meta, _all)` **一次**即收所有 session 的 meta。**非 per-session**。
@@ -942,7 +942,7 @@ interface SummaryInfo {
 //   简写键 current/sub/forked/total（非全称键）+ ratio + contextWindowUsage? + 4 cacheRate。
 //   v0.0.14 起三分区真累加（v0.0.8-0.0.13 是空对象 + ratio=1.0）；v0.0.16 加 4 cacheRate 派生。
 interface SessionUsageView {
-  current: Record<string, number>;             // 当前会话主对话分区（modeKey=current 累加）
+  current: Record<string, number>;             // 当前会话主对话分区（runKind=main 累加；响应键名 current 为对外契约，不随 v0.0.204 改名）
   sub: Record<string, number>;                 // 子 agent 上报分区（递归 sub 累加）
   forked: Record<string, number>;              // forked 旁路分区（compact 等）
   total: Record<string, number>;               // 三分区合计
@@ -1049,7 +1049,7 @@ interface ClearBody {
 
 **行为**（详见 `specs/tech/agent/session/[P0]session_clear.md`）：
 1. **force=false（默认）前置并发清理**：
-   - 若 `session.state ∈ {running, interrupting}` → `POST /session/:id/abort`（4 步收尾，runId+modeKey="current"）→ 等 state 转 interrupted（poll 100ms × N，超时 fallback 强制清空）。
+   - 若 `session.state ∈ {running, interrupting}` → `POST /session/:id/abort`（4 步收尾，runId+runKind="main"）→ 等 state 转 interrupted（poll 100ms × N，超时 fallback 强制清空）。
    - **[v0.0.55] compact 任务清理改 SessionTaskLock**：若 `SessionTaskLock.getState(sid, 'compact').status === "running"` → `SessionTaskLock.markFailed(sid, 'compact', 'cleared')` + 清 forked agent buffer（`bus.clearReplay(session_id:${sid}_amt:summary)`）。原 `markSummaryFailed` 调用替换；语义不变（compact 任务被中断标 failed）。
 2. `sessionStore.clearSession(sid)`（单事务清空 §3 全部范围：transcript / summary / runs / usage 三分区 + RatioWindow + contextWindowUsage / state=idle）。`tokenLimit` 保留（来自 modelConfig，非累加值）。**[v0.0.55]** summaryTask 字段已删（不进 clear 范围；compact 锁在内存，clear 不动）。
 3. emit 事件：

@@ -45,6 +45,8 @@ describe('SectionDefaultModelsAndRequest', () => {
   const defaultProps = {
     defaultModelsDraft: { chat: undefined },
     onDefaultModelsChange: vi.fn(),
+    mountDraft: null as string | null,
+    onMountChange: vi.fn(),
     llmRequestDraft: { stall_tool_s: 120, max_attempts: 3 },
     onLlmRequestChange: vi.fn(),
   };
@@ -92,7 +94,7 @@ describe('SectionDefaultModelsAndRequest', () => {
 
   it('未配 chat → trigger 显「选择 model」占位', () => {
     render(<SectionDefaultModelsAndRequest {...defaultProps} />);
-    expect(screen.getByRole('button', { name: '选择 model' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选择模型或方案' })).toBeTruthy();
   });
 
   it('[v0.0.230 返工] 已配 chat → trigger 显 provider / model（复用 ModelPicker 风格）', () => {
@@ -104,16 +106,18 @@ describe('SectionDefaultModelsAndRequest', () => {
 
   it('[v0.0.230 返工] 打开 picker → 选项显 provider / model 且无搜索框', () => {
     render(<SectionDefaultModelsAndRequest {...defaultProps} />);
-    fireEvent.click(screen.getByRole('button', { name: '选择 model' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择模型或方案' }));
     expect(screen.getByRole('option', { name: /MiniMax \/ glm-5\.2/ })).toBeTruthy();
-    // 用户要求：复用 squad 同款 ModelPicker——无搜索（与 KeyModelPicker 的 searchable 面板区分）
-    expect(screen.queryByPlaceholderText('搜索模型...')).toBeNull();
+    // [v0.0.347 T6] ModelOrPlanPicker 带搜索框（复刻 ModelPickerPanel searchable）+ 两组标题恒显
+    expect(document.querySelector('[data-action-key="common.model-or-plan.search"]')).toBeTruthy();
+    expect(screen.getByText('模型')).toBeTruthy();
+    expect(screen.getByText('方案')).toBeTruthy();
   });
 
   it('[v0.0.230 返工] 点 chat picker 选项 → onDefaultModelsChange("chat", "glm-5.2")（只存 modelId）', () => {
     const onDefaultModelsChange = vi.fn();
     render(<SectionDefaultModelsAndRequest {...defaultProps} onDefaultModelsChange={onDefaultModelsChange} />);
-    fireEvent.click(screen.getByRole('button', { name: '选择 model' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择模型或方案' }));
     fireEvent.click(screen.getByRole('option', { name: /MiniMax \/ glm-5\.2/ }));
     expect(onDefaultModelsChange).toHaveBeenCalledWith('chat', 'glm-5.2');
   });
@@ -142,7 +146,7 @@ describe('SectionDefaultModelsAndRequest', () => {
     render(
       <SectionDefaultModelsAndRequest {...defaultProps} defaultModelsDraft={{ chat: 'ghost-model' }} />,
     );
-    expect(screen.getByRole('button', { name: '选择 model' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选择模型或方案' })).toBeTruthy();
     const clearBtn = screen.getByRole('button', { name: '清除' });
     expect(clearBtn.className).not.toContain('invisible');
   });

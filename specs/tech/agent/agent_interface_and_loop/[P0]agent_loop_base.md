@@ -131,7 +131,7 @@ async function executeTools(input: ExecuteToolsInput): Promise<ToolResultBlock[]
   - eager-drain 的 `allowedTools` = 全集（= toolDefinitions 的 name 集合）→ 等价不过滤
   - forked 的 `allowedTools` = option 白名单 → 拦截
 - **每个 tool step 前检查 `controller.aborted`**（已在执行中的工具不可中断，见 agent_interrupt §4 场景 B/C）
-- emit `tool_result_start → delta* → end`；result 返回给 caller 决定 ingest / 追加内存
+- emit `tool_result_start → delta* → end`；result 返回给 caller 决定 ingest / 追加内存。**[v0.0.354] emit 时机逐个化**：executeAndEmit 经 engine `opts.onResult` 回调注入——每个 result 到达即 emit 三帧 + start/endToolSpan（不再 await 全批后同 tick 连发）；span startTime=该 tool 真实开始时刻（串行推导：上一 result 完成时刻），时长回归真实执行时长不含排队。返回值 `{results, pending}` 与帧序不变式不变（每 result 三帧相邻、全部 result 帧先于 `tool_execution_end`）。
 - **HITL 悬挂**：底层 `ToolExecutionEngine.execute` 返签名改 `{ results, pending }`（悬挂型 tool 经 `Tool.interaction()` 钩子产 pending wrapper 不真跑 run）；`executeAndEmit` 包装层透传 pending 给 caller（runReActLoop ③ 段据 pending.length>0 决定 StopReason=tool_pending + 落盘 + suspended）。详见 `../tools/[P0]tool_execution_engine.md §4/§5` + `agent_hitl.md §1`。
 - **HITL 回填路径也 emit**：占位 pending block 首发时经本原语 emit 三帧；后续 tool_reply 回填**重新执行/编辑**该 block（`handleToolReply` 走 prepareStage 而非本原语）后，同样补发 tool_result 三帧（`emitToolResult`，与本原语 emit 同构）。emit 不是「正常执行路径专属」——凡 tool_result block 内容变更（首发 / HITL 回填后编辑）都须 emit，否则前端停留旧态。详见 `agent_hitl.md §2 INV-8`。
 
@@ -228,7 +228,7 @@ base 定义「loop 该产出哪些事件、何时产出」；**group 由 mode �
 |------|------|------|
 | run 开始 | `run_start` | loop 启动一次 |
 | LLM 流式 | `message_start` → `text_block_*` / `reasoning_block_*` / `tool_call_*` → `usage_block` → `message_end` | callLLM 产出 |
-| 工具执行 | `tool_execution_start` → `tool_result_start` → `tool_result_delta*` → `tool_result_end` → `tool_execution_end` | ③ 段 execute 前后 emit `tool_execution_start/end`（阶段边界）；中间各工具 result 流（含 not-allowed result） |
+| 工具执行 | `tool_execution_start` → `tool_result_start` → `tool_result_delta*` → `tool_result_end` → `tool_execution_end` | ③ 段 execute 前后 emit `tool_execution_start/end`（阶段边界）；中间各工具 result 流（含 not-allowed result）。**[v0.0.354]**：result 帧**到达即逐个发出**（engine onResult 回调，非全批完成后连发）；每 result 的 start/delta/end 三帧相邻，全部 result 帧先于 `tool_execution_end` |
 | run 结束 | `run_end` | loop 退出一次（forked 若开 emit 才发） |
 
 > enqueue 级事件（`message_enqueued` / `enqueued_message_processed` / `enqueued_message_canceled`）是 **eager-drain 独有**（inbox 驱动），见 eager_drain §cancel 配对，**不在 base**。

@@ -190,6 +190,7 @@ describe('deriveRenderStrategy（chrome 数据驱动，零 kind 分支）', () =
       tag: '',
       sessionModel: null,
       defaultModel: null,
+      defaultRoutingPlan: null,
       effort: null,
       approvalMode: null,
       members: [],

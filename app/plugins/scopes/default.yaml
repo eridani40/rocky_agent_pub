@@ -24,14 +24,11 @@ groups:
           - store_sink
           - search_indexing
       - pointId: system_reminder
+        # [v0.0.361] env/workspace/squad_workspace 三静态 provider 退役（静态半迁 system prompt session_states mapper）
         impls:
-          - env
-          - time
-          - workspace
           - tool_error
           - todo
           - squad_agents_status
-          - squad_workspace
           - squad_task
 
   - id: context-assemble
@@ -98,6 +95,7 @@ groups:
           - memory_group
           - squad_role
           - team_roster
+          - session_states
           - parent_task
       - pointId: system_prompt_reducer
         impls:
@@ -109,7 +107,14 @@ groups:
     points:
       - pointId: llm_provider
         impls:
+          # [v0.0.350] +4 native coding plan impl（llm_anthropic plugin）。
+          # anthropic_compatible 必须保持首位——llm-client-factory 未命中回退 providers[0]，
+          # mock fixtures 依赖首位（change_plan S2 契约）。
           - anthropic_compatible
+          - kimi_coding_plan
+          - glm_coding_plan
+          - minimax_coding_plan
+          - deepseek_api
       - pointId: llm_protocol
         impls:
           - anthropic_messages

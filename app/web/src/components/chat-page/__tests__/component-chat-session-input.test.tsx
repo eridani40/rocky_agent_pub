@@ -73,15 +73,33 @@ vi.mock(baseInputPath, () => ({
   ),
 }));
 
-// 桩 pickers（避免引入重逻辑）
+// 桩 pickers（避免引入重逻辑），将 props 暴露到 DOM 以便断言 disabled + onChange
 vi.mock(modelPickerPath, () => ({
-  InputModelPicker: () => <div data-testid="model-picker" />,
+  InputModelPicker: ({ model, disabled, onChange }: { model: ModelSelection | null; disabled?: boolean; onChange: (sel: ModelSelection) => void }) => (
+    <div data-testid="model-picker" data-modelid={model?.modelId} data-disabled={disabled}>
+      <button data-testid="model-picker-change" onClick={() => onChange({ providerId: 'p1', modelId: 'm1' })}>
+        change-model
+      </button>
+    </div>
+  ),
 }));
 vi.mock(effortPickerPath, () => ({
-  InputEffortPicker: () => <div data-testid="effort-picker" />,
+  InputEffortPicker: ({ effort, disabled, onChange }: { effort: string | null; disabled?: boolean; onChange: (level: string) => void }) => (
+    <div data-testid="effort-picker" data-effort={effort} data-disabled={disabled}>
+      <button data-testid="effort-picker-change" onClick={() => onChange('high')}>
+        change-effort
+      </button>
+    </div>
+  ),
 }));
 vi.mock(approvalPickerPath, () => ({
-  InputApprovalModePicker: () => <div data-testid="approval-picker" />,
+  InputApprovalModePicker: ({ approvalMode, disabled, onChange }: { approvalMode: string | null; disabled?: boolean; onChange: (mode: string) => void }) => (
+    <div data-testid="approval-picker" data-mode={approvalMode} data-disabled={disabled}>
+      <button data-testid="approval-picker-change" onClick={() => onChange('greenlight')}>
+        change-approval
+      </button>
+    </div>
+  ),
 }));
 // 桩 ComponentRunStateAbortSlot：渲染按钮调 onAbort（模拟红钮点击）
 vi.mock(runStateBarPath, () => ({
@@ -95,6 +113,7 @@ vi.mock(iconsPath, () => ({ SendIcon: () => <svg /> }));
 
 import { ComponentChatSessionInput } from '../component-chat-session-input';
 import type { SessionChromeView } from '../../../lib/chat-api';
+import type { ModelSelection } from '../../../lib/providers';
 
 /** chrome 夹具（capabilities 全开） */
 function mkChrome(over: Partial<SessionChromeView> = {}): SessionChromeView {
@@ -107,6 +126,7 @@ function mkChrome(over: Partial<SessionChromeView> = {}): SessionChromeView {
     tag: '',
     sessionModel: null,
     defaultModel: null,
+    defaultRoutingPlan: null,
     effort: null,
     approvalMode: null,
     members: [],
@@ -428,5 +448,108 @@ describe('cleanup：unmount 后 ESC listener 移除', () => {
     unmount();
     dispatchESC();
     expect(onAbort).not.toHaveBeenCalled();
+  });
+});
+
+describe('运行中 picker 仍可编辑（v0.0.351 T2）', () => {
+  it('sessionRunning=true 时三个 picker 的 disabled=false（停止按钮仍在）', () => {
+    render(
+      <ComponentChatSessionInput
+        sessionId="s1"
+        chrome={mkChrome()}
+        sessionRunning={true}
+        sessionState="running"
+        enqueueItems={[]}
+        pendingToolCall={null}
+        onSubmitReply={vi.fn()}
+        onEnqueueCancel={vi.fn()}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+        onModelChange={vi.fn()}
+        onEffortChange={vi.fn()}
+        onApprovalModeChange={vi.fn()}
+        sendError={null}
+      />,
+    );
+    expect(document.querySelector('[data-testid="approval-picker"]')?.getAttribute('data-disabled')).toBe('false');
+    expect(document.querySelector('[data-testid="effort-picker"]')?.getAttribute('data-disabled')).toBe('false');
+    expect(document.querySelector('[data-testid="model-picker"]')?.getAttribute('data-disabled')).toBe('false');
+    // 停止按钮仍渲染且位置不变（runState capability 开启）
+    expect(document.querySelector('[data-testid="abort-slot-btn"]')).toBeTruthy();
+  });
+
+  it('运行中点击 model picker → onModelChange 被调用', () => {
+    const onModelChange = vi.fn();
+    render(
+      <ComponentChatSessionInput
+        sessionId="s1"
+        chrome={mkChrome()}
+        sessionRunning={true}
+        sessionState="running"
+        enqueueItems={[]}
+        pendingToolCall={null}
+        onSubmitReply={vi.fn()}
+        onEnqueueCancel={vi.fn()}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+        onModelChange={onModelChange}
+        onEffortChange={vi.fn()}
+        onApprovalModeChange={vi.fn()}
+        sendError={null}
+      />,
+    );
+    fireEvent.click(document.querySelector('[data-testid="model-picker-change"]') as HTMLButtonElement);
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith({ providerId: 'p1', modelId: 'm1' });
+  });
+
+  it('运行中点击 effort picker → onEffortChange 被调用', () => {
+    const onEffortChange = vi.fn();
+    render(
+      <ComponentChatSessionInput
+        sessionId="s1"
+        chrome={mkChrome()}
+        sessionRunning={true}
+        sessionState="running"
+        enqueueItems={[]}
+        pendingToolCall={null}
+        onSubmitReply={vi.fn()}
+        onEnqueueCancel={vi.fn()}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+        onModelChange={vi.fn()}
+        onEffortChange={onEffortChange}
+        onApprovalModeChange={vi.fn()}
+        sendError={null}
+      />,
+    );
+    fireEvent.click(document.querySelector('[data-testid="effort-picker-change"]') as HTMLButtonElement);
+    expect(onEffortChange).toHaveBeenCalledTimes(1);
+    expect(onEffortChange).toHaveBeenCalledWith('high');
+  });
+
+  it('运行中点击 approval mode picker → onApprovalModeChange 被调用', () => {
+    const onApprovalModeChange = vi.fn();
+    render(
+      <ComponentChatSessionInput
+        sessionId="s1"
+        chrome={mkChrome()}
+        sessionRunning={true}
+        sessionState="running"
+        enqueueItems={[]}
+        pendingToolCall={null}
+        onSubmitReply={vi.fn()}
+        onEnqueueCancel={vi.fn()}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+        onModelChange={vi.fn()}
+        onEffortChange={vi.fn()}
+        onApprovalModeChange={onApprovalModeChange}
+        sendError={null}
+      />,
+    );
+    fireEvent.click(document.querySelector('[data-testid="approval-picker-change"]') as HTMLButtonElement);
+    expect(onApprovalModeChange).toHaveBeenCalledTimes(1);
+    expect(onApprovalModeChange).toHaveBeenCalledWith('greenlight');
   });
 });

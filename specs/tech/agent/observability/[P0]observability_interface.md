@@ -3,7 +3,7 @@ type: interface
 title: Observability Adapter 接口契约 + 全量字段
 priority: P0
 status: active
-updated: 2026-07-06
+updated: 2026-08-15
 since: v0.0.10
 related: [[P0]observability_manager.md, [P0]langfuse_adapter.md]
 ---
@@ -138,6 +138,11 @@ interface TraceMetadata {
   modelId: string;                  // = modelConfig.modelId
   providerImpl?: string;            // e.g. "anthropic"
   protocolImpl?: string;            // e.g. "anthropic_messages"
+  providerId?: string;              // [v0.0.353 T2] 真实 provider 实例 id（物理尝试的接入方实例；只进 metadata，不污染 SDK name）
+                                    // [v0.0.353 T3] run 级快照填值：build-run-deps 构造 LoopObservability 时传 SessionConfig.providerId（启动时已 resolve 的 provider；可选不强制，未传跳过）
+  providerName?: string;            // [v0.0.353 T2] 接入方标识（如 'anthropic_compatible'；只进 metadata，避免中文/特殊字符污染 SDK name）
+  /** [v0.0.353 T5 D8] 生效路由方案（planId + planName）；logical gen / TraceMetadata 记录「当时生效方案」；有方案才带，无方案零行为变化（旧 trace 兼容） */
+  routingPlan?: { planId: string; planName?: string };
   toolNames: string[];              // config.tools 的 name 清单
   systemPromptHash?: string;        // system prompt 内容 hash（追踪 prompt 变更影响）
   appVersion?: string;
@@ -151,7 +156,18 @@ interface TraceMetadata {
 ```typescript
 interface GenStart {
   parent: SpanHandle | TraceHandle;
-  model: string;                    // = modelConfig.modelId
+  model: string;                    // = modelConfig.modelId（physical：真实尝试 modelId，由 recordAttemptTarget 覆盖）
+
+  /** [v0.0.353 T2] 真实 provider 实例 id（physical 尝试；只进 metadata）。
+   * [v0.0.353 T3 A1] logical gen 显式传 null（真实信息下沉 physical 子 span；禁止 undefined 冒充"未填"） */
+  providerId?: string | null;
+  /** [v0.0.353 T2] 接入方标识（physical 尝试；只进 metadata，避免污染 SDK name）。
+   * [v0.0.353 T3 A1] logical gen 显式传 null */
+  providerName?: string | null;
+  /** [v0.0.353 T3 A1] 业务视图标识：logical gen 标 true（providerId/providerName=null，model 保留 run 级 modelId 快照）；physical 不设 */
+  logicalView?: boolean;
+  /** [v0.0.353 T5 D8] 生效路由方案（planId + planName）。logical gen / TraceMetadata 记录「当时生效方案」；有方案才带，无方案零行为变化（旧 trace 兼容）。 */
+  routingPlan?: { planId: string; planName?: string };
 
   /** 判别字段：logical（默认）| physical。v0.0.50 起一次 LLM 调用产两条紧邻 generation（同 step span，N 相同）。 */
   kind?: 'logical' | 'physical';
@@ -207,6 +223,20 @@ interface GenMetadata {
   physicalWireBody?: unknown;
   errorCategory?: string;           // 仅 status='error' 写入
   retryChain?: RetryAttempt[];      // 重试链；仅 invoke 内多次 attempt 时非空
+  /** [v0.0.353 T2] 真实 provider 实例 id（physical 写；logical 为 null，A1 治理：真实信息下沉 physical） */
+  providerId?: string | null;
+  /** [v0.0.353 T2] 接入方标识（physical 写；logical 为 null，只进 metadata 不污染 SDK name） */
+  providerName?: string | null;
+  /** [v0.0.353 T2] 真实尝试 modelId（physical 写；= recordAttemptTarget 上报的真实 model） */
+  modelId?: string;
+  /** [v0.0.353 T3] logical 视图标记：true = 此 generation 是 logical（业务视图），provider 相关字段置 null */
+  logicalView?: boolean;
+  /** [v0.0.353 T5 D8] 生效路由方案（与 GenStart.routingPlan 同源）；仅 D9 skipped gen 使用 */
+  routingPlan?: { planId: string; planName?: string };
+  /** [v0.0.353 T5 D9] 被跳候选标记：true 表示本条 generation 记录的是被跳过的候选，非真实 attempt */
+  skipped?: boolean;
+  /** [v0.0.353 T5 D9] 被跳原因（与 skipped 配套） */
+  skipReason?: 'time_window' | 'disabled' | 'circuit_open' | 'banned' | 'resolve_failed' | 'probe_inflight';
 }
 interface RetryAttempt {
   providerId: string;
@@ -267,7 +297,7 @@ interface ToolSpanMetadata {
   toolCallId: string;
   needsApproval: boolean;           // 工具 needsApproval 判定
   approvalStatus?: "pending" | "approved" | "rejected";   // HITL 状态
-  durationMs?: number;
+  durationMs?: number;              // [v0.0.354] 真实执行时长（start 逐个化：startTime=该 tool 串行开始时刻，不含批内排队等待）
 }
 ```
 

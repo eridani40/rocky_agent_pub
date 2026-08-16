@@ -24,6 +24,7 @@ import { FsCrudStore } from '../../persistence/fs-store';
 import { ulid } from '../../config/ulid';
 import { SessionStore } from '../session-store';
 import { ContextEngine } from '../context-engine';
+import { ReminderQueueStore } from '../system-reminder-queue';
 import { setSessionStoreEpDelegate } from '../session-store-ep-delegate';
 import { LoadedScopeConfigProvider } from '../../plugin/scope-config-provider';
 import type { SessionConfig } from '../context-types';
@@ -82,6 +83,7 @@ function mkConfig(overrides: {
       contextWindow: overrides.contextWindow ?? 100000,
     } as unknown as LlmClient,
     modelId: 'test-model',
+    providerId: 'p-test',
     tools: overrides.tools,
     workdir: overrides.workdir,
   };
@@ -100,15 +102,17 @@ describe('rocky_context plugin builtin-loader 登记', () => {
     expect(handlers.length).toBe(5);
   });
 
-  it('impl 登记（ingest 5 + prompt_mapper 12 + prompt_reducer 3 + reminder 8）= 28', () => {
+  it('impl 登记（ingest 5 + prompt_mapper 13 + prompt_reducer 3 + reminder 4）= 25', () => {
     // v0.0.164 起 prompt_mapper 10→11（+memory_squad，v0.0.205 改名 memory_group）；
     // v0.0.232 11→12（+agent_profile）；v0.0.237 reminder 11→8（摘 squad_charter/task/squad_board）；
-    // v0.0.240 reminder 8→9（+squad_task）；v0.0.273 reminder 9→8（reachable_agents + squad_team_status → squad_agents_status 统一）.
+    // v0.0.240 reminder 8→9（+squad_task）；v0.0.273 reminder 9→8（reachable_agents + squad_team_status → squad_agents_status 统一）；
+    // v0.0.361 prompt_mapper 12→13（+session_states）；reminder 8→5（env/workspace/squad_workspace 退役迁 mapper）；
+    // v0.0.361 T3 reminder 5→4（time 退役，时间固定段平移 injector 内部双模式恒出）.
     const counts = {
       'context_ingest_handler': 5,
-      'system_prompt_mapper': 12,
+      'system_prompt_mapper': 13,
       'system_prompt_reducer': 3,
-      'system_reminder': 8,
+      'system_reminder': 4,
     };
     for (const [pointId, expected] of Object.entries(counts)) {
       const ep = BUILTIN_EXTENSION_POINTS.find((e) => e.id === pointId)!;
@@ -150,7 +154,8 @@ describe('ContextEngine ingest handler 链', () => {
     await engine.ingest(cfg, [msg]);
     const page = await store.getMessages(cfg.sessionId, { limit: 100 });
     const stored = page.items[0]!;
-    // reminder 链至少有 env/time 贡献（workspace 也有 workdir）→ reminder block 追加
+    // [v0.0.361 T3] 时间固定段由 injector 内部恒出（time provider 退役）；动态链（本 fixture 无
+    // todo/squad deps → 空贡献）→ reminder block = header + 时间行
     expect(stored.content.length).toBeGreaterThan(1);
     const reminderBlock = stored.content[stored.content.length - 1] as {
       type: string;
@@ -161,6 +166,83 @@ describe('ContextEngine ingest handler 链', () => {
     // [v0.0.50] 消息级 metadata.isSystemReminder 已废止；块级 TextBlock.isSystemReminder 唯一权威
     expect(stored.metadata?.isSystemReminder).toBeUndefined();
     expect((reminderBlock as { isSystemReminder?: boolean }).isSystemReminder).toBe(true);
+  });
+
+  // ---------- [v0.0.361 T3] ContextEngine.ingest queueHandles 接线（端到端）----------
+
+  it('[v0.0.361] incremental：queue 预写 → drain 按序 value 渲染进块 + 队列清空', async () => {
+    const queue = new ReminderQueueStore({ fsRoot: tmpRoot });
+    engine.setReminderQueueStore(queue);
+    const cfg = mkConfig();
+    await queue.write(cfg.sessionId, 'todo', '[todo] item「落四件套」step「写 change_plan」→ done');
+    await queue.write(cfg.sessionId, 'squad', '[squad:agents] mate-1 running');
+    const msg: MessageInput = {
+      id: ulid(),
+      sessionId: cfg.sessionId,
+      role: 'user',
+      content: [{ type: 'text', text: 'hi' }],
+    };
+    await engine.ingest(cfg, [msg], 'default', false, undefined, { useFullReminder: false });
+    const page = await store.getMessages(cfg.sessionId, { limit: 100 });
+    const stored = page.items[0]!;
+    const block = stored.content[stored.content.length - 1] as { text: string };
+    const lines = block.text.split('\n');
+    // header + 时间行 + drain value 按序逐行（§2 硬性样例格式）
+    expect(lines[0]).toBe('[system_reminder]');
+    expect(lines[1]).toMatch(/^Current date and time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(/);
+    expect(lines[2]).toBe('[todo] item「落四件套」step「写 change_plan」→ done');
+    expect(lines[3]).toBe('[squad:agents] mate-1 running');
+    expect(lines).toHaveLength(4);
+    // drain 消费后队列空
+    expect(await queue.drain(cfg.sessionId)).toEqual([]);
+  });
+
+  it('[v0.0.361] full：runState 传入 → 消费后置 false + queue pending 作废清空', async () => {
+    const queue = new ReminderQueueStore({ fsRoot: tmpRoot });
+    engine.setReminderQueueStore(queue);
+    const cfg = mkConfig();
+    await queue.write(cfg.sessionId, 'todo', '[todo] stale pending');
+    const runState = { useFullReminder: true };
+    const msg: MessageInput = {
+      id: ulid(),
+      sessionId: cfg.sessionId,
+      role: 'user',
+      content: [{ type: 'text', text: 'hi' }],
+    };
+    await engine.ingest(cfg, [msg], 'default', false, undefined, runState);
+    // full 消费后置 false（run 内后续轮转 incremental）
+    expect(runState.useFullReminder).toBe(false);
+    // full 已涵盖最新态 → pending 作废（不渲染 stale 行 + 清空）
+    const page = await store.getMessages(cfg.sessionId, { limit: 100 });
+    const block = page.items[0]!.content.at(-1) as { text: string };
+    expect(block.text).not.toContain('stale pending');
+    expect(await queue.drain(cfg.sessionId)).toEqual([]);
+  });
+
+  it('[v0.0.361] 同一 run 连续两轮：首轮 full 置 false → 次轮 incremental 只出时间+drain', async () => {
+    const queue = new ReminderQueueStore({ fsRoot: tmpRoot });
+    engine.setReminderQueueStore(queue);
+    const cfg = mkConfig();
+    const runState: { useFullReminder?: boolean } = {};
+    const msg1: MessageInput = {
+      id: ulid(), sessionId: cfg.sessionId, role: 'user',
+      content: [{ type: 'text', text: 'first' }],
+    };
+    await engine.ingest(cfg, [msg1], 'default', false, undefined, runState);
+    expect(runState.useFullReminder).toBe(false);
+    // 次轮前写入方 queue.write（T4 写入点语义模拟）
+    await queue.write(cfg.sessionId, 'k1', '[todo] 增量行');
+    const msg2: MessageInput = {
+      id: ulid(), sessionId: cfg.sessionId, role: 'user',
+      content: [{ type: 'text', text: 'second' }],
+    };
+    await engine.ingest(cfg, [msg2], 'default', false, undefined, runState);
+    const page = await store.getMessages(cfg.sessionId, { limit: 100 });
+    const second = page.items.find((m) => (m.content[0] as { text?: string })?.text === 'second')!;
+    const block = second.content.at(-1) as { text: string };
+    const lines = block.text.split('\n');
+    expect(lines).toHaveLength(3); // header + 时间 + drain 增量行
+    expect(lines[2]).toBe('[todo] 增量行');
   });
 
   it('空链降级（pluginManager=null）→ 直接 append', async () => {

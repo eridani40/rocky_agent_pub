@@ -40,6 +40,13 @@ export interface GroupDef {
 }
 
 /**
+ * [v0.0.347] 模型路由方案库 group：自渲染即时操作（不走 page-tab dirty / SaveBar）。
+ * 与 providers 同范式（独立 save 流）：不进 KV_GROUPS / TAB_KV_GROUPS（避免 buildKvGroup 误入通用网格），
+ * models tab 由 SectionTabPanel 直接渲染 SectionModelRoutingPlans。
+ */
+export const MODEL_ROUTING_PLANS_GROUP_ID = 'model_routing_plans' as const;
+
+/**
  * 合并页管理的 KV group 定义（v0.0.89 起仅含 page-tab dirty 跟踪的 group）。
  * - llm_request：暴露 stall_tool_s + max_attempts（由 SectionDefaultModelsAndRequest 自渲染 number 卡）
  *   注：llm_request 是嵌套 record（key=default，data 含 timeout/retry/...），前端 read-modify-write 完整 data；

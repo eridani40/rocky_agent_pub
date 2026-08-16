@@ -85,6 +85,22 @@ export interface TraceMetadata {
   inputMessageIds: string[];
   /** = modelConfig.modelId */
   modelId: string;
+  /**
+   * [v0.0.353 T5 D8] 生效路由方案快照（= SessionConfig.modelRoutingPlan；有方案才带）。
+   * logical 层 = 调用意图：metadata 记当时生效方案（planId + planName），model 字段仅 session 口径补充。
+   * 参考: specs/tech/version_logs/v0.0.353/model-routing-trace-correctness/change_plan.md D8
+   */
+  routingPlan?: { planId: string; planName?: string };
+  /**
+   * [v0.0.353 T2] 真实 provider 实例 id（= app_config providers 组 record key）。
+   * run 级快照：可填首候选；logical view 治理见 GenMetadata（A1）。
+   */
+  providerId?: string;
+  /**
+   * [v0.0.353 T2] 真实 provider 接入方标识（LlmProviderConfig.name，如 'anthropic_compatible'）。
+   * 只进 metadata（不污染 SDK name/model 字段，避免中文/特殊字符问题）。
+   */
+  providerName?: string;
   /** e.g. "anthropic" */
   providerImpl?: string;
   /** e.g. "anthropic_messages" */
@@ -106,8 +122,34 @@ export interface TraceMetadata {
 /** startGeneration 入参 */
 export interface GenStart {
   parent: SpanHandle | TraceHandle;
-  /** = modelConfig.modelId */
+  /** = modelConfig.modelId（physical 时改真实 target modelId，见 v0.0.353 T2） */
   model: string;
+  /**
+   * [v0.0.353 T2] 真实 provider 实例 id（= app_config providers 组 record key）。
+   * physical generation 必填真实值；logical view 填 null（A1 治理：真实信息下沉 physical 子 span）。
+   */
+  providerId?: string | null;
+  /**
+   * [v0.0.353 T2] 真实 provider 接入方标识（LlmProviderConfig.name）。
+   * 只进 metadata（不污染 SDK name/model 字段，避免中文/特殊字符问题）。
+   * physical 填真实值；logical view 填 null（A1 治理）。
+   */
+  providerName?: string | null;
+  /**
+   * [v0.0.353 T3 A1] logical view 标识：logical generation 启动时标 `true`，
+   * 表示本 generation 是业务视图（model 为 config.modelId 快照），真实 provider/model 在 physical 子 span。
+   */
+  logicalView?: boolean;
+  /**
+   * [v0.0.353 T5 D8] 生效路由方案（logical generation 用；有方案才带）。
+   * 与 TraceMetadata.routingPlan 同源（LoopObservabilityOpts.routingPlan）。
+   */
+  routingPlan?: { planId: string; planName?: string };
+  /**
+   * [v0.0.353 T5 D9] 额外 metadata（skipped gen 等用；adapter 合并进 langfuse metadata）。
+   * 仅 D9 skipped gen 使用（skipped/reason/providerId/providerName），logical 不传。
+   */
+  metadata?: Record<string, unknown>;
   /**
    * [v0.0.50] generation 类型判别字段：
    *   - `'logical'`（默认，向后兼容）：业务视图 input（messages + system + tools + params）。
@@ -219,6 +261,37 @@ export interface GenMetadata {
   cacheWriteTokens: number;
   /** LLM 调用耗时（start→end） */
   durationMs?: number;
+  /**
+   * [v0.0.353 T2] 真实 provider 实例 id（= app_config providers 组 record key）。
+   * physical generation 必填；logical view 填 null（A1 治理：真实信息下沉 physical 子 span）。
+   */
+  providerId?: string | null;
+  /**
+   * [v0.0.353 T2] 真实 provider 接入方标识（LlmProviderConfig.name，如 'anthropic_compatible'）。
+   * physical generation 必填；logical view 填 null（A1 治理）。只进 metadata（不污染 SDK name 字段）。
+   */
+  providerName?: string | null;
+  /**
+   * [v0.0.353 T2] 真实 modelId（physical generation 用；logical view 不填——真实值在 physical 子 span）。
+   */
+  modelId?: string;
+  /**
+   * [v0.0.353 T2] logical view 标识（A1 治理）：logical generation 标记 `logicalView: true`，
+   * 表示本 generation 是业务视图（model 仍为 config.modelId 快照），真实 provider/model 在 physical 子 span。
+   */
+  logicalView?: boolean;
+  /**
+   * [v0.0.353 T5 D8] 生效路由方案（logical end 对称携带；有方案才带）。
+   * 与 GenStart.routingPlan 同源（LoopObservabilityOpts.routingPlan）。
+   */
+  routingPlan?: { planId: string; planName?: string };
+  /**
+   * [v0.0.353 T5 D9] skipped 候选标记：被跳过候选的成对 gen 标 `skipped: true`，
+   * skipReason 记录跳过原因（time_window/disabled/circuit_open/banned/resolve_failed/probe_inflight）。
+   */
+  skipped?: boolean;
+  /** [v0.0.353 T5 D9] 跳过原因（skipped=true 时必填；D9 6 分支枚举） */
+  skipReason?: string;
   /**
    * [v0.0.25 BUG-001 §3] 物理层 wire body（onWire 钩子记录的 protocol.encode 产出，
    * 与逻辑层 GenInput diff 对账）。onWire 未注入时 undefined（向后兼容）。

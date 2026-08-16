@@ -20,12 +20,10 @@ groups:
           - context_files
           - memory_user
           - memory_session
+          - session_states            # [v0.0.361] env/workspace/团队盘路径静态段（平移自退役 reminder provider）
           # ── academy 专属（仅身份，无训练上下文） ──
           - academy_classroom_role        # 教室身份正文（"你是 X 教室的学生"）
       - pointId: system_reminder
         impls:
-          - env
-          - time
-          - workspace
           - tool_error
           - todo

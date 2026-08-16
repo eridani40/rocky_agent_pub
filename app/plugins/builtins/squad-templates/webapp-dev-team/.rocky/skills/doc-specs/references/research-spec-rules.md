@@ -3,8 +3,8 @@
 ## 目录结构
 
 ```
-specs/research/
-└── {feature-slug}/            # 每个调研主题一个目录
+${SPECS_DIR}/research/
+└── ${SLUG}/            # 每个调研主题一个目录
     ├── overview.md            # 概述 + 策略枚举
     ├── implementation.md      # 核心流程 + Prompt
     ├── comparison.md          # 竞品对比 + 建议
@@ -20,7 +20,7 @@ specs/research/
 # {Feature 名称} 调研报告
 
 - **调研范围**: {一句话描述聚焦点}
-- **调研对象**: refs/{project1}, refs/{project2}
+- **调研对象**: refs/${PROJECT1}, refs/${PROJECT2}
 - **调研日期**: YYYY-MM-DD
 
 ## 1. 概述
@@ -33,7 +33,7 @@ specs/research/
 
 - **定义**: 是什么，解决什么问题
 - **触发条件**: 在什么条件下启用（阈值、判断逻辑）
-- **代码位置**: `refs/{project}/{file}:{line}`
+- **代码位置**: `refs/${PROJECT}/${FILE}:${LINE}`
 
 ### 2.2 策略名称 B
 
@@ -43,7 +43,7 @@ specs/research/
 
 ### 3.1 {流程名称}
 
-**入口**: `refs/{project}/{file}:{line}` — `functionName()`
+**入口**: `refs/${PROJECT}/${FILE}:${LINE}` — `functionName()`
 
 **数据流**:
 1. 输入: {描述输入数据结构}
@@ -53,12 +53,12 @@ specs/research/
 **调用链**:
 \`\`\`
 functionA() → functionB() → functionC()
-  refs/{file}:{line}  refs/{file}:{line}  refs/{file}:{line}
+  refs/${FILE}:${LINE}  refs/${FILE}:${LINE}  refs/${FILE}:${LINE}
 \`\`\`
 
 **关键算法**:
 \`\`\`typescript
-// 摘录自 refs/{project}/{file}:{start}-{end}
+// 摘录自 refs/${PROJECT}/${FILE}:${START}-${END}
 {关键代码片段，保留原始注释}
 \`\`\`
 
@@ -66,7 +66,7 @@ functionA() → functionB() → functionC()
 
 ### 4.1 {Prompt 用途}
 
-- **来源**: `refs/{project}/{file}:{line}`
+- **来源**: `refs/${PROJECT}/${FILE}:${LINE}`
 - **触发时机**: {什么时候调用}
 
 \`\`\`
@@ -115,7 +115,7 @@ functionA() → functionB() → functionC()
 单文件超过 200 行时按语义拆分到同一目录下的多个文件：
 
 ```
-specs/research/{feature-slug}/
+${SPECS_DIR}/research/${SLUG}/
 ├── overview.md           — §1 概述 + §2 策略枚举
 ├── implementation.md     — §3 核心流程 + §4 Prompt
 └── recommendations.md    — §5 竞品对比 + §6 建议
@@ -123,5 +123,5 @@ specs/research/{feature-slug}/
 
 每个文件顶部标注：
 ```markdown
-> 本文件是 {feature} 调研报告的一部分，完整报告见 specs/research/{feature-slug}/
+> 本文件是 ${FEATURE} 调研报告的一部分，完整报告见 ${SPECS_DIR}/research/${SLUG}/
 ```

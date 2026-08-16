@@ -51,6 +51,30 @@ vi.mock(providersPath, () => ({
     </div>
   ),
 }));
+// [v0.0.347 T4] 方案库 mock（同 providers 范式：两按钮模拟 list↔detail 上抛）
+// [v0.0.349 BUG-004] 增 plans-delete-detached-playground 按钮模拟「删已挂载方案 → 上抛 detached」
+const modelRoutingPath = vi.hoisted(() =>
+  require('node:path').resolve(__dirname, '../section-model-routing-plans'),
+);
+vi.mock(modelRoutingPath, () => ({
+  SectionModelRoutingPlans: ({
+    onViewLevelChange,
+    onPlanDeleted,
+  }: {
+    onViewLevelChange?: (l: 'list' | 'detail') => void;
+    onPlanDeleted?: (detached: string[], planId: string) => void;
+  }) => (
+    <div>
+      model-routing-plans
+      <button data-testid="plans-to-detail" onClick={() => onViewLevelChange?.('detail')} />
+      <button data-testid="plans-to-list" onClick={() => onViewLevelChange?.('list')} />
+      <button
+        data-testid="plans-delete-detached-playground"
+        onClick={() => onPlanDeleted?.(['playground'], 'plan-1')}
+      />
+    </div>
+  ),
+}));
 vi.mock(observabilityPath, () => ({
   SectionObservability: () => <div>observability</div>,
 }));
@@ -233,6 +257,27 @@ describe('PageAppSettingsMerged — tab 树 + page-tab 级保存', () => {
     expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
   });
 
+  it('[v0.0.347 T4] providers 进 detail → 独占 tab：方案库 + 两 group 标题全隐藏', async () => {
+    await renderMerged();
+    fireEvent.click(screen.getByRole('button', { name: '模型' }));
+    expect(screen.getByText('model-routing-plans')).toBeTruthy(); // list 态两 section 并存
+    // providers mock 第一个按钮 = 上抛 detail
+    fireEvent.click(screen.getByText('providers').parentElement!.querySelector('button')!);
+    expect(screen.getByText('providers')).toBeTruthy(); // detail 持有者保留（自渲染详情）
+    expect(screen.queryByText('model-routing-plans')).toBeNull(); // 另一 section 隐藏
+    expect(screen.queryByText('供应商')).toBeNull(); // group 标题隐藏
+    expect(screen.queryByText('模型组合方案库')).toBeNull();
+  });
+
+  it('[v0.0.347 T4] 方案库进 detail → 独占 tab：providers group（含标题）隐藏', async () => {
+    await renderMerged();
+    fireEvent.click(screen.getByRole('button', { name: '模型' }));
+    fireEvent.click(screen.getByTestId('plans-to-detail'));
+    expect(screen.getByText('model-routing-plans')).toBeTruthy(); // detail 持有者保留
+    expect(screen.queryByText('providers')).toBeNull(); // providers section 隐藏
+    expect(screen.queryByText('供应商')).toBeNull();
+  });
+
   it('切工具 tab → 右栏渲染网络搜索 group', async () => {
     await renderMerged();
     fireEvent.click(screen.getByRole('button', { name: '工具' }));
@@ -301,5 +346,33 @@ describe('PageAppSettingsMerged — tab 树 + page-tab 级保存', () => {
     await waitFor(() => {
       expect(screen.queryByRole('alert')).not.toBeNull();
     });
+  });
+
+  // ===== [v0.0.349 BUG-004] 删已挂载方案 → 会话 tab trigger 不残显「方案 · <planId>」=====
+  it('[BUG-004] 删已挂载方案（detached 含 playground）→ 切回会话 tab trigger 回 placeholder', async () => {
+    // 初始挂载 plan-1：model_routing group GET 返回 playgroundPlanId（真实 section mock 上抛删除）
+    const { getConfigGroup } = await import('../../../lib/api-client');
+    const defaultImpl = vi.mocked(getConfigGroup).getMockImplementation();
+    vi.mocked(getConfigGroup).mockImplementation(async (_d: string, group: string) =>
+      group === 'model_routing' ? [{ key: 'default', data: { playgroundPlanId: 'plan-1' } }] : [],
+    );
+    try {
+      await renderMerged();
+      // 会话 tab：trigger 显示「方案 · plan-1」（挂载优先呈现，plans 空 → planName 兜底 planId）
+      fireEvent.click(screen.getByRole('button', { name: '会话' }));
+      const trigger = () =>
+        document.querySelector('[data-action-key="settings.default-models.select-chat"]')!;
+      await waitFor(() => expect(trigger().textContent).toContain('plan-1'));
+      // 模型 tab：删除方案（section mock 上抛 onPlanDeleted(['playground'], 'plan-1')）
+      fireEvent.click(screen.getByRole('button', { name: '模型' }));
+      fireEvent.click(screen.getByTestId('plans-delete-detached-playground'));
+      // 切回会话 tab：服务端已解绑 → 本地挂载态同步清 → trigger 回 placeholder（不残显 planId）
+      fireEvent.click(screen.getByRole('button', { name: '会话' }));
+      await waitFor(() => expect(trigger().textContent).not.toContain('plan-1'));
+      expect(trigger().textContent).toContain('选择模型或方案');
+    } finally {
+      // 还原 mock（describe 级 beforeEach 不 reset，防泄漏到后续测试）
+      vi.mocked(getConfigGroup).mockImplementation(defaultImpl ?? (async () => []));
+    }
   });
 });

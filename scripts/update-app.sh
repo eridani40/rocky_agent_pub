@@ -31,18 +31,25 @@ log "dmg: $DMG"
 log "waiting 2s for caller to exit..."
 sleep 2
 
-# ── 3. 杀 app ──
-log "killing ${APP_NAME}..."
-pkill -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" 2>/dev/null || true
-# 等待进程退出（最多 5s）
-for i in $(seq 1 10); do
+# ── 3. 让 app 自己先优雅关闭（graceful quit：跑完 shutdown 钩子/存窗口态；直接强杀会留下崩溃态→下次启动恢复白屏） ──
+log "asking ${APP_NAME} to quit gracefully..."
+osascript -e "tell application \"${APP_NAME}\" to quit" 2>/dev/null || true
+for i in $(seq 1 16); do
   pgrep -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1 || break
   sleep 0.5
 done
-# 确保杀干净（含 Helper 子进程）
-pkill -9 -f "${APP_NAME}" 2>/dev/null || true
-sleep 1
-log "app killed."
+# 8s 还活着才升级强杀（TERM → KILL 兜底）
+if pgrep -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1; then
+  log "graceful quit timeout (8s), escalating to kill..."
+  pkill -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" 2>/dev/null || true
+  for i in $(seq 1 10); do
+    pgrep -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+  pkill -9 -f "${APP_NAME}" 2>/dev/null || true
+  sleep 1
+fi
+log "app closed."
 
 # ── 4. 挂载 dmg ──
 MOUNT="/tmp/${APP_NAME}-dmg-mount"
@@ -67,12 +74,34 @@ log "copied."
 hdiutil detach "$MOUNT" 2>/dev/null || true
 log "dmg detached."
 
-# ── 7. 等待文件落盘（修复白屏：cp 290MB 后立即 open 会读到未写完的文件） ──
-log "waiting for files to settle (sync + 3s)..."
+# ── 7. 等文件真正落盘（检测式，替代盲等秒数；修复白屏：290MB 拷贝后未落盘就 open 读到半成品） ──
+log "waiting for files to settle (sync + lsof drain + size stable)..."
 sync
-sleep 3
+# 7a. lsof 排空：没有任何进程仍占用 .app（cp/mdworker/索引都结束），最多等 30s
+for i in $(seq 1 60); do
+  if lsof +D "$APP_PATH" >/dev/null 2>&1; then sleep 0.5; else break; fi
+done
+# 7b. 大小稳定双读：连续两次 du 一致 = 落盘完成（最多 5s）
+prev=$(du -sk "$APP_PATH" 2>/dev/null | cut -f1)
+for i in $(seq 1 10); do
+  sleep 0.5
+  cur=$(du -sk "$APP_PATH" 2>/dev/null | cut -f1)
+  [[ "$cur" == "$prev" ]] && break
+  prev="$cur"
+done
+log "files settled (size=${prev}KB), +1s buffer..."
+sleep 1
 
 # ── 8. 重启 app ──
 log "launching ${APP_NAME}..."
 open "$APP_PATH"
-log "DONE. ${APP_NAME} updated and launched."
+# 8b. 确认进程真起来了（最多 5s），起不来就明说
+for i in $(seq 1 10); do
+  pgrep -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1 && break
+  sleep 0.5
+done
+if pgrep -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1; then
+  log "DONE. ${APP_NAME} updated and launched (process confirmed)."
+else
+  log "WARN: launched but process not detected within 5s — 请手动打开确认。"
+fi

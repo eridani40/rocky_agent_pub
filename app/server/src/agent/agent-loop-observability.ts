@@ -38,6 +38,18 @@ export interface LoopObservabilityOpts {
   sessionId: string;
   modelId: string;
   /**
+   * [v0.0.353 T3] run 级 provider 快照（= SessionConfig.providerId，run 启动时已 resolve 的 provider；
+   * 挂路由方案时 = 首可用候选）。填入 TraceMetadata.providerId（顶部快照，可选不强制——未传跳过）；
+   * generation 级真实 provider 在 physical 子 span（A1 治理，见 GenMetadata.logicalView）。
+   */
+  providerId?: string;
+  /**
+   * [v0.0.353 T5 D8] 生效路由方案（= config.modelRoutingPlan；有方案才传）。
+   * logical gen / trace metadata 记录「当时生效方案」（planId + planName）；
+   * 无方案（分支 1）不传 → 字段零行为变化（旧 trace 兼容）。
+   */
+  routingPlan?: { planId: string; planName?: string };
+  /**
    * [v0.0.61] SessionKind 可读标签（= SessionKind.toolPolicyRole，如 'studio-leader' / 'playground-rocky'）。
    * 用于 startTrace 拼 trace name；缺省兜底 'session'（避免 langfuse UI 显示 unnamed-trace）。
    */
@@ -151,6 +163,14 @@ export class LoopObservability {
       toolNames: this.opts.toolDefinitions.map((t) => t.name),
       systemPromptHash: this.systemPromptHash(),
     };
+    // [v0.0.353 T3] run 级 provider 快照（可选不强制；未传时跳过，旧 fixture 零改动）
+    if (this.opts.providerId !== undefined) {
+      baseMetadata.providerId = this.opts.providerId;
+    }
+    // [v0.0.353 T5 D8] run 级路由方案快照（有方案才带；无方案零行为变化）
+    if (this.opts.routingPlan !== undefined) {
+      baseMetadata.routingPlan = this.opts.routingPlan;
+    }
     const metadata = this.opts.triggerUsage !== undefined
       ? { ...baseMetadata, triggerUsage: this.opts.triggerUsage }
       : baseMetadata;
@@ -231,6 +251,10 @@ export class LoopObservability {
     };
     // [v0.0.50 §4.3] logical generation name 带 iteration 后缀（`llm-N-logical`），
     // 与同 iteration 的 physical（`llm-N-physical`）成对，AT 断言 name 匹配 `llm-*-logical`。
+    // [v0.0.353 T3 A1] logical view 标记：model 保留 opts.modelId（run 级快照），
+    // providerId/providerName 显式置 null + logicalView: true —— 真实 provider/model 下沉 physical 子 span
+    // （D5 决策：logical 仅作业务视图父容器，真实信息由 T2 的 recordAttemptTarget 链路记录）。
+    // [v0.0.353 T5 D8] routingPlan 透传（有方案才带；无方案零行为变化）。
     return this.safe('startGeneration', () =>
       this.adapter.startGeneration({
         parent,
@@ -238,6 +262,10 @@ export class LoopObservability {
         name: `llm-${iteration}-logical`,
         input,
         startTime,
+        providerId: null,
+        providerName: null,
+        logicalView: true,
+        ...(this.opts.routingPlan !== undefined ? { routingPlan: this.opts.routingPlan } : {}),
       }),
     );
   }
@@ -266,6 +294,12 @@ export class LoopObservability {
       cacheReadTokens: numOrZero(u.input_cache_read),
       cacheWriteTokens: numOrZero(u.input_cache_write),
       durationMs: Date.now() - startTime.getTime(),
+      // [v0.0.353 T3 A1] logical view 标记（与 startGeneration 对称；end 事件 metadata 全量重建需重复标记）
+      providerId: null,
+      providerName: null,
+      logicalView: true,
+      // [v0.0.353 T5 D8] routingPlan 对称（与 startGeneration 同源；有方案才带）
+      ...(this.opts.routingPlan !== undefined ? { routingPlan: this.opts.routingPlan } : {}),
     };
     const output: GenOutput = {
       message: assistantMsg,

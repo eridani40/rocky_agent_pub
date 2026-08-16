@@ -87,11 +87,13 @@ export async function executeImport(
     if (!selected.providers.has(provider.label)) continue;
 
     // 1a. POST /provider（不传 id，后端生成新 ULID）
+    // [v0.0.350] name 透传（native 类型导入保型；旧导出文件无 name → 缺省通用向后兼容）
     const created = await createProvider({
       label: provider.label,
       baseUrl: provider.baseUrl,
       apiKey: provider.credentials.key,
       protocolId: provider.protocolId,
+      name: provider.name,
     });
 
     // 1b. 逐个 POST /provider/:id/model

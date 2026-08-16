@@ -7,14 +7,15 @@
  * 非安全级加密（防肉眼读取），仅做信息整体编解码。
  */
 
-import type { ModelInstance, ProtocolName } from './api-client';
+import type { ModelInstance, ProtocolName, ProviderName } from './api-client';
 
 // —— 类型定义（D2）——
 
 /** 导出/导入的 provider 项（剥离 id，导入时后端生成新 ULID） */
 export interface ProviderExportItem {
   label: string;
-  name: 'anthropic_compatible';
+  /** [v0.0.350] 类型放宽 ProviderName（跟随 ProviderInstance.name）；旧导出文件无 name → 可选，导入链缺省通用 */
+  name?: ProviderName;
   protocolId: ProtocolName;
   baseUrl: string;
   credentials: { key: string };

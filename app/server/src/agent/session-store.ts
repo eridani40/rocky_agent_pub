@@ -110,6 +110,8 @@ export class SessionStore {
       crud: this.crud,
       statusBus: opts.statusBus,
       logWriter: opts.logWriter,
+      // [v0.0.361 T4] 透传 fsRoot：markX 状态变化写 member_state reminder + squad fanout
+      reminderFsRoot: opts.fsRoot,
     });
   }
 

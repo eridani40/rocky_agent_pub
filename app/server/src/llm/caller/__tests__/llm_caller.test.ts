@@ -27,6 +27,8 @@ import type { StreamEvent } from '../../protocol';
 import type { LlmErrorState } from '../llm_error_state';
 import { createLlmErrorState } from '../llm_error_state';
 import { createProviderHealthRegistry, __resetProviderHealthRegistryForTest } from '../provider_health_registry';
+// [v0.0.359 T1] 成功 target registry（ok 分支写入断言）
+import { getSuccessTarget, __resetSuccessTargetRegistryForTest } from '../success-target-registry';
 import { DEFAULT_LLM_REQUEST_CONFIG } from '../../../config/llm_request_config';
 
 // ── 测试 stub 构造器 ──
@@ -124,6 +126,7 @@ function makeBaseReq(): InvokeBaseReq {
 
 beforeEach(() => {
   __resetProviderHealthRegistryForTest();
+  __resetSuccessTargetRegistryForTest();
 });
 
 // ============================================================
@@ -204,6 +207,28 @@ describe('invoke 主流程', () => {
     expect(resp.stopReason).toBe('stop');
     // 瞬时态被清
     expect(ctx.errorState.lastError).toBeUndefined();
+  });
+
+  it('[T4 根治版] branch-1 调用点注入：baseReq.modelId 与 target 不一致时，client.stream 收到 target.modelId', async () => {
+    // 验证 llm_caller.ts 在 invokeCore 内层 attempt 前注入 baseReq.modelId，buildRequest 不再二次改写。
+    const captured: Array<{ modelId: string }> = [];
+    const provider = makeProvider('p1');
+    const model = makeModel('target-model');
+    provider.models = [model];
+    const client: LlmClient = {
+      stream: async function* (req: { modelId: string }): AsyncGenerator<StreamEvent> {
+        captured.push({ modelId: req.modelId });
+        yield { type: 'text_delta', text: 'ok' };
+        yield { type: 'usage', usage: { output_total_tokens: 3, input_total_tokens: 2 } as never };
+        yield { type: 'finish', reason: 'stop' };
+      },
+    } as unknown as LlmClient;
+    const ctx = makeCtx({ client, provider });
+    const baseReq = { ...makeBaseReq(), modelId: 'wrong-model' };
+    const resp = await invoke(baseReq, ctx);
+    expect(resp.message.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'ok' })]));
+    expect(captured).toHaveLength(1);
+    expect(captured[0]!.modelId).toBe('target-model');
   });
 
   it('RETRY_BACKOFF：attempt1 SERVER_ERROR → attempt2 成功', async () => {
@@ -429,5 +454,75 @@ describe('overlay 跨 attempt 继承', () => {
     await invoke(makeBaseReq(), ctx);
     // prefillPartial 在 buildRequest 应用后，invoke 成功时清
     expect(ctx.errorState.prefillPartial).toBeUndefined();
+  });
+});
+
+// ============================================================
+// [v0.0.353 T2] 分支1 recordAttemptTarget（调用谁记录谁）
+// ============================================================
+describe('[v0.0.353 T2] 分支1 recordAttemptTarget', () => {
+  it('成功路径：target 确定后 recordAttemptTarget 带真实 providerId/providerName/modelId', async () => {
+    const client = makeStubClient([textStream('ok')]);
+    const targets: Array<{ providerId: string; providerName: string; modelId: string }> = [];
+    const ctx = makeCtx({
+      client,
+      provider: makeProvider('p1', 'anthropic_compatible'),
+    });
+    ctx.observability = {
+      recordAttemptTarget: (t) => targets.push(t),
+    };
+    await invoke(makeBaseReq(), ctx);
+    // 分支1 resolveTarget 成功 → 上报一次真实 target（provider=p1, name=anthropic_compatible, model=m1）
+    expect(targets.length).toBe(1);
+    expect(targets[0]).toEqual({ providerId: 'p1', providerName: 'anthropic_compatible', modelId: 'm1' });
+  });
+
+  it('fallback 兜底路径：单一 target 也 recordAttemptTarget（provider.name 真实）', async () => {
+    const client = makeStubClient([textStream('ok')]);
+    const targets: Array<{ providerId: string; providerName: string; modelId: string }> = [];
+    const provider = makeProvider('fb1', 'openai_compatible');
+    const model = provider.models[0]!;
+    const ctx: InvokeContext = {
+      errorState: createLlmErrorState(),
+      controller: { runId: 'r1', aborted: false },
+      providers: new Map([[provider.id, provider]]),
+      clientFactory: { getClient: () => client },
+      fallback: { provider, keyRef: 'default', model, client },
+      config: { ...DEFAULT_LLM_REQUEST_CONFIG, retry: { ...DEFAULT_LLM_REQUEST_CONFIG.retry, backoff_base_s: 0, backoff_cap_s: 0, jitter: false } },
+      health: createProviderHealthRegistry(),
+      observability: { recordAttemptTarget: (t) => targets.push(t) },
+    };
+    await invoke(makeBaseReq(), ctx);
+    expect(targets.length).toBe(1);
+    expect(targets[0]).toEqual({ providerId: 'fb1', providerName: 'openai_compatible', modelId: 'm1' });
+  });
+
+  it('observability 未注入（undefined）→ recordAttemptTarget 安全跳过不报错', async () => {
+    const client = makeStubClient([textStream('ok')]);
+    const ctx = makeCtx({ client });
+    // 不注入 observability → invoke 成功且不抛错（optional 链式调用安全）
+    const resp = await invoke(makeBaseReq(), ctx);
+    expect(resp.message).toBeDefined();
+  });
+});
+
+// ============================================================
+// [v0.0.359 T1] 分支1 ok → recordSuccessTarget（ctx.sessionId + 真实 target 写入 registry）
+// ============================================================
+describe('[v0.0.359] 分支1 成功 target registry 写入', () => {
+  it('attemptLoop ok → recordSuccessTarget 以 ctx.sessionId + 真实 target 写入（registry 内容非 observability mock）', async () => {
+    const client = makeStubClient([textStream('ok')]);
+    const provider = makeProvider('p1', 'anthropic_compatible');
+    const ctx = makeCtx({ client, provider });
+    ctx.sessionId = 'sess-359';
+    // 不注入 observability：断言的是 registry（进程级单例）内容，非 observability mock
+    await invoke(makeBaseReq(), ctx);
+    const entry = getSuccessTarget('sess-359');
+    expect(entry).toBeDefined();
+    expect(entry!.providerId).toBe('p1');
+    expect(entry!.providerName).toBe('anthropic_compatible');
+    expect(entry!.modelId).toBe('m1');
+    // 其他 sid 不受污染
+    expect(getSuccessTarget('sess-other')).toBeUndefined();
   });
 });

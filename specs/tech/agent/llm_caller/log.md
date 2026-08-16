@@ -1,13 +1,19 @@
 ---
 type: log
 title: LlmCaller KB 变更记录
-updated: 2026-07-05
+updated: 2026-08-15
 ---
 
 # LlmCaller KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-15 · v0.0.359（success target registry：用量统计归属记实际命中 physical model）
+
+- 新增 `[P0]success_target_registry.md`：进程级「调用成功那一下」target 注册表（globalThis 单例，同 ProviderHealthRegistry 范式）；不寄生 observability recordAttemptTarget。
+- `index.md`：概念表 + 边界表 + 导航表补 SuccessTargetRegistry。
+- `[P0]llm_caller.md §2.2`：attemptLoop ok 分支流程图补 recordSuccessTarget 写入行（ctx.sessionId 存在时，与 observability 平行正路线）；related 补新 spec。
 
 ## 2026-07-14 · v0.0.144（config 装配断链修复 + llm_attempt 补 maxAttempts/message）
 

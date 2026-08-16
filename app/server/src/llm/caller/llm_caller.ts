@@ -47,6 +47,11 @@ import type { ContextCompressor } from './length_context';
 // dev 调试日志（llm hook，spec dev-logs §3.1）
 import type { LogWriter } from '../../dev-logs/log-writer';
 import { safeWriteLlm, type ResolvedResult } from '../../dev-logs/llm-log-helper';
+// [v0.0.347] 模型路由：routingAttemptLoop（有 routingPlan 时走候选决策循环）
+import { routingAttemptLoop, type RoutingPlanInput } from './routing_loop';
+import type { CircuitBreakerRegistry } from './circuit_breaker_registry';
+// [v0.0.359 T1] 成功 target registry（squad 用量统计归属：记调用成功那一下的 physical model）
+import { recordSuccessTarget } from './success-target-registry';
 
 /** invoke 输入的 canonical 请求（agent loop 组装的基线）。 */
 export type InvokeBaseReq = CanonicalRequest;
@@ -55,6 +60,29 @@ export type InvokeBaseReq = CanonicalRequest;
 export interface ObservabilityPort {
   /** 记录物理 wire body（onWire 钩子写入）。每 attempt 调一次。 */
   recordWireBody?(attempt: number, body: unknown, url: string): void;
+  /**
+   * [v0.0.353 T2] 记录本次 wire attempt 的真实 target（调用谁记录谁）。
+   * 每次确定 target 后立即调用（分支1 resolveTarget 返回 / 分支2 routing 候选组装后），
+   * 在 onWire 之前——供 physical generation 用真实 provider/model 启动。
+   * target 未传时 safe 不报错（port 实现内部兜底）。
+   */
+  recordAttemptTarget?(target: {
+    providerId: string;
+    providerName: string;
+    modelId: string;
+  }): void;
+  /**
+   * [v0.0.353 T5 D9] 被跳过候选逐条记录（物理层同级 gen，标 skipped）。
+   * routing_loop 6 处 skip 分支（时间窗/enabled/熔断 open/banned/resolve 失败/half-open permit）
+   * continue 前调用；reason 枚举与 D9 契约一致。port 可选 + 内部 safe 包裹，
+   * observability 失败绝不影响路由主流程（skip 语义本身不变）。
+   */
+  recordSkippedCandidate?(cand: {
+    providerId: string;
+    providerName?: string;
+    modelId: string;
+    reason: 'time_window' | 'disabled' | 'circuit_open' | 'banned' | 'resolve_failed' | 'probe_inflight';
+  }): void;
   /** 成功结束。 */
   endGenerationOk?(message: Message, usage: Usage | null): void;
   /** 失败结束（不塌缩 LOOP_ERROR，带 errorCategory）。 */
@@ -112,6 +140,18 @@ export interface InvokeContext {
    *   { provider, model, request: baseReq, response: InvokeResponse | error }
    */
   logWriter?: LogWriter;
+  /**
+   * [v0.0.347] 模型路由方案（SessionConfig.modelRoutingPlan 透传；分支 2 才有）。
+   * 有 routingPlan → invokeCore 走 routingAttemptLoop（候选决策循环）；
+   * 缺省 undefined → 现有 attemptLoop 路径（分支 1 零改动）。
+   */
+  routingPlan?: RoutingPlanInput;
+  /**
+   * [v0.0.347] 熔断注册表（进程内存单例；DI 注入）。
+   * 缺省 undefined → routing_loop 内部用 getCircuitBreakerRegistry() 单例（生产路径）。
+   * 测试注入隔离实例。
+   */
+  circuitRegistry?: CircuitBreakerRegistry;
 }
 
 /** invoke 返回的聚合响应（含 message / usage / stopReason）。 */
@@ -205,6 +245,13 @@ async function invokeCore(
   physicalGens: GenHandle[],
   obsState: { observabilityEnded: boolean },
 ): Promise<InvokeResponse> {
+  // [v0.0.347] 路由分支：有 routingPlan（分支 2 挂载方案）→ 走 routingAttemptLoop（候选决策循环）。
+  // 候选决策（时间过滤→enabled→熔断→banned→调用→差异化重试→降级）全在 routing_loop 上层，
+  // 复用 attemptLoop 单次调用（watchdog/classify/buildRequest overlay 全保留）；无 routingPlan →
+  // 现有循环（分支 1 零改动）。
+  if (ctx.routingPlan) {
+    return routingAttemptLoop(baseReqIn, ctx.routingPlan, ctx, physicalGens, obsState);
+  }
   // baseReq 可被 MAX_TOKENS_EXCEEDED one-shot ceiling bump 覆盖 params.maxTokens
   // （bumped 值不进 errorState overlay，直接改本次 attempt 的基线，spec §2.2）。
   let baseReq = baseReqIn;
@@ -248,7 +295,18 @@ async function invokeCore(
     }
     const target = resolved.target;
     onResolvedTarget(resolved); // 通知外层捕获最近 target（日志用）
+    // [v0.0.353 T2] 调用谁记录谁：target 确定后立即上报真实 provider/model（physical gen 用）
+    // 分支1 target 来自 resolveTarget（含 fallback 兜底）；providerName = provider.name（接入方标识）。
+    ctx.observability?.recordAttemptTarget?.({
+      providerId: target.providerId,
+      providerName: target.provider.name,
+      modelId: target.model.modelId,
+    });
     providerAttempt = 0;
+
+    // [v0.0.353 T4 根治版] branch-1 非路由路径同样现场注入当前 target modelId，
+    // 保证 fallback/resolve 链切换后 wire body 与真实 target 一致。
+    baseReq = { ...baseReq, modelId: target.model.modelId };
 
     // 内层 attempt 循环
     for (let attempt = 1; attempt <= config.retry.max_attempts; attempt++) {
@@ -277,6 +335,15 @@ async function invokeCore(
         Object.assign(ctx.errorState, clearTransientOnErrorState(ctx.errorState));
         if (appliedPrefill) delete ctx.errorState.prefillPartial;
         ctx.observability?.endGenerationOk?.(result.message, result.usage);
+        // [v0.0.359 T1] 记录「调用成功那一下」的真实 target（与 observability 平行的正路线，
+        // fire-and-forget 同步 Map.set 无异常面；ctx.sessionId 不存在时跳过）
+        if (ctx.sessionId) {
+          recordSuccessTarget(ctx.sessionId, {
+            providerId: target.providerId,
+            providerName: target.provider.name,
+            modelId: target.model.modelId,
+          });
+        }
         return { message: result.message, usage: result.usage, stopReason: result.stopReason };
       }
 

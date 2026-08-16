@@ -34,9 +34,12 @@ import type { ToolExecutionEngine } from '../tools/engine';
 import { buildRunErrorFromThrowable } from '../llm/caller/display_reason';
 import { emitRunStart, emitRunEnd, emitError, emitRequireHumanInput, emitToolExecutionStart, emitToolExecutionEnd } from './agent-loop-emitters';
 import type { LoopState, RunSpec, RunResult } from './loop-ports';
+import type { AppConfigService } from '../config/app-config-service';
+import type { PluginManager } from '../plugin/plugin-manager';
 import { initState, ensureRunCreated } from './agent-loop-lifecycle';
 import { callLLMForSpec } from './loop-stage-llm';
 import { prepareStage, ingestAssistant, ingestToolResults, hasPendingInput, runTryCompact } from './loop-stage-context';
+import { refreshRuntimeConfig } from './loop-runtime-config';
 // sumUsage 聚合每轮 callLLM usage 进 RunResult.usage（供 forked caller 总量累计）
 import { sumUsage } from './session-usage-helper';
 
@@ -152,11 +155,48 @@ export async function runReActLoop(spec: RunSpec): Promise<RunResult> {
         console.warn(`[compact async] ${msg}`);
       });
 
+      // —— ★ [v0.0.351 T1] 运行中配置实时刷新：prepareStage 后、callLLM 前 ——
+      //   读 session 最新 providerId/modelId/effort/approvalMode；模型变化时重建 client。
+      //   仅 main run 刷新；forked/subagent 保持启动快照。刷新失败吞错并继续使用旧 config。
+      if (spec.wireStore) {
+        await refreshRuntimeConfig(spec, {
+          store: spec.wireStore,
+          appConfig: spec.config.appConfig as AppConfigService,
+          pluginManager: spec.config.pluginManager as PluginManager,
+        });
+      }
+
+      // 刷新后再次检查中断，防止刷新期间用户中止 run
+      if (spec.controller.aborted) {
+        interrupted = true;
+        spec.observability.endStepSpan(state, false);
+        break;
+      }
+
       // —— ② callLLM（直调 base.callLLM；design §2 line 95-118，langfuse/obs 内联 loop-stage-llm）——
       const { assistant, usage } = await callLLMForSpec(spec, state);
 
       // 聚合本轮 usage 进 RunResult.usage（forked caller 按结束总量一次性累计）
       accumulatedUsage = sumUsage(accumulatedUsage, usage);
+
+      // —— ★ [v0.0.361 §1.4] summary 触发 full reminder：② 后、下次 ingest 前检查 ——
+      //   compact 完成（store.summary.version 变）→ 置 useFullReminder=true，让下一轮 ingest 回 full。
+      //   仅 main run（wireStore 存在）检查；forked/subagent 恒 full（无 wireStore 跳过，零行为变化）。
+      //   容错：读 summary 失败（mock 缺方法 / store 临时故障）→ 跳过检查，不阻断主 loop
+      //   （最多本轮不触发 full，下轮再查；检查点不应成为 run 新失败源）。
+      //   参考: specs/tech/version_logs/v0.0.361/change_plan.md §1.4
+      if (spec.wireStore) {
+        try {
+          const latestSummary = await spec.wireStore.getSummary(spec.config.sessionId);
+          const prevVersion = state.snapshot?.summary?.version ?? null;
+          const curVersion = latestSummary?.version ?? null;
+          if (prevVersion !== curVersion) {
+            state.useFullReminder = true;
+          }
+        } catch {
+          // 读 summary 失败 → 跳过本轮检查（降级为不触发 full；不阻断 loop）
+        }
+      }
 
       // —— 写回 assistant（ingest + emit message_end + tryCompact）+ onUsage ——
       await ingestAssistant(spec, state, assistant);

@@ -19,19 +19,21 @@ interface KeyChoiceCardsProps {
   onChange: (next: string) => void;
   /** testid 前缀（容器 `${testId}`；每卡 `${testId}-${value}`） */
   testId?: string;
+  /** [v0.0.350] 可选展示名映射（value → 友好名；缺省渲染 value 本身——既有消费方零影响） */
+  labels?: Record<string, string>;
 }
 
 /** 选项卡片组 */
-export function KeyChoiceCards({ value, options, onChange, testId }: KeyChoiceCardsProps) {
+export function KeyChoiceCards({ value, options, onChange, testId, labels }: KeyChoiceCardsProps) {
   return (
-    <div className="flex gap-2 w-full">
+    <div data-testid={testId} className="flex gap-2 w-full">
       {options.map((opt) => {
         const selected = opt === value;
         return (
           <button
             key={opt}
             type="button"
-
+            data-testid={testId ? `${testId}-${opt}` : undefined}
             aria-pressed={selected}
             data-selected={selected ? 'true' : 'false'}
             onClick={() => onChange(opt)}
@@ -41,8 +43,8 @@ export function KeyChoiceCards({ value, options, onChange, testId }: KeyChoiceCa
             }
           >
             <span className="flex items-center justify-between gap-2">
-              <span className={'text-[13px] font-medium capitalize ' + (selected ? 'text-accent' : 'text-fg-2')}>
-                {opt}
+              <span className={'text-[13px] font-medium ' + (selected ? 'text-accent' : 'text-fg-2')}>
+                {labels?.[opt] ?? opt}
               </span>
               {selected && (
                 <svg

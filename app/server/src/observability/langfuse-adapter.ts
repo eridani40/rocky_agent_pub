@@ -156,6 +156,7 @@ export class LangfuseAdapter implements ObservabilityAdapter {
   /**
    * LLM 前：enqueue create-gen（genKind 分支 + genArgs 组装保留）。
    * logical（默认）：name=`llm`/caller name，input=GenInput；physical：name=`llm-physical`，input=wire body，metadata.physicalWire=true。
+   * [v0.0.353 T2] providerId/providerName 写入 metadata（不污染 SDK model/name 字段，避免中文问题）；model 字段 = GenStart.model（真实 target modelId）。
    */
   startGeneration(p: GenStart): GenHandle {
     const id = ulid();
@@ -169,7 +170,17 @@ export class LangfuseAdapter implements ObservabilityAdapter {
         input: genKind === 'physical' ? p.physicalInput : p.input,
         startTime: p.startTime ?? new Date(),
       };
-      if (genKind === 'physical') genArgs.metadata = { physicalWire: true };
+      const meta: Record<string, unknown> = {};
+      if (p.providerId !== undefined) meta.providerId = p.providerId;
+      if (p.providerName !== undefined) meta.providerName = p.providerName;
+      // [v0.0.353 T3 A1] logical view 标识透传（true = 业务视图，真实 provider/model 在 physical 子 span）
+      if (p.logicalView !== undefined) meta.logicalView = p.logicalView;
+      // [v0.0.353 T5 D8] 生效路由方案透传（logical generation；有方案才带）
+      if (p.routingPlan !== undefined) meta.routingPlan = p.routingPlan;
+      // [v0.0.353 T5 D9] 额外 metadata（skipped gen 的 skipped/reason/provider 等；adapter 合并）
+      if (p.metadata !== undefined) Object.assign(meta, p.metadata);
+      if (genKind === 'physical') meta.physicalWire = true;
+      if (Object.keys(meta).length > 0) genArgs.metadata = meta;
       this.queue.enqueue({ kind: 'create-gen', id, parentId: p.parent.id, args: genArgs, genKind });
     } catch (e) {
       warnSuppressed('startGeneration', e);

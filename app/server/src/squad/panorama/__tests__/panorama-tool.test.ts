@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { ulid } from '../../../config/ulid';
+import { SquadStore, MemberStore } from '../../../stores/squad-store';
 import { panoramaTool, PANORAMA_TOOL_DEFINITION } from '../tool/panorama-tool';
 import { emitPanoramaEvent, panoramaGroup } from '../http/sse';
 import type { AgentToolRuntimeContext } from '../../../agent/tools/runtime-context';
@@ -271,5 +273,85 @@ describe('panorama SSE — emitPanoramaEvent', () => {
 
   it('bus 未注入 → 静默跳过不抛', () => {
     expect(() => emitPanoramaEvent(null, squadId, { type: 'panorama_schema_update', squadId, seq: 1 })).not.toThrow();
+  });
+});
+
+// ============================================================
+// [v0.0.361 T4] task transition → reminder queue 写入（change_plan §1.5/§2 样例 E）
+// ============================================================
+describe('panorama tool — task transition reminder 写入', () => {
+  /** 建 squad + members fixture（真实 store）→ 返回 rtc + 各 session id */
+  async function seedSquad(): Promise<{
+    r: AgentToolRuntimeContext;
+    leaderSid: string; ownerSid: string; otherSid: string; chatSid: string; ownerId: string;
+  }> {
+    const sqId = ulid();
+    fs.mkdirSync(path.join(dataDir, 'squads', sqId, 'panorama', 'entities'), { recursive: true });
+    fs.mkdirSync(path.join(dataDir, 'squads', sqId, 'panorama', '.state'), { recursive: true });
+    const leaderId = ulid();
+    const ownerId = ulid();
+    const otherId = ulid();
+    const leaderSid = ulid();
+    const ownerSid = ulid();
+    const otherSid = ulid();
+    const chatSid = ulid();
+    const squadStore = new SquadStore({ root: dataDir });
+    const memberStore = new MemberStore({ root: dataDir });
+    await squadStore.putSquad({
+      id: sqId, name: 'S', modelDefault: 'm', leaderId,
+      memberIds: [leaderId, ownerId, otherId], squadChatSessionId: chatSid, enableHeartBeat: false,
+    } as Parameters<SquadStore['putSquad']>[0]);
+    const base = { squadId: sqId, role: 'mate', tools: [], skillConfig: { mode: 'inherit' }, state: 'deployed' };
+    await memberStore.putMember({ id: leaderId, ...base, sessionId: leaderSid, name: 'darvin', role: 'leader' } as never);
+    await memberStore.putMember({ id: ownerId, ...base, sessionId: ownerSid, name: 'coder' } as never);
+    await memberStore.putMember({ id: otherId, ...base, sessionId: otherSid, name: 'other' } as never);
+    return { r: { ...rtc(), selfSquadId: sqId } as AgentToolRuntimeContext, leaderSid, ownerSid, otherSid, chatSid, ownerId };
+  }
+
+  /** 读 {sid} 的 reminder queue entries */
+  function readQueue(sid: string): Array<{ key: string; value: string }> {
+    const p = path.join(dataDir, 'sessions', sid, 'reminder_queue.json');
+    if (!fs.existsSync(p)) return [];
+    return (JSON.parse(fs.readFileSync(p, 'utf8')) as { entries: Array<{ key: string; value: string }> }).entries;
+  }
+
+  it('transition task → task:{id} 渲染行写 audience（owner+leader；无关 member/squadChat 不写）', async () => {
+    const { r, leaderSid, ownerSid, otherSid, chatSid, ownerId } = await seedSquad();
+    await run({ action: 'create', entity: 'task', fields: { id: 't-1', title: '写入方接线', owner: ownerId } }, r);
+    const tr = await run({ action: 'transition', entity: 'task', id: 't-1', to: 'in_progress' }, r);
+    expect(jsonOf(tr)).toEqual({ ok: true, from: 'todo', to: 'in_progress' });
+    const line = { key: 'task:t-1', value: '[task] t-1「写入方接线」→ 进行中（owner: coder）' };
+    expect(readQueue(ownerSid).map((e) => [e.key, e.value])).toEqual([[line.key, line.value]]);
+    expect(readQueue(leaderSid).map((e) => [e.key, e.value])).toEqual([[line.key, line.value]]);
+    expect(readQueue(otherSid)).toEqual([]);
+    expect(readQueue(chatSid)).toEqual([]);
+  });
+
+  it('done 也是状态变化照写 + 非 task entity 不写', async () => {
+    const { r, ownerSid, ownerId } = await seedSquad();
+    await run({ action: 'create', entity: 'task', fields: { id: 't-2', title: '收尾', owner: ownerId } }, r);
+    await run({ action: 'transition', entity: 'task', id: 't-2', to: 'in_progress' }, r);
+    const done = await run({ action: 'transition', entity: 'task', id: 't-2', to: 'done' }, r);
+    expect(jsonOf(done)).toEqual({ ok: true, from: 'in_progress', to: 'done' });
+    expect(readQueue(ownerSid).map((e) => [e.key, e.value])).toEqual([
+      ['task:t-2', '[task] t-2「收尾」→ 已结束（owner: coder）'],
+    ]);
+    // 非 task entity（pipeline_run）transition 不写 reminder
+    await run({ action: 'define', dsl: DSL }, r);
+    await run({ action: 'create', entity: 'pipeline_run', fields: { id: 'pr-9' } }, r);
+    await run({ action: 'transition', entity: 'pipeline_run', id: 'pr-9', to: 'running' }, r);
+    expect(readQueue(ownerSid)).toHaveLength(1); // 仍只有 task:t-2 一行
+  });
+
+  it('squad record 不存在 → notify 静默 no-op（transition 主路径不受影响）', async () => {
+    // ghost squad：panorama 目录骨架在但 SquadStore 无 record（fanout audience 解析为空集）
+    const ghost = ulid();
+    fs.mkdirSync(path.join(dataDir, 'squads', ghost, 'panorama', 'entities'), { recursive: true });
+    fs.mkdirSync(path.join(dataDir, 'squads', ghost, 'panorama', '.state'), { recursive: true });
+    const r = { ...rtc(), selfSquadId: ghost } as AgentToolRuntimeContext;
+    await run({ action: 'create', entity: 'task', fields: { id: 't-3', title: 'X' } }, r);
+    const tr = await run({ action: 'transition', entity: 'task', id: 't-3', to: 'in_progress' }, r);
+    expect(jsonOf(tr)).toEqual({ ok: true, from: 'todo', to: 'in_progress' });
+    expect(fs.existsSync(path.join(dataDir, 'sessions'))).toBe(false);
   });
 });

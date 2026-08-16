@@ -18,6 +18,9 @@ v0.0.317 从 `component-tab-save-bar.tsx` 迁移并升级：改名 `SaveBar` + �
 - variant?: 'tab' | 'detail' — action-key 后缀模式：
   - `'tab'`（缺省）：action-key = `settings.tab.save` / `settings.tab.cancel`
   - `'detail'`：action-key = `settings.detail.save` / `settings.detail.cancel`
+- saveTestId?: string — 保存按钮 testid（T4 additive prop，不传=无 testid）
+- cancelTestId?: string — 取消按钮 testid（T4 additive prop，不传=无 testid）
+- trailing?: ReactNode — **[v0.0.349]** 尾部插槽：渲染在按钮组之后（右端），供消费方挂附加动作（如 provider detail 的删除 danger 按钮）；不传=零渲染，既有消费方零影响。删除等破坏性动作走 danger 按钮样式由插槽内容自带
 
 ## 视觉基线
 - dirty=true：status「● 有未保存的改动」+ 保存按钮高亮（accent bg）+ 取消按钮可见
@@ -29,3 +32,5 @@ v0.0.317 从 `component-tab-save-bar.tsx` 迁移并升级：改名 `SaveBar` + �
 ## 消费方
 - `app/web/src/components/app-dev-config-page/page-app-settings-merged.tsx`（dev config 页 tab 级，variant=tab）
 - `app/web/src/components/studio-page/component-seats-panel.tsx`（studio 面板级，variant=tab）
+- `app/web/src/components/app-dev-config-page/component-plan-detail.tsx`（方案详情页，variant=detail + saveTestId/cancelTestId）
+- `app/web/src/components/providers/component-provider-detail.tsx`（provider 详情页，variant=detail + **[v0.0.349] trailing=删除 danger 按钮**：已存 provider 且 onDeleted 存在才渲染）

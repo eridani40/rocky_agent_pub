@@ -36,6 +36,8 @@ interface SessionChromeView {
   sessionModel: { providerId: string; modelId: string } | null;
   /** 该 kind 的默认模型（picker 顶部「默认模型」项数据源）；未配置 → null */
   defaultModel: { providerId?: string; modelId: string } | null;
+  /** 该 kind 挂载的默认方案（picker「方案 · 名（默认）」数据源）；未挂载/方案被删 → null；academy 恒 null（同构：字段恒在） */
+  defaultRoutingPlan: { planId: string; planName: string } | null;
   effort: 'default' | 'low' | 'high' | 'max' | null;
   approvalMode: 'normal' | 'greenlight' | null;
   /** studio: squad 全体成员投影（群聊 actor 解析用）；其他 kind 恒 []（同构：字段恒在） */
@@ -61,13 +63,15 @@ interface SessionChromeView {
 
 `readOnly = session.derivation === 'subagent'`（与 kind 正交；subagent 保留宿主 kind）。
 
-### 3.2 defaultModel / tag / members 数据源
+### 3.2 defaultModel / defaultRoutingPlan / tag / members 数据源
 
-| kind | defaultModel 来源 | tag | members |
-|---|---|---|---|
-| playground | `app_config.default_models.default.chat`（modelId only） | '' | [] |
-| studio_member / studio_group | `squadStore.getSquad(session.squadId)` → `modelDefault` + `modelDefaultProviderId` | `squad.name · member.role` / `squad.name · 群聊` | `memberStore.listMembers(squadId)` 投影 |
-| academy_head / coach / student | `academyStore.getClassroom(session.academyClassroomId)` → `defaultModel {providerId?, modelId}` | '' | [] |
+| kind | defaultModel 来源 | defaultRoutingPlan 来源 | tag | members |
+|---|---|---|---|---|
+| playground | `app_config.default_models.default.chat`（modelId only） | `app_config.model_routing.default.playgroundPlanId` → `getPlan` 反查 `plan.name` | '' | [] |
+| studio_member / studio_group | `squadStore.getSquad(session.squadId)` → `modelDefault` + `modelDefaultProviderId` | `squad.modelRoutingPlanId` → `getPlan` 反查 `plan.name` | `squad.name · member.role` / `squad.name · 群聊` | `memberStore.listMembers(squadId)` 投影 |
+| academy_head / coach / student | `academyStore.getClassroom(session.academyClassroomId)` → `defaultModel {providerId?, modelId}` | 恒 `null`（非目标） | '' | [] |
+
+> `defaultRoutingPlan` 与运行时 `resolveModelRoutingPlan`（session-config.ts）同口径：方案被删（`getPlan` 返 undefined）→ `null`（视为未挂载，不 throw）；保证「显示 == 实际行为」。方案/默认模型互斥（T6），二选一。
 
 **降级规则**：squad/classroom 不存在、default 未配置 → 对应字段 null/[]，**不 throw 不 4xx**（chrome 是展示装饰，缺数据按未配置渲染）。tag 逐段降级：studio_member 对端 member 缺失（members 列表中查无 `session.memberId`，数据不一致）→ tag 仅 `squad.name`（无 `· role` 段）；squad 名缺失 → tag=''。数据源读取异常（IO error）同样按「缺数据」降级（`services/session-chrome.ts.safeRead()`）。
 
@@ -101,6 +105,7 @@ interface SessionCapabilities {
 
 - **只读聚合**：本端点纯读（session + squad/classroom + app_config），无副作用、无状态机交互。
 - **写路径不变**：model/effort/approvalMode 修改仍 `PUT /session/:id`（04 §2）；chrome 无 PUT。
+- **运行中可改 + 下轮生效**（v0.0.351）：session 运行中输入区三件套（sessionModel/effort/approvalMode）可编辑，PUT 落库后由 main run 每轮 iteration 边界 `refreshRuntimeConfig` 重读 session 最新值生效（`loop-runtime-config.ts`；旁路 run 保持启动快照）。
 - **取代的前端拼装**：`GET /session` + `GET /squad/:id` 两跳（旧 useStudioChatChrome）、academy 前端透传 classroom.defaultModel、playground useModelRestore 的 GET /session 回填——统一收敛为本端点一跳。
 - **测试**：确定性 HTTP 契约 → UT 覆盖（不进 AT，冒烟集铁律）。
 

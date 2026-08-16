@@ -89,8 +89,12 @@ interface ToolExecutionEngine {
    *   非 undefined 时 toolCall.name ∉ allowedTools → 不执行，返拒绝 result（isError=true，[v0.0.48] 统一 code `tool_not_allowed`，见 §3.1）
    * - [v0.0.101 breaking] execute 返签名从 `Promise<ToolResultBlock[]>` 改 `Promise<{ results: ToolResultBlock[]; pending: PendingToolCall[] }>`
    *   （悬挂型 tool 经 §5 interaction 钩子产 pending wrapper；caller=runReActLoop ③ 据 pending.length>0 决定 StopReason=tool_pending）
+   * - [v0.0.354] opts 增可选 `onResult?: (result, index) => void` 增量结果回调：每个 result push 进 results 的**同时**立即调用（不等整批完成）。
+   *   caller（executeAndEmit）注入 emit/span 逻辑实现「成功一个发一个」逐个 SSE 推送。7 条产出路径全覆盖（白名单外/未注册/
+   *   invalid-input/deny/ask-pending/interaction-pending/runTool）；index=该 result 在 toolCalls 中的下标；
+   *   回调抛错 fail-silent（对齐 writeToolLog，绝不影响执行主流程与返回值）。不传 = 现状（零行为变化）。
    */
-  execute(config: SessionConfig, toolCalls: ToolCallBlock[], allowedTools?: string[]): Promise<{ results: ToolResultBlock[]; pending: PendingToolCall[] }>;
+  execute(config: SessionConfig, toolCalls: ToolCallBlock[], allowedTools?: string[], opts?: ExecuteRunCtx): Promise<{ results: ToolResultBlock[]; pending: PendingToolCall[] }>;
 }
 ```
 
@@ -150,17 +154,19 @@ rejectToolCall(call: ToolCallBlock, reason: string): ToolResultBlock {
 
 ```
 // [v0.0.101 breaking] execute 返签名从 ToolResultBlock[] 改 {results, pending}
-execute(config, toolCalls, allowedTools?, ctx?):
+// [v0.0.354] pushResult 统一产出 helper：push results + 立即调 opts.onResult（try/catch fail-silent）
+execute(config, toolCalls, allowedTools?, ctx?, opts?):
   results: ToolResultBlock[] = []
   pending: PendingToolCall[] = []
   if (!config._readSet) config._readSet = new Set<string>()       // 跨 execute 共享 read 跟踪
   sharedReadSet = config._readSet
   allowedSet = allowedTools === undefined ? undefined : new Set(allowedTools)
-  for call of toolCalls:                                          // 串行，逐个
+  pushResult(result, i): results.push(result); try { opts?.onResult?.(result, i) } catch {}   // 7 条产出路径全走本 helper
+  for i, call of toolCalls:                                        // 串行，逐个（indexed：回调需下标）
     if (allowedSet !== undefined && !allowedSet.has(call.name))
-      results.push(rejectToolCall(call, 'not in whitelist')); continue  // [v0.0.48] 统一 `tool_not_allowed` code，见 §3.1
-    result, p = await executeOne(config, call, sharedReadSet, ctx)
-    results.push(result)
+      pushResult(rejectToolCall(call, 'not in whitelist'), i); continue  // [v0.0.48] 统一 `tool_not_allowed` code，见 §3.1
+    result, p = await executeOne(config, call, sharedReadSet, ctx)      // 其余 5 拒绝/悬挂路径同样走 pushResult（见 executeOne 各分支）
+    pushResult(result, i)
     if (p) pending.push(p)                                        // [v0.0.101] 收集悬挂 wrapper（一次性收集，不逐个退出）
   return { results, pending }
 

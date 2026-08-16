@@ -14,7 +14,12 @@
  *
  * 白盒：mock rtc（selfSquadId + selfMemberId + memberStore），验证 action 分派 + 越权防护。
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ulid } from '../../../config/ulid';
+import { SquadStore, MemberStore } from '../../../stores/squad-store';
 import { presenceTool } from '../presence-tool';
 import type { ToolCtx, ToolInput } from '../../../tools/types';
 import type { AgentToolRuntimeContext } from '../runtime-context';
@@ -42,6 +47,8 @@ function makeRtc(opts: {
   selfMemberId?: string;
   memberStore?: AgentToolRuntimeContext['memberStore'];
   noMemberStore?: boolean;
+  selfName?: string;
+  dataDir?: string;
 }): { rtc: AgentToolRuntimeContext; putSpy: ReturnType<typeof vi.fn> } {
   const currentMember: FakeMember = {
     id: opts.selfMemberId ?? 'M-1',
@@ -78,13 +85,13 @@ function makeRtc(opts: {
     parentScope: undefined,
     selfSessionId: 'SID-1',
     selfType: 'mate',
-    selfName: 'alice',
+    selfName: opts.selfName ?? 'alice',
     ...(opts.selfSquadId !== undefined ? { selfSquadId: opts.selfSquadId } : {}),
     ...(opts.selfMemberId !== undefined ? { selfMemberId: opts.selfMemberId } : {}),
     memberStore,
     agentManager: {} as never,
     store: {} as never,
-    sessionDeps: {} as never,
+    sessionDeps: (opts.dataDir !== undefined ? { dataDir: opts.dataDir } : {}) as never,
   };
   return { rtc, putSpy };
 }
@@ -214,5 +221,80 @@ describe('presence 工具 — 只写自己（selfMemberId，UC-14）', () => {
     const written = putSpy.mock.calls[0]![0] as Record<string, unknown>;
     // member id 应为 self（getMember 使用了 selfMemberId）
     expect(written.id).toBe('M-SELF');
+  });
+});
+
+// ── [v0.0.361 T4] reminder queue fanout（change_plan §1.5/§2 样例 C） ──
+
+describe('presence 工具 — reminder queue fanout', () => {
+  let root: string;
+  let squadId: string;
+  let selfMemberId: string;
+  let leaderSid: string;
+  let selfSid: string;
+  let chatSid: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'presence-ut-'));
+    const leaderId = ulid();
+    squadId = ulid();
+    selfMemberId = ulid();
+    leaderSid = ulid();
+    selfSid = ulid();
+    chatSid = ulid();
+    const squadStore = new SquadStore({ root });
+    const memberStore = new MemberStore({ root });
+    await squadStore.putSquad({
+      id: squadId, name: 'S', modelDefault: 'm', leaderId,
+      memberIds: [leaderId, selfMemberId], squadChatSessionId: chatSid, enableHeartBeat: false,
+    } as Parameters<SquadStore['putSquad']>[0]);
+    const base = { squadId, role: 'mate', tools: [], skillConfig: { mode: 'inherit' }, state: 'deployed' };
+    await memberStore.putMember({ id: leaderId, ...base, sessionId: leaderSid, name: 'darvin', role: 'leader' } as never);
+    await memberStore.putMember({ id: selfMemberId, ...base, sessionId: selfSid, name: 'bob' } as never);
+  });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  /** 读 {sid} 的 reminder queue entries */
+  function readQueue(sid: string): Array<{ key: string; value: string }> {
+    const p = join(root, 'sessions', sid, 'reminder_queue.json');
+    if (!existsSync(p)) return [];
+    return (JSON.parse(readFileSync(p, 'utf8')) as { entries: Array<{ key: string; value: string }> }).entries;
+  }
+
+  it('set → presence:{memberId} 渲染行 fanout 全员 + squadChat', async () => {
+    const { rtc } = makeRtc({ selfSquadId: squadId, selfMemberId, selfName: 'bob', dataDir: root });
+    const { isError } = await runPresence(rtc, { action: 'set', text: '正在写 UT' });
+    expect(isError).toBe(false);
+    const expectLine = [`[squad:agents] bob presence: 正在写 UT`];
+    for (const sid of [leaderSid, selfSid, chatSid]) {
+      expect(readQueue(sid).map((e) => [e.key, e.value])).toEqual(
+        expectLine.map((v) => [`presence:${selfMemberId}`, v]),
+      );
+    }
+  });
+
+  it('clear → 「presence 已清除」行', async () => {
+    const { rtc } = makeRtc({ selfSquadId: squadId, selfMemberId, selfName: 'bob', dataDir: root });
+    await runPresence(rtc, { action: 'set', text: 'x' });
+    const { isError } = await runPresence(rtc, { action: 'clear' });
+    expect(isError).toBe(false);
+    expect(readQueue(leaderSid).map((e) => [e.key, e.value])).toEqual([
+      [`presence:${selfMemberId}`, '[squad:agents] bob presence 已清除'],
+    ]);
+  });
+
+  it('dataDir 缺省 → fanout no-op（工具主路径不受影响）', async () => {
+    const { rtc } = makeRtc({ selfSquadId: squadId, selfMemberId, selfName: 'bob' });
+    const { isError } = await runPresence(rtc, { action: 'set', text: 'no dir' });
+    expect(isError).toBe(false);
+    expect(readQueue(leaderSid)).toEqual([]);
+    expect(readQueue(selfSid)).toEqual([]);
+  });
+
+  it('fanout 写失败（squad 不存在）→ 吞错不阻断工具返回', async () => {
+    const { rtc } = makeRtc({ selfSquadId: ulid(), selfMemberId, selfName: 'bob', dataDir: root });
+    const { isError, text } = await runPresence(rtc, { action: 'set', text: 'ghost squad' });
+    expect(isError).toBe(false);
+    expect(JSON.parse(text)).toEqual({ ok: true });
   });
 });

@@ -10,11 +10,19 @@
  * - ProviderName / ProtocolName 字面量 union（占位成员见各自注释）
  */
 
-/** provider 标识哪家接入方（按鉴权协议族）= 指向哪个 llm_provider ext impl */
+/**
+ * provider 标识哪家接入方（按鉴权协议族）= 指向哪个 llm_provider ext impl。
+ * v0.0.350 起 +4 native coding plan 类型（决策①，挂 llm_anthropic plugin 同 anthropic 协议域）。
+ */
 export type ProviderName =
   | 'anthropic_compatible' // Anthropic 直连及兼容端点
   | 'openai_compatible' // OpenAI / OpenRouter / Together / Ollama 等 Bearer 系
-  | 'glm'; // 智谱 GLM（未实现，仅占位）
+  | 'glm' // 智谱 GLM（未实现，仅占位）
+  // ---- v0.0.350 四渠道 coding plan native（均 anthropic 协议 + 各自额度查询能力）----
+  | 'kimi_coding_plan' // Kimi Coding Plan（额度型：5h+周桶，Bearer 查询）
+  | 'glm_coding_plan' // 智谱 GLM Coding Plan（额度型，查询端点裸 key 实测特例）
+  | 'minimax_coding_plan' // MiniMax Coding Plan（额度型：5h+周桶 status 门控）
+  | 'deepseek_api'; // DeepSeek 按量付费（余额型：balance_infos + is_available）
 
 /** protocol 标识请求翻译契约 = 指向哪个 llm_protocol ext impl */
 export type ProtocolName =
@@ -155,4 +163,53 @@ export interface LlmModelConfig {
 /** LlmClient 构造期可选注入的 tokenizer 契约（来源 context/usage 模块，本文只声明） */
 export interface Tokenizer {
   count(text: string): number;
+}
+
+// ---- v0.0.350 额度/余额查询统一形状（决策⑧；四渠道解析器唯一输出契约）----
+// 参考: specs/tech/version_logs/v0.0.350/change_plan.md 决策⑧ + specs/research/v0.0.350-live-verify.md
+
+/** 额度窗口口径：5 小时滚动 / 周限额（cc-switch 同口径两桶） */
+export type QuotaWindowKind = 'five_hour' | 'weekly';
+
+/** 单个额度桶（已用百分比口径；重置时间 ISO 本地化由前端做） */
+export interface QuotaTier {
+  window: QuotaWindowKind;
+  /** 已用百分比（0-100；kimi 由 limit/used 换算、minimax 由 100-remaining 反转、glm 直读） */
+  usedPercent: number;
+  /** 重置时间 ISO 字符串（缺失 = 渠道未提供，前端显示「--」） */
+  resetsAt?: string;
+}
+
+/** 额度查询错误（单渠道隔离语义，不炸整体；kind 供前端文案分类） */
+export interface QuotaError {
+  /** auth=凭证失效(401/403)；business=业务错误(透原始文案)；network=网络失败；timeout=15s 超时 */
+  kind: 'auth' | 'business' | 'network' | 'timeout';
+  message: string;
+}
+
+/**
+ * 额度/余额快照（统一形状；fetchedAt 由聚合端点填充）。
+ * - kind='quota'（额度型）：tiers + membership；kind='balance'（余额型）：balance + isAvailable。
+ * - error 态：仅 providerId/providerLabel/implId/error/fetchedAt 有值（LastGood 由前端持有）。
+ */
+export interface QuotaSnapshot {
+  providerId: string;
+  providerLabel: string;
+  implId: ProviderName;
+  kind: 'quota' | 'balance';
+  tiers?: QuotaTier[];
+  /** 套餐/会员档位（kimi membership.level / glm data.level） */
+  membership?: string;
+  balance?: {
+    currency: string;
+    /** 总额（数值化后的数字，前端格式化两位小数） */
+    total: number;
+    granted?: number;
+    toppedUp?: number;
+  };
+  /** deepseek is_available（余额是否可用） */
+  isAvailable?: boolean;
+  error?: QuotaError;
+  /** 快照拉取时刻（ms epoch；聚合端点统一 Date.now()） */
+  fetchedAt: number;
 }

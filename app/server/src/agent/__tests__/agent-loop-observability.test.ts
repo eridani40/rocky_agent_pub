@@ -518,6 +518,90 @@ describe('AgentLoop observability 埋点序列（mock:tool）', () => {
     expect(obs.currentGenIteration()).toBe(2);
   });
 
+  it('[v0.0.353 T3 A1] startGeneration 标 logicalView=true + providerId/providerName=null（真实信息下沉 physical 子 span）', () => {
+    // 自定义 spy 捕获 GenStart 全量 A1 字段（makeSpy 不记这些字段）
+    const startCalls: Array<{ providerId?: string | null; providerName?: string | null; logicalView?: boolean }> = [];
+    const adapter: ObservabilityAdapter = {
+      startTrace: () => ({ kind: 'trace', id: 't' }) as TraceHandle,
+      endTrace: () => {},
+      startGeneration: (p: GenStart) => {
+        startCalls.push({ providerId: p.providerId, providerName: p.providerName, logicalView: p.logicalView });
+        return { kind: 'gen', id: 'g1', parent: p.parent } as GenHandle;
+      },
+      endGeneration: () => {},
+      startSpan: () => ({ kind: 'span', id: 'sp', parent: { kind: 'trace', id: 't' } as TraceHandle }) as SpanHandle,
+      endSpan: () => {},
+      async shutdown() {},
+    };
+    const obs = new LoopObservability({
+      adapter, runId: 'r1', sessionId: 's1', modelId: 'm',
+      fallbackSystemPrompt: 'sys', toolDefinitions: [],
+    });
+    obs.startTrace([]);
+    const fakeState = { step: 0, ingestUpTo: null, llmUpTo: null, snapshot: null, done: false };
+    obs.startStepSpan(fakeState as never);
+    obs.startGeneration([], 0, new Date(), 'sys');
+    expect(startCalls).toHaveLength(1);
+    expect(startCalls[0]).toMatchObject({ providerId: null, providerName: null, logicalView: true });
+  });
+
+  it('[v0.0.353 T3 A1] endGeneration metadata 同样标 null/null/true（end 事件全量重建需对称标记）', () => {
+    const endMetas: Array<Record<string, unknown>> = [];
+    const adapter: ObservabilityAdapter = {
+      startTrace: () => ({ kind: 'trace', id: 't' }) as TraceHandle,
+      endTrace: () => {},
+      startGeneration: (p: GenStart) => ({ kind: 'gen', id: 'g1', parent: p.parent }) as GenHandle,
+      endGeneration: (p: GenEnd) => {
+        endMetas.push(p.metadata as unknown as Record<string, unknown>);
+      },
+      startSpan: () => ({ kind: 'span', id: 'sp', parent: { kind: 'trace', id: 't' } as TraceHandle }) as SpanHandle,
+      endSpan: () => {},
+      async shutdown() {},
+    };
+    const obs = new LoopObservability({
+      adapter, runId: 'r1', sessionId: 's1', modelId: 'm',
+      fallbackSystemPrompt: 'sys', toolDefinitions: [],
+    });
+    obs.startTrace([]);
+    const fakeState = { step: 0, ingestUpTo: null, llmUpTo: null, snapshot: null, done: false };
+    obs.startStepSpan(fakeState as never);
+    const gen = obs.startGeneration([], 0, new Date(), 'sys');
+    const assistant = { id: 'a1', role: 'assistant', content: [] } as never as Parameters<typeof obs.endGeneration>[1];
+    obs.endGeneration(gen, assistant, null, new Date());
+    expect(endMetas).toHaveLength(1);
+    expect(endMetas[0]).toMatchObject({ providerId: null, providerName: null, logicalView: true });
+  });
+
+  it('[v0.0.353 T3] startTrace 写 run 级 providerId 快照（opts.providerId 传入时；未传跳过）', () => {
+    const traceMetas: Array<Record<string, unknown>> = [];
+    const adapter: ObservabilityAdapter = {
+      startTrace: (p: TraceStart) => {
+        traceMetas.push(p.metadata as unknown as Record<string, unknown>);
+        return { kind: 'trace', id: 't' } as TraceHandle;
+      },
+      endTrace: () => {},
+      startGeneration: (p: GenStart) => ({ kind: 'gen', id: 'g1', parent: p.parent }) as GenHandle,
+      endGeneration: () => {},
+      startSpan: () => ({ kind: 'span', id: 'sp', parent: { kind: 'trace', id: 't' } as TraceHandle }) as SpanHandle,
+      endSpan: () => {},
+      async shutdown() {},
+    };
+    // 传入 → 快照落 TraceMetadata.providerId
+    const obsWith = new LoopObservability({
+      adapter, runId: 'r1', sessionId: 's1', modelId: 'm', providerId: 'p-main',
+      fallbackSystemPrompt: 'sys', toolDefinitions: [],
+    });
+    obsWith.startTrace([]);
+    expect(traceMetas[0]!.providerId).toBe('p-main');
+    // 未传 → 跳过（旧 fixture 零改动）
+    const obsWithout = new LoopObservability({
+      adapter, runId: 'r2', sessionId: 's2', modelId: 'm',
+      fallbackSystemPrompt: 'sys', toolDefinitions: [],
+    });
+    obsWithout.startTrace([]);
+    expect(traceMetas[1]!.providerId).toBeUndefined();
+  });
+
   it('[M1] trace systemPromptHash 在不同 config.systemPrompt 下不同（多 run 追踪 config 变更）', async () => {
     // runWithSpy 用 systemPrompt='sys'，再跑一遍 systemPrompt='other-sys-prompt'
     const { adapter: a1, calls: c1 } = makeSpy();
@@ -765,5 +849,81 @@ describe('AgentLoop observability 埋点序列（mock:tool）', () => {
     const genCall = calls.find((c) => c.method === 'startGeneration');
     expect(genCall).toBeTruthy();
     expect(genCall!.genContextWindowUsage).toBeUndefined();
+  });
+
+  // ── [v0.0.353 T5 D8] routingPlan 全链透传（logical gen metadata 记生效方案） ──
+
+  it('[v0.0.353 T5 D8] startTrace/startGeneration/endGeneration 带 routingPlan（opts.routingPlan 传入时）', () => {
+    const traceMetas: Array<Record<string, unknown>> = [];
+    const genStarts: Array<{ routingPlan?: unknown }> = [];
+    const genEnds: Array<Record<string, unknown>> = [];
+    const adapter: ObservabilityAdapter = {
+      startTrace: (p: TraceStart) => {
+        traceMetas.push(p.metadata as unknown as Record<string, unknown>);
+        return { kind: 'trace', id: 't' } as TraceHandle;
+      },
+      endTrace: () => {},
+      startGeneration: (p: GenStart) => {
+        genStarts.push({ routingPlan: p.routingPlan });
+        return { kind: 'gen', id: 'g1', parent: p.parent } as GenHandle;
+      },
+      endGeneration: (p: GenEnd) => {
+        genEnds.push(p.metadata as unknown as Record<string, unknown>);
+      },
+      startSpan: () => ({ kind: 'span', id: 'sp', parent: { kind: 'trace', id: 't' } as TraceHandle }) as SpanHandle,
+      endSpan: () => {},
+      async shutdown() {},
+    };
+    const obs = new LoopObservability({
+      adapter, runId: 'r1', sessionId: 's1', modelId: 'm',
+      routingPlan: { planId: 'plan-1', planName: '主方案' },
+      fallbackSystemPrompt: 'sys', toolDefinitions: [],
+    });
+    obs.startTrace([]);
+    const fakeState = { step: 0, ingestUpTo: null, llmUpTo: null, snapshot: null, done: false };
+    obs.startStepSpan(fakeState as never);
+    const gen = obs.startGeneration([], 0, new Date(), 'sys');
+    const assistant = { id: 'a1', role: 'assistant', content: [] } as never as Parameters<typeof obs.endGeneration>[1];
+    obs.endGeneration(gen, assistant, null, new Date());
+    // 三层对称：trace metadata + gen start + gen end 全带 routingPlan
+    expect(traceMetas[0]!.routingPlan).toEqual({ planId: 'plan-1', planName: '主方案' });
+    expect(genStarts[0]!.routingPlan).toEqual({ planId: 'plan-1', planName: '主方案' });
+    expect(genEnds[0]!.routingPlan).toEqual({ planId: 'plan-1', planName: '主方案' });
+  });
+
+  it('[v0.0.353 T5 D8] 无 routingPlan（分支 1）→ startTrace/startGeneration/endGeneration 均不含该字段（零行为变化）', () => {
+    const traceMetas: Array<Record<string, unknown>> = [];
+    const genStarts: Array<{ routingPlan?: unknown }> = [];
+    const genEnds: Array<Record<string, unknown>> = [];
+    const adapter: ObservabilityAdapter = {
+      startTrace: (p: TraceStart) => {
+        traceMetas.push(p.metadata as unknown as Record<string, unknown>);
+        return { kind: 'trace', id: 't' } as TraceHandle;
+      },
+      endTrace: () => {},
+      startGeneration: (p: GenStart) => {
+        genStarts.push({ routingPlan: p.routingPlan });
+        return { kind: 'gen', id: 'g1', parent: p.parent } as GenHandle;
+      },
+      endGeneration: (p: GenEnd) => {
+        genEnds.push(p.metadata as unknown as Record<string, unknown>);
+      },
+      startSpan: () => ({ kind: 'span', id: 'sp', parent: { kind: 'trace', id: 't' } as TraceHandle }) as SpanHandle,
+      endSpan: () => {},
+      async shutdown() {},
+    };
+    const obs = new LoopObservability({
+      adapter, runId: 'r2', sessionId: 's2', modelId: 'm',
+      fallbackSystemPrompt: 'sys', toolDefinitions: [],
+    });
+    obs.startTrace([]);
+    const fakeState = { step: 0, ingestUpTo: null, llmUpTo: null, snapshot: null, done: false };
+    obs.startStepSpan(fakeState as never);
+    const gen = obs.startGeneration([], 0, new Date(), 'sys');
+    const assistant = { id: 'a1', role: 'assistant', content: [] } as never as Parameters<typeof obs.endGeneration>[1];
+    obs.endGeneration(gen, assistant, null, new Date());
+    expect(traceMetas[0]!.routingPlan).toBeUndefined();
+    expect(genStarts[0]!.routingPlan).toBeUndefined();
+    expect(genEnds[0]!.routingPlan).toBeUndefined();
   });
 });

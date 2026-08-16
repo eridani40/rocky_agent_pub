@@ -262,6 +262,8 @@ describe('PageStudio', () => {
     // panorama subscribe 同理：auto-cleanup 触发的 unmount 会调 unsubscribe，
     //   reset 后需默认可用实现避免 .catch(undefined) 崩溃
     panoramaMocks.subscribe.mockResolvedValue(makeSubHandle());
+    // [bugfix 2026-08-15] 清 pin 状态：置顶用例写入 localStorage，防跨用例污染默认选中断言
+    localStorage.removeItem('studio.squadPins');
   });
 
   it('挂载 → sidebar 渲染 squad 列表 + 新建按钮；自动选中第一个 → 落坐席面板（v0.0.165 T5 IA D7）', async () => {
@@ -272,6 +274,20 @@ describe('PageStudio', () => {
     expect(await screen.findByRole('button', { name: /Alpha 小队/ })).toBeTruthy();
     // [v0.0.165 T5] 自动选中第一个 → 坐席面板（selectSquad 默认落 'seats'，不再是 SquadPanel/studio-main）
     expect(await seatsPanelSignal()).toBeTruthy();
+  });
+
+  it('挂载默认选中=sidebar 视觉第一行（置顶优先，非 API 首位；bugfix 2026-08-15）', async () => {
+    // API 序 [Beta(updatedAt 最新), Alpha]；Alpha 置顶 → sortSquads 视觉第一行=Alpha
+    mocks.listSquads.mockResolvedValue([
+      mkSummary({ id: 's2', name: 'Beta 小队', updatedAt: '2026-07-01T00:00:00.000Z' }),
+      mkSummary(), // s1 Alpha（updatedAt 较旧，但被 pin）
+    ]);
+    localStorage.setItem('studio.squadPins', JSON.stringify(['s1']));
+    render(<PageStudio />);
+    await screen.findByRole('button', { name: /Beta 小队/ });
+    // 默认选中应取排序后第一个（置顶 s1），而非 API 原始序 list[0]（s2）
+    await waitFor(() => expect(mocks.getSquad).toHaveBeenCalledWith('s1'));
+    expect(mocks.getSquad).not.toHaveBeenCalledWith('s2');
   });
 
   it('点新建按钮 → 打开 new-squad wizard', async () => {

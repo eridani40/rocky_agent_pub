@@ -51,7 +51,7 @@ Studio 主区「团队首页」单页中枢容器：常驻头部（squad 名 + �
 | fallbackToSeats（mutation 回落 + token-stats/member/member-create 返回） | mutation handler 簇回落首页 seats | `void reloadDetail(selectedSquadId)`（v0.0.276 新增，非空时） |
 | handleChatBack（chat 返回） | chat 页 topbar 返回键回 seats | `void reloadDetail(chatBackSquadId)`（v0.0.276 新增，非空时） |
 
-**为什么需要（bug 核心）**：running/idle 状态（presence 三态 + spinner）**已由 SSE 实时覆盖**——`useStudioUnreadMeta` 订阅 `session_meta _all` → `stateMap[sid]`，`useSeatsData` 的 `derivePresence/isRunning` 走 stateMap，SSE 一直推。但 **presence 文本（member.currentWork）无 SSE**——Member.currentWork 只在 SquadDetail.members[]（presence tool 写 member store，不推 session_meta）→ **reloadDetail 是唯一刷新途径**。member.state（deployed/benched）为 detail 静态（mutation 后 refresh 已处理），reloadDetail 兜底。
+**为什么需要（bug 核心）**：running/idle 状态（presence 三态 + spinner）**已由 SSE 实时覆盖**——`useStudioUnreadMeta` 订阅 `session_meta _all` → `stateMap[sid]`，`useSeatsData` 的 `derivePresence/isRunning` 走 stateMap，SSE 一直推（**[v0.0.348]** 起底层为四层 hydration：同步订阅 + GET 冷启动补水 + updatedAt 竞态仲裁 + onResumed 重连校正——订阅前/断连窗口丢的帧由 GET 基线兜回，三张 map 不再永久错态）。但 **presence 文本（member.currentWork）无 SSE**——Member.currentWork 只在 SquadDetail.members[]（presence tool 写 member store，不推 session_meta）→ **reloadDetail 是唯一刷新途径**。member.state（deployed/benched）为 detail 静态（mutation 后 refresh 已处理），reloadDetail 兜底。
 
 **fire-and-forget（R5）**：进/返 seats 调 `void reloadDetail`（不 await 阻塞渲染）——立即渲染旧 detail，GET 返回 setDetail 新对象 → re-render 更新；本地 server GET 快，用户几乎无感。
 

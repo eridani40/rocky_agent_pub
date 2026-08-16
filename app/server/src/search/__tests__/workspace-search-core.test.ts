@@ -1,10 +1,12 @@
 /**
  * workspace-search-core UT —— searchWorkspace 公共搜索核心（v0.0.346）
  * 参考: specs/tech/version_logs/v0.0.346/change_plan.md（search-core 行 + tests 行）
+ *       specs/tech/version_logs/v0.0.360/change_plan.md §1.1（symlink 受控跟随 C1-C6）
  *
  * 覆盖 change_plan tests 行必覆盖清单：
  *   basename 匹配 / pathMode 完整相对路径匹配 / 目录命中不递归其下层 / node_modules+.git 排除 /
- *   点开头目录可遍历可命中 / 100 条早停 truncated:true / symlink 目录不递归
+ *   点开头目录可遍历可命中 / 100 条早停 truncated:true / symlink 受控跟随（v0.0.360：
+ *   workspace 内 symlink = 授权 → 跟随递归；realpath visited 防循环；broken symlink 跳过）
  *
  * 文件系统隔离：tmpdir + mkdtemp + afterEach rm（no-mock fs，对齐既有 handler UT 风格）。
  */
@@ -132,20 +134,60 @@ describe('searchWorkspace', () => {
     expect(r.truncated).toBe(false);
   });
 
-  it('symlink 目录不递归（出 workspace 目标 / 循环引用均不跟随）', () => {
+  it('[v0.0.360] symlink→dir 受控跟随：workspace 内链接 = 授权，目标内文件可命中（目标可在 workspace 外）', () => {
     const ws = makeWs();
     const outside = mkdtempSync(join(tmpdir(), 'oobt-searchcore-out-'));
     tmpRoots.push(outside);
     try {
       writeFileSync(join(outside, 'secret-helper.txt'), 'secret');
       symlinkSync(outside, join(ws, 'link'));
-      symlinkSync(ws, join(ws, 'self'));
       writeFileSync(join(ws, 'inside-helper.txt'), 'x');
 
       const r = searchWorkspace(ws, 'helper');
+      // 语义翻转核心：经 workspace 内 symlink 进入的目标目录递归跟随，其内文件按链接路径返回
       expect(r.files).toContain('inside-helper.txt');
-      expect(r.files.some((p: string) => p.includes('secret-helper'))).toBe(false);
-      // 循环 self 未导致无限递归 → 正常返回即证明
+      expect(r.files).toContain('link/secret-helper.txt');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('[v0.0.360] 循环引用不死循环：self/祖先链接 realpath 归一后去重，正常返回', () => {
+    const ws = makeWs();
+    // self → 根（自指循环）
+    symlinkSync(ws, join(ws, 'self'));
+    // 祖先回环：sub/back → sub（祖先指向）
+    mkdirSync(join(ws, 'sub'), { recursive: true });
+    symlinkSync(join(ws, 'sub'), join(ws, 'sub', 'back'));
+    writeFileSync(join(ws, 'self-helper.txt'), 'x');
+    writeFileSync(join(ws, 'sub', 'helper.txt'), 'x');
+
+    const r = searchWorkspace(ws, 'helper');
+    // 循环未导致无限递归 → 正常返回；各自真实文件命中
+    expect(r.files).toEqual(expect.arrayContaining(['self-helper.txt', 'sub/helper.txt']));
+    expect(r.truncated).toBe(false);
+  });
+
+  it('[v0.0.360] 多级 symlink 链跟随（a→b→file 链式授权逐段解析）+ broken symlink 跳过', () => {
+    const ws = makeWs();
+    const outside = mkdtempSync(join(tmpdir(), 'oobt-searchcore-chain-'));
+    tmpRoots.push(outside);
+    try {
+      mkdirSync(join(outside, 'docs'), { recursive: true });
+      writeFileSync(join(outside, 'docs', 'guide-helper.md'), 'x');
+      // 链式（两段均在 workspace 外也无妨——逐段解析直至真实目录）：
+      //   outside/docs 真目录 → outside/b 链 → ws/a 链；ws 内唯一入口 = a
+      symlinkSync(join(outside, 'docs'), join(outside, 'b'));
+      symlinkSync(join(outside, 'b'), join(ws, 'a'));
+      // broken：指向不存在目标
+      symlinkSync(join(ws, 'no-such-target'), join(ws, 'broken'));
+
+      const r = searchWorkspace(ws, 'helper');
+      // 多级链逐段跟随（a → b → docs，含链中间段在 workspace 外）：guide-helper.md 经最外层
+      //   链接路径返回；ws 内 a 是唯一入口 → 断言无 readdir 顺序依赖
+      expect(r.files).toEqual(['a/guide-helper.md']);
+      // broken symlink → statSync 失败 → 跳过（不崩、不进结果）
+      expect(r.files.some((p: string) => p.startsWith('broken'))).toBe(false);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

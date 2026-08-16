@@ -6,21 +6,26 @@
  * 职责：providers group 内容区根；持 view 状态机（list | detail）+ draft/snapshot + save diff；
  *   挂载 GET /provider 加载（响应含 items + protocols，[v0.0.53] cache protocols 给 fields）；
  *   detail 保存调 saveProviderWithModels → reload → 回 list。
+ *   [v0.0.350 决策⑤⑥] 保存链透传 name（类型）；list 视图底部挂 CodingPlansQuotaFooter
+ *   （native 子集非空才渲染；额度轮询在组件内 use-quota-polling）。
  * 边界：自管理，仅通过 onViewLevelChange 上抛 view level（[v0.0.140] detail 二级页时
  *   父级隐藏同 tab 的 default_models/llm_request group）。
  *
  * testid: providers-section
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   loadProvidersAndProtocols,
   saveProviderWithModels,
+  deleteProvider,
   type ProviderInstance,
   type ModelInstance,
   type ProtocolMeta,
 } from '../../lib/api-client';
 import { ComponentProviderListCard } from './component-provider-list-card';
+import { isNativeCodingPlan } from './provider-type-presets';
+import { CodingPlansQuotaFooter } from './component-coding-plans-quota-footer';
 import {
   ComponentProviderDetail,
   type ProviderDraft,
@@ -93,6 +98,8 @@ export function SectionProviders({ onViewLevelChange }: SectionProvidersProps = 
           enabled: draft.enabled,
           // [v0.0.53] protocolId 必传（新建 provider 必填，已存 diff 算 dirty）
           protocolId: draft.protocolId,
+          // [v0.0.350 决策⑤] name 类型透传（POST 必传；PUT name 变化才传）
+          name: draft.name,
           models: draft.models as ModelInstance[],
         });
         await reload();
@@ -104,7 +111,31 @@ export function SectionProviders({ onViewLevelChange }: SectionProvidersProps = 
     [providers, view, reload],
   );
 
+  /** [v0.0.349] 二级页删除确认 → DELETE → reload → 回 list（即时生效，不进 diff-save） */
+  const handleDeleted = useCallback(async () => {
+    if (view.level !== 'detail' || !view.pid) return;
+    setError(null);
+    try {
+      await deleteProvider(view.pid);
+      await reload();
+      setView({ level: 'list' });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [view, reload]);
+
   const totalModels = providers.reduce((s, p) => s + p.models.length, 0);
+  // [v0.0.352 T1] 按 enabled 分组：默认渲染启用组；停用组非空时渲染折叠入口
+  const { enabledProviders, disabledProviders } = useMemo(
+    () => ({
+      enabledProviders: providers.filter((p) => p.enabled),
+      disabledProviders: providers.filter((p) => !p.enabled),
+    }),
+    [providers],
+  );
+  const [disabledExpanded, setDisabledExpanded] = useState(false);
+  // [v0.0.350 决策⑥] native coding plan 子集（额度总览参与渠道；旧 record 无 name → 视为通用不参与）
+  const nativeProviders = providers.filter((p) => isNativeCodingPlan(p.name));
 
   return (
     <div className="flex flex-col">
@@ -121,6 +152,7 @@ export function SectionProviders({ onViewLevelChange }: SectionProvidersProps = 
           protocols={protocols}
           onBack={backToList}
           onSaved={handleSaved}
+          onDeleted={handleDeleted}
         />
       ) : (
         <>
@@ -134,12 +166,12 @@ export function SectionProviders({ onViewLevelChange }: SectionProvidersProps = 
           {loading ? (
             <div className="text-xs text-muted font-mono py-4">{t('common:status.loading')}</div>
           ) : (
-            providers.map((p) => (
+            enabledProviders.map((p) => (
               <ComponentProviderListCard key={p.id} provider={p} onClick={() => openDetail(p.id)} />
             ))
           )}
 
-          {/* 添加提供商卡：虚线边框 */}
+          {/* 添加提供商卡：虚线边框（始终置于启用组之后） */}
           <button
             type="button"
             data-action-key="providers.provider.create"
@@ -148,6 +180,50 @@ export function SectionProviders({ onViewLevelChange }: SectionProvidersProps = 
           >
             <span className="text-[14px] font-medium">{t('section.addProvider')}</span>
           </button>
+
+          {/* [v0.0.352 T1] 停用折叠入口：非空时渲染，点击切换展开态 */}
+          {!loading && disabledProviders.length > 0 && (
+            <button
+              type="button"
+              data-testid="providers-disabled-fold"
+              onClick={() => setDisabledExpanded((v) => !v)}
+              className={`mt-2 flex items-center justify-center gap-2 w-full py-2 text-[12px] text-muted transition-colors ${
+                disabledExpanded ? 'border border-border rounded-[10px] hover:border-border-strong' : 'border border-dashed border-border-strong rounded-[10px] hover:border-border-strong hover:text-fg-2'
+              }`}
+            >
+              <span>{t('fold.disabled', { count: disabledProviders.length })}</span>
+              <svg
+                aria-hidden
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`transition-transform ${disabledExpanded ? 'rotate-180' : ''}`}
+              >
+                <path d={disabledExpanded ? 'M6 9l6 6 6-6' : 'M9 6l6 6-6 6'} />
+              </svg>
+            </button>
+          )}
+
+          {/* [v0.0.352 T1] 展开的停用 provider 列表 */}
+          {!loading && disabledExpanded && (
+            <div data-testid="providers-disabled-list" className="mt-2">
+              {disabledProviders.map((p) => (
+                <ComponentProviderListCard key={p.id} provider={p} onClick={() => openDetail(p.id)} />
+              ))}
+            </div>
+          )}
+
+          {/* [v0.0.350 决策⑥] 额度总览 footer：仅 list 视图底部 + 存在 native provider 时渲染 */}
+          {nativeProviders.length > 0 && (
+            <CodingPlansQuotaFooter
+              providers={nativeProviders.map((p) => ({ id: p.id, label: p.label, baseUrl: p.baseUrl }))}
+            />
+          )}
         </>
       )}
     </div>
@@ -161,12 +237,15 @@ function Detail({
   protocols,
   onBack,
   onSaved,
+  onDeleted,
 }: {
   providers: ProviderInstance[];
   pid: string | null;
   protocols: ProtocolMeta[];
   onBack: () => void;
   onSaved: (draft: ProviderDraft) => void;
+  /** [v0.0.349] 删除确认回调（DELETE + reload + 回 list） */
+  onDeleted: () => void;
 }) {
   const provider = pid ? providers.find((p) => p.id === pid) ?? null : null;
   return (
@@ -175,6 +254,7 @@ function Detail({
       protocolOptions={protocols}
       onBack={onBack}
       onSaved={onSaved}
+      onDeleted={onDeleted}
     />
   );
 }

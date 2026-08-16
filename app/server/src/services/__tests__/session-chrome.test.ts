@@ -178,6 +178,57 @@ describe('buildSessionChrome — 降级（缺数据 null/[]，绝不 throw）', 
   });
 });
 
+describe('buildSessionChrome — defaultRoutingPlan 方案投影（v0.0.357，与 resolveModelRoutingPlan 同口径）', () => {
+  /** mock appConfig：按 group/key 路由 model_routing / model_routing_plans / default_models */
+  function mkAppConfig(map: Record<string, unknown>): SessionChromeSources['appConfig'] {
+    return { get: (g, k) => map[`${g}/${k}`] };
+  }
+  const PLAN = { id: 'plan-1', name: '方案 甲', items: [], createdAt: 1 };
+
+  it('playground 挂方案 → defaultRoutingPlan 有值 + defaultModel null（academy 恒 null）', async () => {
+    const deps = emptySources();
+    deps.appConfig = mkAppConfig({
+      'model_routing/default': { playgroundPlanId: 'plan-1' },
+      'model_routing_plans/plan-1': PLAN,
+    });
+    const view = await buildSessionChrome(mkSession(), deps);
+    expect(view.kind).toBe('playground');
+    expect(view.defaultRoutingPlan).toEqual({ planId: 'plan-1', planName: '方案 甲' });
+    // 未配 default_models.chat → defaultModel 保持 null（两维度独立投影）
+    expect(view.defaultModel).toBeNull();
+    // academy 恒 null（同构字段恒在，非目标 kind）
+    const ac = await buildSessionChrome(
+      mkSession({ biz: 'academy', role: 'coach', academyClassroomId: 'c1' }), deps,
+    );
+    expect(ac.defaultRoutingPlan).toBeNull();
+  });
+
+  it('studio 挂方案 → defaultRoutingPlan 有值；方案被删（getPlan 返 undefined）→ null 不 throw', async () => {
+    const deps = emptySources();
+    deps.appConfig = mkAppConfig({ 'model_routing_plans/plan-1': PLAN });
+    deps.squadStore = {
+      getSquad: async () => ({ name: 'S队', modelRoutingPlanId: 'plan-1' }),
+    };
+    const view = await buildSessionChrome(
+      mkSession({ biz: 'studio', role: 'leader', squadId: 'sq1', memberId: 'm1' }), deps,
+    );
+    expect(view.kind).toBe('studio_member');
+    expect(view.defaultRoutingPlan).toEqual({ planId: 'plan-1', planName: '方案 甲' });
+    expect(view.defaultModel).toBeNull();
+
+    // 方案被删：model_routing_plans 查无 → 降级 null（挂载悬空，与 resolve 同口径）
+    const deps2 = emptySources();
+    deps2.appConfig = mkAppConfig({});
+    deps2.squadStore = {
+      getSquad: async () => ({ name: 'S队', modelRoutingPlanId: 'plan-gone' }),
+    };
+    const view2 = await buildSessionChrome(
+      mkSession({ biz: 'studio', role: 'leader', squadId: 'sq1', memberId: 'm1' }), deps2,
+    );
+    expect(view2.defaultRoutingPlan).toBeNull();
+  });
+});
+
 describe('buildSessionChrome — sessionModel / readOnly / 同构 shape', () => {
   it('sessionModel：保留字 default/none/空 → null；具体值 → {providerId, modelId}', async () => {
     for (const mid of ['default', 'none', '', undefined]) {

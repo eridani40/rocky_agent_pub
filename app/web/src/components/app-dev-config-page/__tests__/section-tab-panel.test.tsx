@@ -16,6 +16,7 @@
  * vi.mock 用绝对路径（MEMORY: bun+jsdom 并发下相对路径 vi.mock 静默失效）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { useState, useEffect } from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { initI18n } from '../../../i18n';
 
@@ -29,6 +30,17 @@ const observabilityPath = vi.hoisted(() =>
 const logsConfigPath = vi.hoisted(() =>
   require('node:path').resolve(__dirname, '../section-logs-config'),
 );
+const providersPath = vi.hoisted(() =>
+  require('node:path').resolve(__dirname, '../../providers/section-providers'),
+);
+const modelRoutingPath = vi.hoisted(() =>
+  require('node:path').resolve(__dirname, '../section-model-routing-plans'),
+);
+
+// [T4-blocking 回归教训] mock 可观测计数器：若 models case list↔detail 分支结构不同构
+// （children 同位置节点类型变化），React reconciliation 会卸载重挂 Section——计数器递增。
+const providersMockState = vi.hoisted(() => ({ mountCount: 0 }));
+const plansMockState = vi.hoisted(() => ({ mountCount: 0 }));
 
 // mock SectionObservability：暴露两个按钮模拟 list↔detail 切换（上抛 onDetailViewChange）
 vi.mock(observabilityPath, () => ({
@@ -43,6 +55,53 @@ vi.mock(observabilityPath, () => ({
 // mock SectionLogsConfig：logs group 不再走 kvGroups，改由 SectionLogsConfig 自行 GET /config/app?group=logs
 vi.mock(logsConfigPath, () => ({
   SectionLogsConfig: () => <div>logs-config-mock</div>,
+}));
+// [T4-blocking 回归] mock 用**真实 useState** 持内部 view state + 挂载计数器 + 挂载时上抛
+// list（同真实 section 机制）：list→detail 切换若触发 reconciliation 重挂，内部 state 归零
+// （闪回 list）+ mountCount 递增——两条断言都能拦截。
+vi.mock(providersPath, () => ({
+  SectionProviders: ({ onViewLevelChange }: { onViewLevelChange?: (l: 'list' | 'detail') => void }) => {
+    const [level, setLevel] = useState<'list' | 'detail'>('list');
+    useEffect(() => {
+      providersMockState.mountCount += 1;
+      onViewLevelChange?.('list'); // 挂载初始 list（同真实 section：切 tab 重挂后父级复位）
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return (
+      <div data-testid="providers-mock">
+        <span data-testid="providers-mock-level">{level}</span>
+        <button
+          type="button"
+          data-testid="providers-mock-enter"
+          onClick={() => { setLevel('detail'); onViewLevelChange?.('detail'); }}
+        >
+          进详情
+        </button>
+      </div>
+    );
+  },
+}));
+vi.mock(modelRoutingPath, () => ({
+  SectionModelRoutingPlans: ({ onViewLevelChange }: { onViewLevelChange?: (l: 'list' | 'detail') => void }) => {
+    const [level, setLevel] = useState<'list' | 'detail'>('list');
+    useEffect(() => {
+      plansMockState.mountCount += 1;
+      onViewLevelChange?.('list');
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return (
+      <div data-testid="plans-mock">
+        <span data-testid="plans-mock-level">{level}</span>
+        <button
+          type="button"
+          data-testid="plans-mock-enter"
+          onClick={() => { setLevel('detail'); onViewLevelChange?.('detail'); }}
+        >
+          进详情
+        </button>
+      </div>
+    );
+  },
 }));
 
 import { SectionTabPanel } from '../section-tab-panel';
@@ -60,6 +119,19 @@ function renderObservabilityTab() {
       consolidationDraft={{ enabled: false, dailyTime: '00:00' }}
     />,
   );
+}
+
+/** 构造 models tab 所需最小 props */
+function renderModelsTab() {
+  const props: SectionTabPanelProps = {
+    selectedTab: 'models',
+    kvGroups: {},
+    defaultModelsDraft: {},
+    onDefaultModelsChange: () => {},
+    onKeyChange: () => {},
+    consolidationDraft: { enabled: false, dailyTime: '00:00' },
+  };
+  return render(<SectionTabPanel {...props} />);
 }
 
 describe('SectionTabPanel — observability tab detail 视图隐藏 logs group（v0.0.199）', () => {
@@ -121,5 +193,42 @@ describe('SectionTabPanel — observability tab detail 视图隐藏 logs group�
     expect(screen.getByRole('heading', { name: '可观测性' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '日志' })).toBeTruthy();
     expect(screen.getByText('logs-config-mock')).toBeTruthy();
+  });
+});
+
+describe('SectionTabPanel — models tab list↔detail 不重挂（T4-blocking 回归）', () => {
+  beforeEach(() => {
+    cleanup();
+    providersMockState.mountCount = 0;
+    plansMockState.mountCount = 0;
+  });
+  afterEach(() => cleanup());
+
+  it('providers 进 detail：不重挂（mountCount 不变）+ 独占渲染（方案库隐藏）+ detail 态保持不闪回', async () => {
+    renderModelsTab();
+    expect(screen.getByTestId('providers-mock')).toBeTruthy();
+    expect(providersMockState.mountCount).toBe(1);
+    // 模拟真实 section 内部进详情：setLevel('detail') + 上抛 detail
+    fireEvent.click(screen.getByTestId('providers-mock-enter'));
+    // 核心断言 1（闪回拦截）：若 list↔detail 结构不同构触发 reconciliation 重挂，
+    // section 内部 state 归零回 list + 挂载 effect 再上抛 list → detail 闪回。
+    expect(screen.getByTestId('providers-mock-level').textContent).toBe('detail');
+    // 核心断言 2（重挂拦截）：mountCount 仍为 1（同实例，未卸载重挂）
+    expect(providersMockState.mountCount).toBe(1);
+    // 独占渲染：方案库隐藏、h3 标题隐藏
+    expect(screen.queryByTestId('plans-mock')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '供应商' })).toBeNull();
+    expect(screen.getByTestId('providers-mock')).toBeTruthy();
+  });
+
+  it('方案库进 detail：不重挂 + providers group（含标题）隐藏 + detail 态保持', () => {
+    renderModelsTab();
+    expect(plansMockState.mountCount).toBe(1);
+    fireEvent.click(screen.getByTestId('plans-mock-enter'));
+    expect(screen.getByTestId('plans-mock-level').textContent).toBe('detail');
+    expect(plansMockState.mountCount).toBe(1);
+    expect(screen.queryByTestId('providers-mock')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '供应商' })).toBeNull();
+    expect(screen.getByTestId('plans-mock')).toBeTruthy();
   });
 });

@@ -20,7 +20,7 @@ import { renderHook, act, cleanup } from '@testing-library/react';
 // [v0.0.88] SseClient API 改 handle-based unsubscribe：subscribe 返回 SubscribeHandle，
 //   cleanup 调 handle.unsubscribe()，不再传 (topic, group) 旧签名。这里捕获 handle 上的 spy
 //   供 unmount 防泄露 case 断言（参考 use-page-chat-mount singletonSpies 模式）。
-const { sseClientMock, metaHandleMock, handleUnsubscribeSpy, markReadMock, sseClientPath, chatApiPath } = vi.hoisted(() => {
+const { sseClientMock, metaHandleMock, handleUnsubscribeSpy, markReadMock, listByBizMock, sseClientPath, chatApiPath } = vi.hoisted(() => {
   const handleUnsubscribeSpy = vi.fn().mockResolvedValue(undefined);
   return {
     sseClientMock: {
@@ -29,11 +29,15 @@ const { sseClientMock, metaHandleMock, handleUnsubscribeSpy, markReadMock, sseCl
       // 旧签名 client.unsubscribe(topic, group) 保留 spy 以便误用时能抓到（hook 已不再调它）
       unsubscribe: vi.fn(),
       destroy: vi.fn(),
+      // [v0.0.348] onResumed：注册断连回调返退订 fn（T1 三层 hydration 需要）
+      onResumed: vi.fn(() => vi.fn()),
     },
     // subscribe resolve 返回的 handle 对象（含 unsubscribe spy）
     metaHandleMock: { unsubscribe: handleUnsubscribeSpy },
     handleUnsubscribeSpy,
     markReadMock: vi.fn(),
+    // [v0.0.348] hydrate GET 数据源（本文件不测 hydration，mock 空表防真 fetch）
+    listByBizMock: vi.fn(async () => [] as Array<never>),
     sseClientPath: require('node:path').resolve(__dirname, '../../../lib/sse-client'),
     chatApiPath: require('node:path').resolve(__dirname, '../../../lib/chat-api.ts'),
   };
@@ -44,12 +48,13 @@ vi.mock(sseClientPath, () => ({
   SseClient: vi.fn().mockImplementation(() => sseClientMock),
 }));
 
-// mock markSessionRead（fire-and-forget POST /read）
+// mock markSessionRead（fire-and-forget POST /read）+ listSessionsByBiz（hydrate GET 不跑真网络）
 vi.mock(chatApiPath, async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../lib/chat-api')>();
   return {
     ...actual,
     markSessionRead: (...args: Parameters<typeof markReadMock>) => markReadMock(...args),
+    listSessionsByBiz: listByBizMock,
   };
 });
 

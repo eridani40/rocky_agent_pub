@@ -1,14 +1,14 @@
 type: component
 purpose: chat-input-bar 底部按钮行内的审批模式选择器（2 档 enum，session 级持久化，绿灯短路 ask）
 since: v0.0.148
-updated: 2026-07-15
+updated: 2026-08-15
 
 # component-input-approval-mode-picker
 
 ## 消费方
 
-- `components/chat-page/component-chat-session-input.tsx`
-- `components/chat-page/use-chat-chrome.ts`
+- `components/chat-page/component-chat-session-input.tsx`（唯一渲染方）
+- `components/chat-page/use-chat-chrome.ts`（仅 import `ApprovalMode` 类型，不渲染组件）
 
 ## 0. 职责
 session 级审批模式选择器（2 档 enum），位于 input-bar 按钮行**最左位**（effort picker 左侧）。
@@ -25,7 +25,7 @@ session 级审批模式选择器（2 档 enum），位于 input-bar 按钮行**�
 
 ## Props
 - approvalMode: 'normal' | 'greenlight' | null
-- disabled?: boolean
+- disabled?: boolean（v0.0.351 起主消费方 chat-session-input 恒传 `false`——**运行中可编辑**，改模式对下轮工具审批生效；prop 保留供其他场景禁用）
 - onChange: (mode: 'normal' | 'greenlight') => void
 
 ## 复用关系

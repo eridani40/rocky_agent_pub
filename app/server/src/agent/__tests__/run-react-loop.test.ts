@@ -9,7 +9,7 @@
  * 测试策略：mock prepareStage / callLLMForSpec / runTryCompact，按 spy 调用顺序断言
  *   prepareStage → runTryCompact（被 fire-and-forget void）→ callLLMForSpec
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // 绝对路径 mock（避免 bun+jsdom 相对路径静默失效）。
 // vi.mock 被 vitest 提升到文件顶部（早于 import/const），故 path 用 vi.hoisted + require('node:path')
@@ -26,6 +26,7 @@ const { mockPaths } = vi.hoisted(() => {
       stageTool: resolve(__dirname, '../agent-loop-stage-tool'),
       emitters: resolve(__dirname, '../agent-loop-emitters'),
       lifecycle: resolve(__dirname, '../agent-loop-lifecycle'),
+      llmClientFactory: resolve(__dirname, '../../llm-client-factory'),
     },
   };
 });
@@ -63,11 +64,15 @@ vi.mock(mockPaths.lifecycle, () => ({
   initState: vi.fn(),
   ensureRunCreated: vi.fn(),
 }));
+vi.mock(mockPaths.llmClientFactory, () => ({
+  buildLlmClient: vi.fn().mockImplementation(() => ({ contextWindow: 200000, refreshed: true })),
+}));
 
 import { runReActLoop } from '../run-react-loop';
 import { prepareStage, ingestAssistant, runTryCompact, hasPendingInput } from '../loop-stage-context';
 import { callLLMForSpec } from '../loop-stage-llm';
 import { extractToolCalls } from '../agent-loop-helpers';
+import { buildLlmClient } from '../../llm-client-factory';
 import type { RunSpec, LoopState } from '../loop-ports';
 
 describe('[v0.0.80.t1 task-1] run-react-loop compact 触发点（prepareStage 后、callLLM 前）', () => {
@@ -258,6 +263,163 @@ describe('[v0.0.144 需求1] run 层失败写 error.log 含 layer:run', () => {
 //   覆盖三条 exit 路径：pre-loop abort 空 / interrupted 已累加 / 正常退出全量 Σ
 // ============================================================
 
+// ============================================================
+// [v0.0.351 T1] 运行中配置实时刷新：iteration 边界重读 session 并生效
+// ============================================================
+
+describe('[v0.0.351 T1] refreshRuntimeConfig 在 prepareStage 后、callLLM 前生效', () => {
+  function buildMainSpec(sessionStates: Array<{
+    providerId?: string;
+    modelId?: string;
+    effort?: 'default' | 'low' | 'high' | 'max';
+    approvalMode?: 'normal' | 'greenlight';
+  }>): RunSpec {
+    const initialClient = { contextWindow: 100000, id: 'client-old' };
+    const cfg = {
+      sessionId: 's1',
+      providerId: 'p-old',
+      modelId: 'm-old',
+      effort: 'low' as const,
+      approvalMode: 'normal' as const,
+      client: initialClient,
+      appConfig: {},
+      pluginManager: {},
+    };
+    let idx = 0;
+    const mockStore = {
+      getSession: vi.fn().mockImplementation(async () => {
+        return { id: 's1', ...sessionStates[idx++] };
+      }),
+      // [v0.0.361 §1.4] summary 触发检查点读 getSummary（缺省 null = 无 summary）
+      getSummary: vi.fn().mockResolvedValue(null),
+    };
+    return {
+      sessionId: 's1',
+      runId: 'r1',
+      runKind: 'main',
+      scopeId: 'default',
+      controller: { aborted: false },
+      config: cfg as never,
+      observability: {
+        reset: vi.fn(),
+        startTrace: vi.fn(),
+        endTrace: vi.fn(),
+        startStepSpan: vi.fn(),
+        endStepSpan: vi.fn(),
+        markTraceError: vi.fn(),
+      },
+      wireEmitCtx: { bus: { clearReplay: vi.fn() } },
+      wireStore: mockStore as never,
+      wireInitState: async () => ({
+        ingestUpTo: null, llmUpTo: null, snapshot: {
+          system: { id: 'sys', sessionId: 's1', role: 'system', content: [] },
+          messages: [], inputCharCount: 0,
+          contextWindowUsage: { systemTokens: 0, messageTokens: 0, toolTokens: 0, totalTokens: 0, maxOutputTokens: 0, tokenLimit: 0, remainingTokens: 0 },
+          summary: null,
+          tools: [],
+        }, step: 0, done: false,
+      } as unknown as LoopState),
+      lifecycle: { onUsage: vi.fn(), onRunEnd: vi.fn(), onInterrupted: vi.fn() },
+      toolDefinitions: [],
+      message: undefined,
+      maxIter: 10,
+    } as unknown as RunSpec;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prepareStage as ReturnType<typeof vi.fn>).mockResolvedValue('ok');
+    (ingestAssistant as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (runTryCompact as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (extractToolCalls as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    (hasPendingInput as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    (buildLlmClient as ReturnType<typeof vi.fn>).mockImplementation(() => ({ contextWindow: 200000, id: 'client-new' }));
+  });
+
+  it('providerId/modelId 变化 → 重建 client，callLLM 拿到新 modelId', async () => {
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+
+    const spec = buildMainSpec([
+      { providerId: 'p-new', modelId: 'm-new' },
+    ]);
+
+    await runReActLoop(spec);
+
+    expect(spec.config.providerId).toBe('p-new');
+    expect(spec.config.modelId).toBe('m-new');
+    expect(buildLlmClient).toHaveBeenCalledOnce();
+    expect(buildLlmClient).toHaveBeenCalledWith('p-new', 'm-new', {}, {});
+    expect(spec.config.client).toEqual({ contextWindow: 200000, id: 'client-new' });
+  });
+
+  it('model 不变、effort/approvalMode 变化 → client 引用稳定，callLLM 拿到新 effort/approvalMode', async () => {
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+
+    const spec = buildMainSpec([
+      { providerId: 'p-old', modelId: 'm-old', effort: 'high', approvalMode: 'greenlight' },
+    ]);
+    const oldClient = spec.config.client;
+
+    await runReActLoop(spec);
+
+    expect(spec.config.providerId).toBe('p-old');
+    expect(spec.config.modelId).toBe('m-old');
+    expect(spec.config.client).toBe(oldClient); // 引用稳定
+    expect(spec.config.effort).toBe('high');
+    expect(spec.config.approvalMode).toBe('greenlight');
+    expect(buildLlmClient).not.toHaveBeenCalled();
+  });
+
+  it('forked run 不刷新，保持启动快照', async () => {
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+
+    const mainSpec = buildMainSpec([
+      { providerId: 'p-new', modelId: 'm-new', effort: 'high', approvalMode: 'greenlight' },
+    ]);
+    const forkedSpec = { ...mainSpec, runKind: 'summary', scopeId: 'forked-1' } as unknown as RunSpec;
+    forkedSpec.config = { ...mainSpec.config };
+    const oldClient = forkedSpec.config.client;
+
+    await runReActLoop(forkedSpec);
+
+    expect(forkedSpec.config.providerId).toBe('p-old');
+    expect(forkedSpec.config.modelId).toBe('m-old');
+    expect(forkedSpec.config.effort).toBe('low');
+    expect(forkedSpec.config.approvalMode).toBe('normal');
+    expect(forkedSpec.config.client).toBe(oldClient);
+    expect(buildLlmClient).not.toHaveBeenCalled();
+  });
+
+  it('刷新失败（store.getSession throw）→ log warn 并继续用旧 config', async () => {
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const spec = buildMainSpec([]);
+    (spec.wireStore as unknown as { getSession: ReturnType<typeof vi.fn> }).getSession.mockRejectedValue(new Error('db down'));
+
+    await expect(runReActLoop(spec)).resolves.toBeDefined();
+
+    expect(spec.config.providerId).toBe('p-old');
+    expect(spec.config.modelId).toBe('m-old');
+    expect(buildLlmClient).not.toHaveBeenCalled();
+    expect(warnSpy.mock.calls.some((c) => String(c).includes('refresh failed'))).toBe(true);
+    warnSpy.mockRestore();
+  });
+});
+
+
 /** 造最小 spec（wireInitState 跳真实 state init；其余依赖 mock 模块） */
 function buildSpec(opts: { aborted?: boolean } = {}): RunSpec {
   return {
@@ -362,5 +524,144 @@ describe('[v0.0.235] RunResult.usage 聚合（每轮 callLLM usage Σ 进返回�
     // 空对象：无数值字段被填
     expect(result.usage.total_tokens).toBeUndefined();
     expect(result.usage.cost).toBeUndefined();
+  });
+});
+
+// ============================================================
+// [v0.0.361 §1.4] summary 触发 full reminder：② callLLM 后、下次 ingest 前检查
+//   compact 完成（store.summary.version 变）→ state.useFullReminder=true
+//   参考: specs/tech/version_logs/v0.0.361/change_plan.md §1.4
+// ============================================================
+
+describe('[v0.0.361 §1.4] summary 触发 full reminder', () => {
+  /** 构造 main spec：wireStore 带 getSummary（可控版本序列），state.snapshot.summary 带 prevVersion */
+  function buildSummarySpec(summaryVersions: Array<number | null>): RunSpec & { state: LoopState } {
+    const cfg = {
+      sessionId: 's1',
+      providerId: 'p1',
+      modelId: 'm1',
+      effort: 'low' as const,
+      approvalMode: 'normal' as const,
+      client: { contextWindow: 100000, id: 'client' },
+      appConfig: {},
+      pluginManager: {},
+    };
+    let idx = 0;
+    const mockStore = {
+      getSession: vi.fn().mockResolvedValue({ id: 's1' }),
+      getSummary: vi.fn().mockImplementation(async () => {
+        const v = summaryVersions[Math.min(idx++, summaryVersions.length - 1)]!;
+        return v === null ? null : { version: v, summaryUpTo: null, content: 's', block: null, createdAt: '', updatedAt: '' };
+      }),
+    };
+    const state = {
+      ingestUpTo: null, llmUpTo: null,
+      snapshot: {
+        system: { id: 'sys', sessionId: 's1', role: 'system', content: [] },
+        messages: [], inputCharCount: 0,
+        contextWindowUsage: { systemTokens: 0, messageTokens: 0, toolTokens: 0, totalTokens: 0, maxOutputTokens: 0, tokenLimit: 0, remainingTokens: 0 },
+        summary: { version: 1, summaryUpTo: null, content: 's', block: null, createdAt: '', updatedAt: '' },
+        tools: [],
+      },
+      step: 0, done: false,
+    } as unknown as LoopState;
+    const spec = {
+      sessionId: 's1',
+      runId: 'r1',
+      runKind: 'main',
+      scopeId: 'default',
+      controller: { aborted: false },
+      config: cfg as never,
+      observability: {
+        reset: vi.fn(), startTrace: vi.fn(), endTrace: vi.fn(),
+        startStepSpan: vi.fn(), endStepSpan: vi.fn(), markTraceError: vi.fn(),
+      },
+      wireEmitCtx: { bus: { clearReplay: vi.fn() } },
+      wireStore: mockStore as never,
+      wireInitState: async () => state,
+      lifecycle: { onUsage: vi.fn(), onRunEnd: vi.fn(), onInterrupted: vi.fn() },
+      toolDefinitions: [],
+      message: undefined,
+      maxIter: 10,
+    } as unknown as RunSpec & { state: LoopState };
+    (spec as unknown as { state: LoopState }).state = state;
+    return spec;
+  }
+
+  it('summary.version 变化（store 1 → 2）→ useFullReminder 置 true', async () => {
+    (prepareStage as ReturnType<typeof vi.fn>).mockResolvedValue('ok');
+    (ingestAssistant as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (runTryCompact as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (extractToolCalls as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    (hasPendingInput as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+
+    // 两轮：第 1 轮 store 返 version 2（≠ snapshot 1）→ 置 true；第 2 轮 store 返 version 2（= snapshot 1? 但 state.snapshot 未变）
+    // 单轮即 break（无 tool call + hasPendingInput false）
+    const spec = buildSummarySpec([2, 2]);
+    await runReActLoop(spec);
+
+    expect(spec.state.useFullReminder).toBe(true);
+  });
+
+  it('summary.version 未变（store 1 = snapshot 1）→ useFullReminder 保持 undefined（不触发）', async () => {
+    (prepareStage as ReturnType<typeof vi.fn>).mockResolvedValue('ok');
+    (ingestAssistant as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (runTryCompact as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (extractToolCalls as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    (hasPendingInput as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+
+    const spec = buildSummarySpec([1, 1]);
+    await runReActLoop(spec);
+
+    expect(spec.state.useFullReminder).toBeUndefined();
+  });
+
+  it('forked run（无 wireStore）→ 跳过检查，useFullReminder 保持 undefined', async () => {
+    (prepareStage as ReturnType<typeof vi.fn>).mockResolvedValue('ok');
+    (ingestAssistant as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (runTryCompact as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (extractToolCalls as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    (hasPendingInput as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+
+    const spec = buildSummarySpec([2, 2]);
+    // forked：wireStore 置 undefined（旁路 run 不设 store）
+    (spec as unknown as { wireStore: unknown }).wireStore = undefined;
+    await runReActLoop(spec);
+
+    expect(spec.state.useFullReminder).toBeUndefined();
+  });
+
+  it('getSummary 抛错 → 容错跳过检查，不阻断主 loop（stopReason 正常）', async () => {
+    (prepareStage as ReturnType<typeof vi.fn>).mockResolvedValue('ok');
+    (ingestAssistant as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (runTryCompact as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (extractToolCalls as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    (hasPendingInput as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    (callLLMForSpec as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assistant: { id: 'a1', sessionId: 's1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      usage: {},
+    });
+
+    const spec = buildSummarySpec([2, 2]);
+    const mockStore = (spec.wireStore as unknown as { getSummary: ReturnType<typeof vi.fn> });
+    mockStore.getSummary.mockRejectedValue(new Error('db down'));
+
+    const result = await runReActLoop(spec);
+
+    // 不阻断：正常退出（no_tool_call），useFullReminder 未置
+    expect(result.stopReason).toBe('no_tool_call');
+    expect(spec.state.useFullReminder).toBeUndefined();
   });
 });

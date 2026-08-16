@@ -59,6 +59,7 @@ function mkConfig(overrides: Partial<SessionConfig> = {}): SessionConfig {
     systemPrompt: 'PLACEHOLDER',
     client: { contextWindow: 100000 } as unknown as LlmClient,
     modelId: 'm',
+    providerId: 'p-m',
     workdir: tmpRoot,
     ...overrides,
   };

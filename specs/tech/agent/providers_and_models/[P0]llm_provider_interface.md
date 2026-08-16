@@ -51,23 +51,41 @@ interface LlmProvider {
   /** 用 providerConfig.credentials 构造 auth header；config 作参数传入，impl 不持有。
    *  [v0.0.25] keyRef 可选：多 key 时选指定 keyRef（fallback chain 引用）；单 key 忽略。 */
   buildAuthHeaders(config: LlmProviderConfig, keyRef?: string): Record<string, string>;
+
+  /** [v0.0.350] 额度/余额查询能力（可选方法）：null = 该 impl 无额度能力（anthropic_compatible
+   *  不实现 = undefined 天然兼容）。仅 4 native coding plan impl 实现。
+   *  无状态：config（含 baseUrl/credentials）作入参；查询域从 config.baseUrl 推导（§3.5）。
+   *  统一输出 QuotaSnapshot（api spec 02-llm-chat §5.6 形状）；15s 超时；
+   *  单渠道失败 throw（由聚合 handler 转 item.error，不炸整体）。 */
+  queryQuota?(config: LlmProviderConfig): Promise<QuotaSnapshot | null>;
 }
 
 type ProviderName =
-  | "anthropic_compatible"   // Anthropic 直连及兼容端点
-  | "openai_compatible"      // OpenAI / OpenRouter / Together / Ollama 等 Bearer 系
-  | "glm";                   // 智谱 GLM
+  | "anthropic_compatible"   // Anthropic 直连及兼容端点（通用，v0.0.3 既有缺省值）
+  | "openai_compatible"      // OpenAI / OpenRouter / Together / Ollama 等 Bearer 系（占位，未实现）
+  | "glm"                    // 智谱 GLM（占位，未实现）
+  // [v0.0.350] 4 native coding plan 类型（已实现，见下方实现表；POST/PUT /provider 白名单校验）
+  | "kimi_coding_plan"       // Kimi Coding Plan（协议 anthropic_messages + 额度查询）
+  | "glm_coding_plan"        // 智谱 GLM Coding Plan（同上；额度查询鉴权裸 api_key）
+  | "minimax_coding_plan"    // MiniMax Coding Plan（同上）
+  | "deepseek_api";          // DeepSeek（按量付费，余额型查询）
 ```
 
 ### buildAuthHeaders 各 provider 实现
 
 每个具体 provider 实现接收 `config`、读 `config.credentials.key`，逻辑互不相同：
 
-| Provider type | buildAuthHeaders(config) 实现 |
-|----------|------------------------|
-| `anthropic_compatible` | `{ "x-api-key": config.credentials.key, "anthropic-version": "2023-06-01" }` |
-| `openai_compatible` | `{ "Authorization": "Bearer " + config.credentials.key }` |
-| `glm` | 把 `config.credentials.key` 解析后签名为 JWT → `{ "Authorization": "Bearer " + jwt }` |
+| Provider type | buildAuthHeaders(config) 实现 | queryQuota [v0.0.350] |
+|----------|------------------------|------------------|
+| `anthropic_compatible` | `{ "x-api-key": config.credentials.key, "anthropic-version": "2023-06-01" }` | —（不实现） |
+| `openai_compatible` | `{ "Authorization": "Bearer " + config.credentials.key }`（占位） | — |
+| `glm` | 把 `config.credentials.key` 解析后签名为 JWT → `{ "Authorization": "Bearer " + jwt }`（占位） | — |
+| `kimi_coding_plan` | 同 anthropic_compatible（extends 复用） | ✅ `GET {baseUrl}/v1/usages`（Bearer）；limits[0]→5h 桶 + usage→周桶；used 直读优先/limit−remaining 兜底；字符串数值兼容；membership.level 透出 |
+| `glm_coding_plan` | 同 anthropic_compatible（extends 复用） | ✅ `GET {推导域}/api/monitor/usage/quota/limit`（**裸 api_key 无 Bearer**）；过滤 type∈{TOKENS_LIMIT,CREDIT_LIMIT}；分桶只锚 unit（3→5h、6→周）；percentage 直读已用%；TIME_LIMIT 忽略；data.level 透出 |
+| `minimax_coding_plan` | 同 anthropic_compatible（extends 复用） | ✅ `GET {推导域}/v1/api/openplatform/coding_plan/remains`（Bearer）；只取 model_name=="general"；已用%=100−remaining%；周桶仅 current_weekly_status==1 |
+| `deepseek_api` | 同 anthropic_compatible（extends 复用） | ✅ `GET {origin}/user/balance`（Bearer）；balance_infos[]（字符串金额）+ is_available；kind=balance 无 tiers |
+
+> [v0.0.350] 4 native impl 物理归属：`app/plugins/builtins/llm_anthropic/`（provider-kimi/glm/minimax/deepseek.ts + quota-shared.ts helper）；plugin.json extImpls +4（point=llm_provider）。解析规则权威 = `specs/research/v0.0.350-live-verify.md`（四渠道真调实测）+ cc-switch 对照（coding_plan.rs）。**MUST NOT** 任何校验逻辑依赖响应 model 回显（glm 请求 5.2 回显 5.3 实测）。
 
 > header 逻辑随 provider 实现走，调用方只调 `provider.buildAuthHeaders(providerConfig)`，不感知差异。后续若需 token 刷新等方法，在 `LlmProvider` 接口扩展。
 
@@ -116,6 +134,13 @@ interface CredentialKey {
 **理由**：base 随接入点变（per-instance，直连 vs 自部署，归 app_config），path 随接口契约变（per-type，归 protocol impl 代码），两者独立演化；但「选哪个 protocol（即选哪个 path）」必须与 baseUrl 在同一实体——同一 provider 若挂多 protocol 则每个 protocol 对应不同 baseUrl（如 anthropic_messages 拼 `/v1/messages` vs openai_chat_completions 拼 `/v1/chat/completions` 通常 baseUrl 不同），无法共享同一 provider 实例。
 **反例**：把 path 写进 provider 数据会导致换 protocol 时连 provider 一起改；把 baseUrl 塞进 protocol impl 则同 protocol 不同接入点无法表达；**把 `protocolId` 放到 modelConfig**（v0.0.53 前的旧设计）会让「请求去哪儿」的事实源跨实体分裂（path 来源 protocol impl + baseUrl 来源 provider config，但选哪个 protocol 由 model 决定 → 三实体协调），且强制 model 列表与 protocol 耦合（换 protocol 要改每个 model）。
 **[v0.0.53] 迁移要点**：旧 record 顶层无 `protocolId` → 数据迁移函数从 `models[0].protocolId` 抄（本就同值 `anthropic_messages`）；旧 `models[].protocolId` 物理删除（避免 dead code）。详见 `specs/tech/version_logs/v0.0.53/change_log.md §3`。
+
+### 3.5 [v0.0.350] native coding plan 类型：preset + 额度查询归 per-type impl
+
+- **类型划分补充**：4 native coding plan 类型按「preset + 额度查询能力」维度划分（鉴权协议族同 anthropic_compatible——buildAuthHeaders extends 复用，不违背 §3.2 协议族原则）；差异只在 per-type preset（默认 baseUrl/默认模型，**前端持有**，后端不感知）与 queryQuota 能力（impl 实现）。
+- **查询域推导**（保持用户改 baseUrl 的灵活性，R5 采纳）：纯函数 `deriveQuotaBaseUrl(implId, baseUrl)` 子串匹配——kimi=baseUrl 原样；glm 含 `bigmodel.cn`→`https://open.bigmodel.cn` 否则 `https://api.z.ai`；minimax 含 `minimax.io`→国际域否则 `api.minimaxi.com`；deepseek 取 origin。
+- **impl 注册顺序约束**：default scope llm_provider impls 中 anthropic_compatible **必须首位**（llm-client-factory 未命中回退 providers[0]，mock fixtures 依赖）。
+- **额度查询消费方**：`GET /provider/quota` 聚合端点（handlers/provider-quota.ts，Promise.all 并发 + 单渠道错误隔离）；前端 5min 轮询 + LastGoodSnapshot 失败保留（server 不缓存不落盘）。
 
 ## 4. 示例
 

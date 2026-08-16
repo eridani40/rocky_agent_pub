@@ -29,6 +29,8 @@ import { createLangfuseObservabilityPort } from '../llm/caller/langfuse_observab
 import { toLogicalMessages } from '../llm/logical-view';
 import type { LogWriter } from '../dev-logs/log-writer';
 import type { LoopState, RunSpec } from './loop-ports';
+// [v0.0.347] 模型路由：clientBuilder（routing 多候选模型按 (providerId, modelId) 真实组装 client）
+import { buildLlmClient } from '../llm-client-factory';
 
 /**
  * 统一 LLM 调用（骨架 ② 段，design §2 line 95-116）。
@@ -81,6 +83,11 @@ export async function callLLMForSpec(
     adapter: obs.getAdapter(), genHandle,
     iteration: obs.currentGenIteration(), step: obs.currentGenIteration(),
     model: config.modelId,
+    // [v0.0.353 T5 D8] routingPlan 透传（config.modelRoutingPlan 有才传；无方案零行为变化）。
+    // buildMetadata（logical end）对称携带——与 start 侧 LoopObservability 同源。
+    ...(config.modelRoutingPlan !== undefined
+      ? { routingPlan: { planId: config.modelRoutingPlan.planId, planName: config.modelRoutingPlan.planName } }
+      : {}),
   });
 
   // 调 base.callLLM 原语（chunk 循环中断 + emit + 聚合 message/usage 全在 base）
@@ -115,6 +122,18 @@ export async function callLLMForSpec(
     //   health 不传 → invoke 内部用进程单例（按四元组 key 隔离，spec §6.5）。
     llmRequestConfig: config.llmRequestConfig,
     allProviders: config.allProviders,
+    // [v0.0.347] 模型路由：透传挂载方案（分支 2；undefined = 分支 1 现有路径零改动）
+    //   clientBuilder 只在有 routingPlan 时注入——routing 多候选模型才需按 (providerId, modelId)
+    //   真实组装 client（buildLlmClient 需 appConfig + pluginManager，均来自 SessionConfig）。
+    //   无 routingPlan（分支 1 / 测试 mock SessionConfig）→ 不注入 → clientFactory 占位
+    //   回退 config.client（恒返回注入的 client），与 T2 前行为完全一致（装配链零回归）。
+    routingPlan: config.modelRoutingPlan,
+    ...(config.modelRoutingPlan
+      ? {
+          clientBuilder: (providerId: string, modelId: string) =>
+            buildLlmClient(providerId, modelId, config.appConfig as never, config.pluginManager as never),
+        }
+      : {}),
   });
 
   // EOS strip（main squad only；forked spec.eosStripper=undefined 不调）

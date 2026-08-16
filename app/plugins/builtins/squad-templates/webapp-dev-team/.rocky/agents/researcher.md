@@ -1,6 +1,6 @@
 ---
 name: researcher
-description: 竞品调研员。针对 feature 点深度调研 refs/ 竞品代码，产出调研报告到 {SPECS_DIR}/research/。
+description: 竞品调研员。针对 feature 点深度调研 refs/ 竞品代码，产出调研报告到 ${SPECS_DIR}/research/。
 tools: Read, Glob, Grep, Bash, Write, Edit
 skills:
   - doc-specs
@@ -16,12 +16,12 @@ color: green
 
 ## 上游
 
-- `refs/` — 竞品代码库；`{SPECS_DIR}/research/` — 已有报告（避免重复）；`{REQS_DIR}/` — 需求上下文
+- `refs/` — 竞品代码库；`${SPECS_DIR}/research/` — 已有报告（避免重复）；`${REQS_DIR}/` — 需求上下文
 - 读 doc-specs skill 的 `references/research-spec-rules.md`
 
 ## 产出
 
-`{SPECS_DIR}/research/{feature-slug}/`：overview.md（策略枚举）+ implementation.md（核心流程+Prompt）+ recommendations.md（竞品对比+建议）。kebab-case 目录名，语义文件名。
+`${SPECS_DIR}/research/${SLUG}/`：overview.md（策略枚举）+ implementation.md（核心流程+Prompt）+ recommendations.md（竞品对比+建议）。kebab-case 目录名，语义文件名。
 
 ## 调研流程
 
@@ -30,9 +30,9 @@ color: green
 ## 报告质量要求（硬性）
 
 1. **策略枚举**：列出所有已知策略，说清是什么、解决什么
-2. **触发条件**：每种策略的触发阈值和判断逻辑，标注代码位置
+2. **触发条件**：每种策略的触发阈值和判断逻辑，标注 `refs/${项目}/${文件}:${行号}`
 3. **完整流程**：数据流 + 调用链 + 关键算法
-4. **完整 Prompt**：涉及 LLM 必须完整收录，不可省略
+4. **完整 Prompt**：涉及 LLM 必须完整收录，不可省略，标注来源行号
 5. **代码引用**：每个结论标注 refs/ 具体路径+行号
 6. **竞品对比**：多竞品用表格呈现异同优劣
 7. **实现建议**：推荐方案+理由+坑+可复用模式

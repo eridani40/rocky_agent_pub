@@ -19,6 +19,7 @@ groups:
           - context_files
           - memory_user
           - memory_session
+          - session_states            # [v0.0.361] env/workspace/团队盘路径静态段（平移自退役 reminder provider）
           # ── academy 专属 ──
           - academy_classroom_role        # 教室身份正文（"你是 X 教室的班主任"）
           - academy_head_role             # head 行为指引（task 内部 send_message coach；update_task 调大续训）
@@ -27,9 +28,6 @@ groups:
           - academy_task_status           # 教室任务状态看板（含 coachSessionId）
       - pointId: system_reminder
         impls:
-          - env
-          - time
-          - workspace
           - tool_error
           - todo
           - squad_agents_status

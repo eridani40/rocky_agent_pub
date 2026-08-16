@@ -5,6 +5,8 @@
     "addProvider": "+ Add Provider"
   },
   "field": {
+    "typeLabel": "Type",
+    "typeHint": "name (coding plan preset)",
     "nameLabel": "Name",
     "namePlaceholder": "e.g. Claude",
     "apiKeyHint": "credentials.key (masked ***, overwrite on retype)",
@@ -14,6 +16,37 @@
     "urlEmpty": "Fill Base URL and select a protocol first",
     "enableTitle": "Enable this provider",
     "enableHint": "When disabled, hidden from model picker"
+  },
+  "type": {
+    "anthropic_compatible": "Anthropic Compatible",
+    "kimi_coding_plan": "Kimi Coding Plan",
+    "glm_coding_plan": "Zhipu GLM Coding Plan",
+    "minimax_coding_plan": "MiniMax Coding Plan",
+    "deepseek_api": "DeepSeek (Pay-as-you-go)"
+  },
+  "quota": {
+    "title": "Quota Overview",
+    "groupQuota": "Plan Quota",
+    "groupBalance": "Prepaid Balance",
+    "providerCount": "{{count}} providers",
+    "fiveHour": "5-hour quota",
+    "weekly": "This week's quota",
+    "used": "Used",
+    "time": "Time",
+    "resetSuffix": "reset",
+    "balance": "Balance",
+    "insufficient": "Insufficient balance",
+    "membership": "Plan",
+    "granted": "Granted",
+    "toppedUp": "Topped up",
+    "fullResetTime": "Resets",
+    "countdown": "Resets in ~{{h}}h {{m}}m {{s}}s",
+    "lastUpdated": "Updated {{time}}",
+    "errorAuth": "Credentials expired. Please check your API key.",
+    "fast": "Fast usage"
+  },
+  "fold": {
+    "disabled": "Disabled ({{count}})"
   },
   "list": {
     "modelCount": "{{count}} models",
@@ -27,7 +60,10 @@
     "saved": "✓ Saved",
     "modelsTitle": "Models · {{count}}",
     "addModel": "+ Add Model",
-    "emptyModels": "No models yet. Click \"Add Model\" to add one."
+    "emptyModels": "No models yet. Click \"Add Model\" to add one.",
+    "delete": "Delete",
+    "deleteTitle": "Delete Provider",
+    "deleteBody": "After deletion, plan items referencing this provider's models will become invalid; sessions using its models will automatically switch or fall back to other models. Delete this provider?"
   },
   "model": {
     "add": "Add Model",

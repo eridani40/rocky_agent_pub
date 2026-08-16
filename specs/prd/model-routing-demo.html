@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模型路由降级 · 配置 demo 与调用说明（v3.1）</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --line:#e3e6ea; --ink:#1f2937; --sub:#6b7280;
+    --blue:#2563eb; --blue-bg:#eff6ff; --green:#059669; --green-bg:#ecfdf5;
+    --red:#dc2626; --red-bg:#fef2f2; --amber:#d97706; --amber-bg:#fffbeb;
+    --code-bg:#111827; --code-ink:#e5e7eb; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;padding:32px 20px 80px}
+  .wrap{max-width:1080px;margin:0 auto}
+  header{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:16px;padding:28px 32px;margin-bottom:24px}
+  header h1{font-size:24px;margin-bottom:6px}
+  header p{opacity:.92;font-size:13px}
+  .badge{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);border-radius:99px;padding:2px 12px;font-size:12px;margin-right:8px}
+  nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px}
+  nav a{background:var(--card);border:1px solid var(--line);border-radius:99px;padding:6px 14px;font-size:13px;color:var(--ink);text-decoration:none}
+  nav a:hover{border-color:var(--blue);color:var(--blue)}
+  h2{font-size:20px;margin:36px 0 4px;display:flex;align-items:center;gap:10px}
+  h2 .tag{font-size:12px;background:var(--blue);color:#fff;border-radius:6px;padding:2px 8px;font-weight:500}
+  h3{font-size:16px;margin:18px 0 10px}
+  .sub{color:var(--sub);font-size:13px;margin-bottom:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .card-title{font-size:15px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:12px 0}
+  .layer{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fafbfc}
+  .layer .lv{font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+  .layer.app .lv{color:var(--blue)} .layer.group .lv{color:var(--green)} .layer.session .lv{color:var(--amber)}
+  .layer ul{list-style:none;font-size:13px;color:#374151}
+  .layer li{padding:3px 0;border-bottom:1px dashed #eef0f3}
+  .layer li:last-child{border-bottom:none}
+  .arrow-down{text-align:center;color:#9ca3af;font-size:18px;margin:2px 0}
+  pre{background:var(--code-bg);color:var(--code-ink);border-radius:10px;padding:14px 16px;overflow-x:auto;font:12.5px/1.6 var(--mono);margin:10px 0}
+  pre .cm{color:#6b7280} pre .kw{color:#93c5fd} pre .ty{color:#fbbf24} pre .st{color:#86efac}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:12px 0;font-size:13px}
+  .step{background:var(--blue-bg);border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:5px 10px;white-space:nowrap}
+  .step.ok{background:var(--green-bg);border-color:#a7f3d0;color:#065f46}
+  .step.no{background:var(--red-bg);border-color:#fecaca;color:#991b1b}
+  .step.wa{background:var(--amber-bg);border-color:#fde68a;color:#92400e}
+  .step.gray{background:#f3f4f6;border-color:#d1d5db;color:#374151}
+  .arrow{color:#9ca3af;font-weight:700}
+  .hours{display:grid;grid-template-columns:repeat(12,1fr);gap:5px;margin:10px 0}
+  .hour{border:1px solid var(--line);border-radius:6px;text-align:center;padding:6px 0;font-size:12px;font-family:var(--mono);background:#f9fafb;color:#9ca3af;cursor:pointer;user-select:none}
+  .hour.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .hour:hover{outline:2px solid #bfdbfe}
+  .legend{font-size:12px;color:var(--sub);margin-top:6px;display:flex;gap:16px}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .legend .on{background:var(--blue)} .legend .off{background:#e5e7eb;border:1px solid var(--line)}
+  details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fafbfc}
+  summary{cursor:pointer;padding:10px 14px;font-size:13.5px;font-weight:600;color:#374151}
+  details[open] summary{border-bottom:1px solid var(--line)}
+  details .body{padding:12px 14px;font-size:13px;color:#374151}
+  details .body ol{padding-left:20px} details .body li{margin:5px 0}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#f3f4f6;font-weight:600}
+  .scn{border-radius:14px;border:1px solid var(--line);overflow:hidden;margin:16px 0;background:var(--card)}
+  .scn-head{padding:14px 20px;font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px}
+  .scn-head .no{width:28px;height:28px;border-radius:8px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+  .scn-body{padding:4px 20px 16px}
+  .pill{display:inline-block;border-radius:99px;padding:1px 10px;font-size:12px;font-weight:600}
+  .pill.ok{background:var(--green-bg);color:var(--green);border:1px solid #a7f3d0}
+  .pill.no{background:var(--red-bg);color:var(--red);border:1px solid #fecaca}
+  .pill.wa{background:var(--amber-bg);color:var(--amber);border:1px solid #fde68a}
+  .pill.blue{background:var(--blue-bg);color:var(--blue);border:1px solid #bfdbfe}
+  .trace{font:12.5px/1.7 var(--mono);background:#f8fafc;border:1px dashed #d1d5db;border-radius:8px;padding:10px 14px;margin:10px 0;color:#374151}
+  .btn-row{margin:8px 0}
+  button.ghost{background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 12px;font-size:12.5px;color:var(--sub);cursor:pointer}
+  button.ghost:hover{border-color:var(--blue);color:var(--blue)}
+  footer{margin-top:40px;color:var(--sub);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+
+  /* ===== 时钟按钮 + hover tooltip ===== */
+  .clock-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;transition:all .15s;padding:0}
+  .clock-btn.has-time{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 0 6px rgba(37,99,235,.35)}
+  .clock-btn.no-time{background:#fff;border-color:var(--line);color:#9ca3af}
+  .clock-btn:hover{transform:scale(1.08)}
+  .tip-wrap{position:relative;display:inline-flex}
+  .tip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#111827;color:#fff;font-size:12px;padding:5px 10px;border-radius:6px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s;z-index:60}
+  .tip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#111827}
+  .tip-wrap:hover .tip{opacity:1}
+
+  /* ===== 小时弹层（popover） ===== */
+  .pop{position:fixed;z-index:100;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.16);padding:14px;width:400px;max-width:calc(100vw - 24px)}
+  .pop h4{font-size:13px;margin-bottom:8px;color:var(--ink)}
+  .hours2{display:grid;grid-template-columns:repeat(12,1fr);gap:4px}
+  .hour2{border:1px solid var(--line);border-radius:5px;text-align:center;padding:7px 0;font-size:11.5px;font-family:var(--mono);background:#f9fafb;color:#9ca3af;user-select:none;cursor:crosshair;touch-action:none}
+  .hour2.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .hour2.drag{outline:2px solid #60a5fa;outline-offset:-1px}
+  .pop-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px}
+  .pop-tip{font-size:11.5px;color:var(--sub);margin-top:8px}
+
+  /* ===== 熔断红绿灯 ===== */
+  .light{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;padding:3px 8px;border-radius:99px;border:1px solid transparent;font-size:12px;font-weight:600;white-space:nowrap}
+  .light:hover{border-color:var(--line)}
+  .light .dot{width:12px;height:12px;border-radius:50%;display:inline-block;flex-shrink:0}
+  .light.closed .dot{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.6)}
+  .light.open .dot{background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,.6)}
+  .light.halfopen .dot{background:#eab308;box-shadow:0 0 6px rgba(234,179,8,.6)}
+  .light.closed{color:#16a34a}
+  .light.open{color:#dc2626}
+  .light.halfopen{color:#a16207}
+  .light .cd{font-family:var(--mono);font-size:11px;color:#b91c1c}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>模型路由降级 · 配置 demo 与调用说明</h1>
+  <p><span class="badge">方案 v3.1</span><span class="badge">2026-08-14</span><span class="badge">老板 9 点 + 架构讨论已拍板（D1–D14）</span>用于方案确认 · 静态说明页（自包含，双击即开）</p>
+</header>
+
+<nav>
+  <a href="#p1">Part 1 · 配置 demo</a>
+  <a href="#p2">Part 2 · 调用说明</a>
+  <a href="#sA">场景 A 时间条件</a>
+  <a href="#sB">场景 B 熔断三态</a>
+  <a href="#sC">场景 C 降级链</a>
+  <a href="#sD">场景 D 模型去重</a>
+  <a href="#sE">场景 E resolve 双分支</a>
+</nav>
+
+<!-- ================= Part 1 ================= -->
+<h2 id="p1"><span class="tag">Part 1</span> 配置 demo（怎么配）</h2>
+
+<div class="card">
+  <div class="card-title">① 配置层级：四层职责（老板架构讨论 10:49）</div>
+  <div class="sub">app 定义方案 → group 挂载方案或默认模型 → session 只能选 model / default。箭头表示「向下生效 / 被覆盖」。</div>
+  <div class="grid3">
+    <div class="layer app">
+      <div class="lv">App 级 · 方案库（CRUD）</div>
+      <ul>
+        <li><b>模型组合方案</b> = 可命名/可编辑/可删除的有序条目链</li>
+        <li>唯一定义处：新建 / 重命名 / 删除 / 复制</li>
+        <li>编辑后所有挂载方立即生效</li>
+      </ul>
+    </div>
+    <div class="layer group">
+      <div class="lv">Group / Playground（studio）</div>
+      <ul>
+        <li><b>挂载一个方案</b> → 该 group 下所有 session 走方案链</li>
+        <li>或只配 <b>默认模型</b>（现有逻辑）</li>
+        <li>本期仅 studio / playground 可用方案</li>
+      </ul>
+    </div>
+    <div class="layer session">
+      <div class="lv">Session 级</div>
+      <ul>
+        <li>只能配 <b>model / default</b>（不能配方案）</li>
+        <li>session 显式模型 = 覆盖 group 默认模型</li>
+        <li>session = default → 直接走 group 挂载方案链</li>
+      </ul>
+    </div>
+  </div>
+  <pre><span class="kw">resolve</span>(session, group):
+  ├─ group 无方案（只配模型）→ <span class="ty">分支 1</span>：现有单模型逻辑（resolveModel 原链，零改动）
+  └─ group 有方案 → <span class="ty">分支 2</span>：
+       ├─ session.modelId == <span class="st">'default'</span> → 直接走方案链（方案条目本身）
+       └─ session 显式配了模型 → session 模型作为 <span class="kw">priority 0</span> 合成插入方案顶部
+            （临时合成，<b>不写回</b>方案实体；熔断键 = planId + session 模型）</pre>
+</div>
+
+<div class="card">
+  <div class="card-title">② 模型组合方案编辑：有序条目列表 + 时间条件 + 熔断参数</div>
+  <div class="sub">方案 = 可命名实体，条目按 priority 升序 = 尝试顺序。下方是「主力+兜底」方案编辑器的核心控件。</div>
+
+  <h3>条目列表（上移 / 下移 = 调 priority；每条 = provider + model 选择 + 时间条件 + 熔断状态）</h3>
+  <table>
+    <tr><th>priority</th><th>Provider</th><th>Model</th><th>时间条件</th><th>熔断状态</th><th>操作</th></tr>
+    <tr>
+      <td>1（最优先）</td><td>Moonshot</td><td>kimi-k2</td>
+      <td><span class="tip-wrap"><button class="clock-btn has-time" id="clock0" title="点击设置时间条件" aria-label="时间条件">🕐</button><span class="tip">02:00–23:00 可用</span></span></td>
+      <td><span class="light closed" id="light0" title="点击循环切换三态"><span class="dot"></span><span class="lbl">Closed</span></span></td>
+      <td>↑ ↓ ✕</td>
+    </tr>
+    <tr>
+      <td>2</td><td>DeepSeek</td><td>deepseek-chat</td>
+      <td><span class="tip-wrap"><button class="clock-btn no-time" id="clock1" title="点击设置时间条件" aria-label="时间条件">🕐</button><span class="tip">全天可用</span></span></td>
+      <td><span class="light closed" id="light1" title="点击循环切换三态"><span class="dot"></span><span class="lbl">Closed</span></span></td>
+      <td>↑ ↓ ✕</td>
+    </tr>
+    <tr>
+      <td>3</td><td>Zhipu</td><td>glm-4.6</td>
+      <td><span class="tip-wrap"><button class="clock-btn has-time" id="clock2" title="点击设置时间条件" aria-label="时间条件">🕐</button><span class="tip">08:00–22:00 可用</span></span></td>
+      <td><span class="light open" id="light2" title="点击循环切换三态"><span class="dot"></span><span class="lbl">Open</span><span class="cd" id="cd2">42s 后恢复探测</span></span></td>
+      <td>↑ ↓ ✕</td>
+    </tr>
+    <tr>
+      <td>4</td><td>Zhipu</td><td>glm-4.6</td>
+      <td><span class="tip-wrap"><button class="clock-btn no-time" id="clock3" title="点击设置时间条件" aria-label="时间条件">🕐</button><span class="tip">全天可用</span></span></td>
+      <td><span class="light halfopen" id="light3" title="点击循环切换三态"><span class="dot"></span><span class="lbl">HalfOpen</span></span></td>
+      <td>↑ ↓ ✕</td>
+    </tr>
+  </table>
+  <div class="sub">🕐 时钟按钮：<b>灰色描边</b> = 全天可用（无时间限制）；<b>主题色实心</b> = 已设时间条件。hover 显示时间限制；点击弹出 24 格小时拖拽选择。🟢🔴🟡 红绿灯 = 该模型当前熔断状态（点击循环切换演示；🔴 Open 带倒计时）。</div>
+
+  <h3>时间条件：时钟按钮 + 拖拽选择（24 格小时，白名单，老板 D3）</h3>
+  <div class="sub">点任一 item 行的时钟按钮弹出小时面板：<b>按住拖动划过格子</b> = 选中连续区间（可多次拖拽加选，如 02–08 + 14–23 两段）；<b>再拖已选格 = 取消</b>；「清空」= 恢复全天。下面单独放一个可玩的面板。</div>
+  <div class="card" style="padding:14px 16px;margin:8px 0">
+    <div class="card-title" style="margin-bottom:6px">可玩面板 · Kimi 时间条件（默认 2–23 点）</div>
+    <div class="hours2" id="hoursDemo"></div>
+    <div class="pop-actions">
+      <span class="pop-tip">拖拽选中/取消 · 可多段 · 每天重复 · 本地时间</span>
+      <button class="ghost" id="hoursClear">清空 = 恢复全天</button>
+    </div>
+  </div>
+  <div class="legend"><span><i class="on"></i>可用（白名单）</span><span><i class="off"></i>不可用 → 跳过</span><span>不做周几/分钟/exclude</span></div>
+  <pre><span class="kw">interface</span> <span class="ty">TimeCondition</span> { <span class="kw">hours</span>: <span class="ty">number</span>[] }   <span class="cm">// 0-23，白名单：当前小时 ∈ hours → 可用；否则跳过</span>
+<span class="cm">// Kimi 只在 02:00-23 点可用：</span>{ <span class="kw">hours</span>: [<span class="st">2</span>,<span class="st">3</span>,...,<span class="st">23</span>] }  <span class="cm">// 0、1 点不可用 → 自动滑到下一模型</span></pre>
+
+  <h3>熔断参数（高级 · 可折叠区，老板 D6 默认值）</h3>
+  <details>
+    <summary>熔断参数（可选覆盖，默认 4 / 2 / 60 / 0.6 / 10）</summary>
+    <div class="body">
+      <table>
+        <tr><th>参数</th><th>默认</th><th>含义</th></tr>
+        <tr><td>失败阈值 failure_threshold</td><td><b>4</b></td><td>连续失败 ≥ 4 次 → Closed → Open</td></tr>
+        <tr><td>恢复阈值 success_threshold</td><td><b>2</b></td><td>HalfOpen 连续成功 ≥ 2 次 → 回 Closed</td></tr>
+        <tr><td>恢复等待 timeout_seconds</td><td><b>60</b></td><td>Open 后等 60s → HalfOpen（放 1 个探测）</td></tr>
+        <tr><td>错误率 error_rate_threshold</td><td><b>0.6</b></td><td>total ≥ min_requests 且错误率 ≥ 60% → Open</td></tr>
+        <tr><td>最小请求 min_requests</td><td><b>10</b></td><td>错误率判定的最小样本量</td></tr>
+      </table>
+      <pre><span class="kw">interface</span> <span class="ty">CircuitConfig</span> {
+  failure_threshold?: <span class="ty">number</span>;   <span class="cm">// 默认 4</span>
+  success_threshold?: <span class="ty">number</span>;   <span class="cm">// 默认 2</span>
+  timeout_seconds?:   <span class="ty">number</span>;   <span class="cm">// 默认 60</span>
+  error_rate_threshold?: <span class="ty">number</span>; <span class="cm">// 默认 0.6</span>
+  min_requests?:      <span class="ty">number</span>;   <span class="cm">// 默认 10</span>
+}</pre>
+    </div>
+  </details>
+
+  <h3>同模型条目约束（老板 D9 · 保存时硬拒绝）</h3>
+  <div class="sub">同一个模型（providerId + modelId 复合）最多 2 个条目：<b>1 个带时间 + 1 个不带时间</b>，且带时间必须排在上面（时间命中用带时间的，未命中滑到无条件的兜底）。</div>
+  <table>
+    <tr><th>组合</th><th>是否允许</th><th>说明</th></tr>
+    <tr><td>带时间 ×1 + 不带时间 ×1（带时间在上）</td><td><span class="pill ok">✅ 允许</span></td><td>正常用法：时间窗口内用带时间条目，窗口外滑到无条件兜底</td></tr>
+    <tr><td>带时间 ×2</td><td><span class="pill no">✕ 硬拒绝</span></td><td>同模型不允许 2 个带时间条目</td></tr>
+    <tr><td>不带时间 ×2</td><td><span class="pill no">✕ 硬拒绝</span></td><td>重复 = 冗余</td></tr>
+    <tr><td>带时间在无条件的下面</td><td><span class="pill no">✕ 硬拒绝</span></td><td>带时间条目必须在不带时间条目上面</td></tr>
+  </table>
+  <pre><span class="kw">interface</span> <span class="ty">RoutingItem</span> {
+  providerId: <span class="ty">string</span>;            <span class="cm">// 指向 app_config providers 实例（ModelRef 复合，防同名跨 provider 歧义）</span>
+  modelId: <span class="ty">string</span>;
+  priority: <span class="ty">number</span>;            <span class="cm">// 1 = 最高优先（尝试顺序 = priority 升序）</span>
+  timeCondition?: <span class="ty">TimeCondition</span>;  <span class="cm">// 可选；不配置 = 随时可用（无条件条目）</span>
+}
+
+<span class="kw">interface</span> <span class="ty">ModelRoutingPlan</span> {
+  id: <span class="ty">string</span>;
+  name: <span class="ty">string</span>;            <span class="cm">// 可命名实体（如「主力+兜底」）；group 挂载引用</span>
+  items: <span class="ty">RoutingItem</span>[];    <span class="cm">// 有序降级链（按 priority 升序 = 尝试顺序）</span>
+  circuit?: <span class="ty">CircuitConfig</span>; <span class="cm">// 熔断参数覆盖（可选）</span>
+  createdAt: <span class="ty">number</span>;
+}</pre>
+</div>
+
+<div class="card">
+  <div class="card-title">③ 配置示例数据：完整方案「主力+兜底」</div>
+  <div class="sub">4 个条目：Kimi 带时间（2–23 点）+ DeepSeek 无条件 + GLM 带时间（8–22 点）+ GLM 无条件——GLM 是「带时间在上 + 无条件兜底」的标准双条目。</div>
+  <pre>{
+  <span class="kw">name</span>: <span class="st">"主力+兜底"</span>,
+  <span class="kw">items</span>: [
+    { <span class="kw">providerId</span>: <span class="st">"moonshot"</span>, <span class="kw">modelId</span>: <span class="st">"kimi-k2"</span>, <span class="kw">priority</span>: <span class="st">1</span>, <span class="kw">timeCondition</span>: { <span class="kw">hours</span>: [<span class="st">2</span>,<span class="st">3</span>,...,<span class="st">23</span>] } },  <span class="cm">// 只在 2-23 点</span>
+    { <span class="kw">providerId</span>: <span class="st">"deepseek"</span>, <span class="kw">modelId</span>: <span class="st">"deepseek-chat"</span>, <span class="kw">priority</span>: <span class="st">2</span> },                          <span class="cm">// 无条件兜底</span>
+    { <span class="kw">providerId</span>: <span class="st">"zhipu"</span>, <span class="kw">modelId</span>: <span class="st">"glm-4.6"</span>, <span class="kw">priority</span>: <span class="st">3</span>, <span class="kw">timeCondition</span>: { <span class="kw">hours</span>: [<span class="st">8</span>,...,<span class="st">22</span>] } },   <span class="cm">// 只在 8-22 点</span>
+    { <span class="kw">providerId</span>: <span class="st">"zhipu"</span>, <span class="kw">modelId</span>: <span class="st">"glm-4.6"</span>, <span class="kw">priority</span>: <span class="st">4</span> }                                   <span class="cm">// 同模型无条件兜底（带时间在其上）</span>
+  ],
+  <span class="kw">circuit</span>: { <span class="kw">failure_threshold</span>: <span class="st">4</span>, <span class="kw">success_threshold</span>: <span class="st">2</span>, <span class="kw">timeout_seconds</span>: <span class="st">60</span>, <span class="kw">error_rate_threshold</span>: <span class="st">0.6</span>, <span class="kw">min_requests</span>: <span class="st">10</span> }
+}</pre>
+</div>
+
+<!-- ================= Part 2 ================= -->
+<h2 id="p2"><span class="tag">Part 2</span> 调用时的情况说明（怎么走）</h2>
+
+<div class="card">
+  <div class="card-title">① resolve 双分支：先定「走方案 / 走单模型」，逐步决策在 attempt 内</div>
+  <div class="sub">路由不是调用前 resolve 一次定死模型（老板架构讨论 ④）——resolve 只产出「候选链起点」，attempt 循环内部逐步决策。</div>
+  <div class="flow">
+    <span class="step">LLM 调用请求到来</span><span class="arrow">→</span>
+    <span class="step">resolve(session, group)</span><span class="arrow">→</span>
+    <span class="step">group 无方案 ?</span>
+  </div>
+  <div class="flow">
+    <span class="step gray">├─ 是 → 分支 1：单模型（现有 resolveModel 原链）</span><span class="arrow">→</span><span class="step gray">直接调用该模型</span>
+  </div>
+  <div class="flow">
+    <span class="step">└─ 否 → 分支 2：有方案</span><span class="arrow">→</span>
+    <span class="step">session = default ?</span>
+  </div>
+  <div class="flow">
+    <span class="step ok">├─ 是 → 候选链 = 方案 items（按 priority 升序）</span>
+  </div>
+  <div class="flow">
+    <span class="step wa">└─ 否（显式模型）→ priority 0 合成插入方案顶部</span><span class="arrow">→</span>
+    <span class="step wa">候选链 = [session 模型] + 方案 items（临时，不写回；熔断键 planId+模型）</span>
+  </div>
+  <pre><span class="kw">interface</span> <span class="ty">RoutingItem</span> { ... }  <span class="cm">// 见 Part 1</span>
+<span class="cm">// resolve 产出 = 候选链起点；后续每一步（调谁 / sleep 多久）都在 attempt 循环内 f(config, state) 决定</span></pre>
+</div>
+
+<div class="card">
+  <div class="card-title">② attempt 内部路由循环：时间过滤 → 熔断 → 去重 → 按序尝试 → 失败决策 → 退避</div>
+  <div class="flow">
+    <span class="step">① 时间过滤</span><span class="arrow">→</span>
+    <span class="step">② 熔断检查</span><span class="arrow">→</span>
+    <span class="step">③ bannedModels 去重</span><span class="arrow">→</span>
+    <span class="step">④ 发起 LLM 调用</span>
+  </div>
+  <div class="flow">
+    <span class="step ok">成功 → 返回结果（熔断收敛）</span>
+    <span class="step no">失败 → 记原因 + 按错误类型决策</span>
+  </div>
+  <div class="flow">
+    <span class="step no">重试（模型内 N 次）</span><span class="arrow">/</span>
+    <span class="step wa">放弃（abandoned → 进 bannedModels）</span><span class="arrow">/</span>
+    <span class="step gray">跳过（skipped）</span><span class="arrow">→</span>
+    <span class="step">退避 sleep</span><span class="arrow">→</span>
+    <span class="step">下一个候选（cursor+1）</span>
+  </div>
+  <pre><span class="kw">while</span> (还有候选):
+  next = <span class="kw">f</span>(config, state)   <span class="cm">// 决策：时间过滤 → 熔断检查 → 候选游标 → 退避 sleep</span>
+  sleep(next.delay)          <span class="cm">// 按错误类型/退避决策</span>
+  result = llmCall(next.item)
+  state.record(result)       <span class="cm">// 记录成功/失败 + 原因（called/failed/abandoned/skipped）</span>
+  <span class="kw">if</span> (result.ok) <span class="kw">break</span>       <span class="cm">// 收敛返回</span>
+<span class="cm">// 循环耗尽 → 上抛聚合错误（各条目失败原因摘要）</span></pre>
+  <details>
+    <summary>失败决策明细：按错误类型差异化「模型内重试次数」（老板 D1）</summary>
+    <div class="body">
+      <table>
+        <tr><th>错误类别</th><th>模型内重试</th><th>熔断行为</th></tr>
+        <tr><td>RATE_LIMITED（429）/ PROVIDER_OVERLOADED（529）</td><td>0（快速失败直接降级）</td><td>计失败；达阈值 → Open</td></tr>
+        <tr><td>NETWORK / TIMEOUT_* / SERVER_ERROR / STREAM_INCOMPLETE / EMPTY_RESPONSE</td><td>1（瞬态重试）</td><td>计失败；达阈值 → Open</td></tr>
+        <tr><td>AUTH_INVALID（401）/ AUTH_FORBIDDEN（403）</td><td>0</td><td><b>直接熔断 Open</b>（短期不恢复）</td></tr>
+        <tr><td>MAX_TOKENS_TOO_HIGH</td><td>1（降 maxTokens ×0.7）</td><td>计失败；达阈值 → Open</td></tr>
+        <tr><td>CONTEXT_LENGTH_EXCEEDED / MAX_TOKENS_EXCEEDED</td><td>0（走压缩/bump 修复流程）</td><td>修复后仍失败才计</td></tr>
+        <tr><td>CONTENT_FILTERED / MODEL_NOT_FOUND / MALFORMED_TOOL_CALL / BAD_REQUEST_OTHER</td><td>0</td><td>计失败；达阈值 → Open</td></tr>
+        <tr><td>ABORTED_BY_USER</td><td>—</td><td>不算失败，直接返回</td></tr>
+      </table>
+      <div class="sub">超时沿用现有看门狗（TTFB 45s / stall 30/30/120，老板 D2）；sleep 决策 = f(config, state)，同模型内重试走 backoff，换模型降级可 0 sleep 或短 sleep。</div>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <div class="card-title">③ Config / State 分离：决策 = f(config, state)，可复现（老板 10:52/10:53）</div>
+  <table>
+    <tr><th>维度</th><th>内容</th><th>生命周期</th><th>特性</th></tr>
+    <tr>
+      <td><b>Config（静态定义）</b></td>
+      <td>方案实体（items 有序链 + 时间条件 + 熔断参数）+ <b>熔断状态</b>（planId+providerId+modelId 三维，谁在备选、谁熔断了）</td>
+      <td><b>跨 call 存活</b>（挂方案实体维度）</td>
+      <td>静态可查询；熔断 = 运行时内存态（不持久化，重启丢失可接受）</td>
+    </tr>
+    <tr>
+      <td><b>State（动态执行）</b></td>
+      <td>agent loop 对「这一次 llm call」的状态：候选处置轨迹 + 游标 + bannedModels</td>
+      <td><b>call 级瞬时</b>（单次调用生命周期）</td>
+      <td>每次 llm call 独立；不落盘，call 结束即弃</td>
+    </tr>
+  </table>
+  <pre><span class="kw">interface</span> <span class="ty">AttemptState</span> {
+  tried: <span class="ty">CandidateRecord</span>[];   <span class="cm">// 已处置候选的轨迹（调用过谁、失败了、放弃了谁）</span>
+  cursor: <span class="ty">number</span>;             <span class="cm">// 当前尝试到候选列表哪个位置</span>
+  bannedModels: <span class="ty">Set</span>&lt;<span class="ty">string</span>&gt;;  <span class="cm">// 本次 call 被放弃/熔断的模型配置（providerId+modelId），v3.1</span>
+}
+
+<span class="kw">interface</span> <span class="ty">CandidateRecord</span> {
+  item: <span class="ty">RoutingItem</span>;          <span class="cm">// 候选条目（provider+model）</span>
+  status: <span class="st">'called'</span> | <span class="st">'failed'</span> | <span class="st">'abandoned'</span> | <span class="st">'skipped'</span>;
+  error?: <span class="ty">LlmError</span>;           <span class="cm">// 失败原因（错误分类）</span>
+  attemptCount?: <span class="ty">number</span>;      <span class="cm">// 模型内尝试次数</span>
+  sleepUntil?: <span class="ty">number</span>;        <span class="cm">// 退避等待截止（429/限流时）</span>
+}</pre>
+  <div class="sub">四态：<b>called</b> 发起了调用 / <b>failed</b> 调用失败（记录原因分类）/ <b>abandoned</b> 放弃了（不重试不降级，401/403/429 快速失败）/ <b>skipped</b> 跳过了（时间未命中 / 熔断 Open / bannedModels 去重）。</div>
+</div>
+
+<!-- ================= 5 场景 ================= -->
+<h2>5 个场景（每个：图文 + 可展开步骤）</h2>
+
+<div class="scn" id="sA">
+  <div class="scn-head" style="background:var(--amber-bg)"><span class="no" style="background:var(--amber)">A</span> 时间条件：Kimi hours=[2-23]，当前 1 点 → 跳过 → DeepSeek</div>
+  <div class="scn-body">
+    <div class="flow">
+      <span class="step">当前 1 点</span><span class="arrow">→</span>
+      <span class="step wa">P1 Kimi（hours=[2..23]）时间未命中 → skipped</span><span class="arrow">→</span>
+      <span class="step ok">P2 DeepSeek（无条件）→ 调用成功</span>
+    </div>
+    <details>
+      <summary>展开步骤细节</summary>
+      <div class="body">
+        <ol>
+          <li>agent 发起 llm call → resolve 产出候选链：[Kimi(带时间), DeepSeek(无条件), ...]</li>
+          <li>attempt 循环 ① 时间过滤：当前小时 = 1，Kimi 的 hours=[2..23] 不含 1 → <b>跳过（skipped）</b>，不消耗尝试、不计熔断失败</li>
+          <li>② 熔断检查：DeepSeek 无熔断 → 放行；③ bannedModels 无 DeepSeek</li>
+          <li>④ 发起 DeepSeek 调用 → 成功 → 返回结果</li>
+        </ol>
+        <div class="trace">state.tried = [
+  { item: kimi(priority 1), status: 'skipped' },        <span class="cm">// 时间过滤未命中</span>
+  { item: deepseek(priority 2), status: 'called' }      <span class="cm">// 成功</span>
+]</div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="scn" id="sB">
+  <div class="scn-head" style="background:var(--red-bg)"><span class="no" style="background:var(--red)">B</span> 熔断三态：Closed →（连续失败 4 次）→ Open →（等 60s）→ HalfOpen 探测 → 成功×2 → Closed</div>
+  <div class="scn-body">
+    <div class="flow">
+      <span class="step ok">Closed（全部放行）</span><span class="arrow">→</span>
+      <span class="step no">连续失败 ≥ 4 → Open</span><span class="arrow">→</span>
+      <span class="step wa">等 60s → HalfOpen（限流 1 探测）</span><span class="arrow">→</span>
+      <span class="step ok">探测成功 ×2 → Closed</span>
+    </div>
+    <pre>       连续失败 ≥ failure_threshold  或 (total ≥ min_requests 且 error_rate ≥ error_rate_threshold)
+Closed ──────────────────────────────────────────────────────────────────────► Open
+  ▲                                                                              │
+  │ 半开连续成功 ≥ success_threshold                                             │ timeout_seconds 到期
+  │ ◄────────────────────────────────────────── HalfOpen ◄──────────────────────┘
+                                                      │ 限流 1 探测请求
+                                                      │ 探测失败 → 立即回 Open</pre>
+    <details>
+      <summary>展开步骤细节</summary>
+      <div class="body">
+        <ol>
+          <li>熔断键 = <b>(planId, providerId, modelId)</b> 三维，挂方案实体维度——方案 A 里 Kimi 熔断 ≠ 方案 B 里 Kimi 熔断；同一方案多处挂载共享熔断状态</li>
+          <li><b>Closed</b>：全部放行。连续 4 次调用失败（任何错误类别都计失败，老板 D1）→ 状态机转 <b>Open</b></li>
+          <li><b>Open</b>：拒绝该模型请求（该条目 skipped + 进 bannedModels）→ 等待 timeout_seconds = 60s 到期</li>
+          <li><b>HalfOpen</b>：放行 1 个真实用户请求做探测（零额外成本）；探测成功 → success 计数；连续 2 次成功 → 回 <b>Closed</b></li>
+          <li>探测失败 → 立即回 Open（重新计时）；半开 permit 必须归还（防卡死，对齐 cc-switch release_half_open_permit）</li>
+        </ol>
+        <div class="trace">circuit[planId+moonshot+kimi-k2] = { state: 'Open', openedAt: t0, ... }
+<span class="cm">// 熔断状态属 Config（跨 call 共享存活），不持久化，重启丢失可接受</span></div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="scn" id="sC">
+  <div class="scn-head" style="background:var(--blue-bg)"><span class="no">C</span> 降级链：P1 Kimi 失败(超时) → 重试 1 次再失败 → P2 DeepSeek 成功</div>
+  <div class="scn-body">
+    <div class="flow">
+      <span class="step">P1 Kimi 调用</span><span class="arrow">→</span>
+      <span class="step no">TIMEOUT（看门狗）→ 模型内重试 1 次</span><span class="arrow">→</span>
+      <span class="step no">再失败 → failed</span><span class="arrow">→</span>
+      <span class="step">退避 sleep</span><span class="arrow">→</span>
+      <span class="step ok">P2 DeepSeek 成功</span>
+    </div>
+    <details>
+      <summary>展开步骤细节</summary>
+      <div class="body">
+        <ol>
+          <li>P1 Kimi 发起调用 → 首 chunk 超时（看门狗 TTFB 45s 触发）</li>
+          <li>错误类别 TIMEOUT_FIRST_CHUNK → 模型内重试次数 = 1 → 退避后重试 1 次</li>
+          <li>重试仍失败 → record failed（原因：超时）→ 降级：cursor 前进到 P2</li>
+          <li>换模型降级可 0 sleep 或短 sleep（决策 = f(config, state) 可复现）→ P2 DeepSeek 调用成功 → 返回结果</li>
+          <li>Kimi 失败计入熔断计数（连续失败 +1）——但未达阈值 4，熔断仍 Closed</li>
+        </ol>
+        <div class="trace">state.tried = [
+  { item: kimi, status: 'failed', error: TIMEOUT_FIRST_CHUNK, attemptCount: 2 },  <span class="cm">// 1 次重试后仍失败</span>
+  { item: deepseek, status: 'called' }                                             <span class="cm">// 成功</span>
+]</div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="scn" id="sD">
+  <div class="scn-head" style="background:var(--amber-bg)"><span class="no" style="background:var(--amber)">D</span> 模型去重：Kimi 带时间 item 失败放弃 → bannedModels 含 Kimi → 后面 Kimi 无条件 item 跳过（即使配置了）</div>
+  <div class="scn-body">
+    <div class="sub">放弃/熔断挂钩<b>模型配置</b>（providerId+modelId），不是 item（老板 10:55）——同一模型在一次 attempt 内可能以多个 item 出现（session 合成 + 带时间 + 无条件），一旦被放弃/熔断，本次 attempt 内后续该模型全部 skipped。</div>
+    <div class="flow">
+      <span class="step">候选链：[Kimi(带时间 P1), DeepSeek(P2), Kimi(无条件 P3), GLM(P4)]</span>
+    </div>
+    <div class="flow">
+      <span class="step">P1 Kimi 带时间 → 调用</span><span class="arrow">→</span>
+      <span class="step no">401 AUTH_INVALID → abandoned</span><span class="arrow">→</span>
+      <span class="step no">Kimi 进 bannedModels</span><span class="arrow">→</span>
+      <span class="step ok">P2 DeepSeek 成功</span>
+    </div>
+    <div class="flow">
+      <span class="step gray">P3 Kimi 无条件（已配置）→ 因 bannedModels 含 Kimi → skipped（不再尝试）</span>
+    </div>
+    <details>
+      <summary>展开步骤细节</summary>
+      <div class="body">
+        <ol>
+          <li>候选链含两个 Kimi 条目：P1 带时间（2–23 点）+ P3 无条件——这是合法配置（同模型最多 2 条，带时间在上）</li>
+          <li>P1 Kimi 调用 → 401 AUTH_INVALID → <b>直接熔断 Open + 快速失败放弃（abandoned）</b>（凭证失效短期不恢复）</li>
+          <li>Kimi 模型配置（moonshot+kimi-k2）加入本次 call 的 <b>bannedModels</b></li>
+          <li>P2 DeepSeek 调用成功 → 返回结果</li>
+          <li>关键：即使 P3 配置了 Kimi 无条件条目，也<b>不会再尝试</b>（skipped）——同一模型一次 attempt 只尝试一次</li>
+        </ol>
+        <div class="trace">state.tried = [
+  { item: kimi(带时间), status: 'abandoned', error: AUTH_INVALID },
+  { item: deepseek,     status: 'called' },
+  { item: kimi(无条件), status: 'skipped' }     <span class="cm">// bannedModels 含 moonshot+kimi-k2 → 跳过</span>
+]
+state.bannedModels = { "moonshot+kimi-k2" }</div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="scn" id="sE">
+  <div class="scn-head" style="background:var(--green-bg)"><span class="no" style="background:var(--green)">E</span> resolve 双分支：session default vs session 显式模型（priority 0 合成）</div>
+  <div class="scn-body">
+    <div class="sub">group 挂载了方案「主力+兜底」。session 的 model 选择决定候选链起点。</div>
+    <table>
+      <tr><th>session.modelId</th><th>候选链</th><th>说明</th></tr>
+      <tr>
+        <td><b>'default'</b></td>
+        <td>[Kimi(P1), DeepSeek(P2), GLM(P3), GLM(P4)] = 方案 items 本身</td>
+        <td>直接走方案链，无合成</td>
+      </tr>
+      <tr>
+        <td><b>显式模型</b>（如 glm-4.6）</td>
+        <td>[glm-4.6(P0 合成), Kimi(P1), DeepSeek(P2), GLM(P3), GLM(P4)]</td>
+        <td>session 模型作为 priority 0 插入顶部；临时合成<b>不写回</b>方案实体；熔断键 = planId + session 模型</td>
+      </tr>
+    </table>
+    <details>
+      <summary>展开步骤细节（显式模型分支）</summary>
+      <div class="body">
+        <ol>
+          <li>resolve(session, group)：group 有方案 → 分支 2；session.modelId ≠ default（显式配了 glm-4.6）</li>
+          <li>合成候选链：glm-4.6 作为 <b>priority 0</b> 插入方案顶部——优先用用户显式选的模型</li>
+          <li>合成只发生在内存（临时），不写回方案实体（方案库不变）</li>
+          <li>熔断键 = (planId, zhipu, glm-4.6) —— session 显式模型也享受方案熔断控制（同一方案内与 P3/P4 的 GLM 条目共享熔断状态）</li>
+          <li>若 P0 glm-4.6 失败被放弃 → bannedModels 含 zhipu+glm-4.6 → 后续 P3/P4 的 GLM 条目也 skipped（同模型去重，场景 D 机制）</li>
+        </ol>
+        <div class="trace">resolve 产出（分支 2 · 显式模型）：
+合成链 = [ { model: glm-4.6, priority: 0, 来源: session },   <span class="cm">// 不写回</span>
+           { model: kimi-k2, priority: 1, 来源: plan.items }, ... ]
+circuitKey = planId + "zhipu" + "glm-4.6"   <span class="cm">// 共享方案熔断</span></div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<footer>
+  依据：specs/prd/model-routing-方案设计-2026-08-14.md（v3.1）· 老板拍板 9 点（10:40 D1–D9）+ 架构讨论（10:49–10:55 D10–D14）· 调研：specs/research/model-routing-2026-08-14.md<br>
+  本页为静态说明 demo（自包含单 HTML，无外部依赖），用于方案确认；最终实现以正式 PRD 为准。
+</footer>
+
+</div>
+<script>
+  /* ============ 1. 小时选择：可玩面板（拖拽） ============ */
+  // 默认 2-23 点（Kimi 示例）
+  const demoHours = new Set([2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]);
+  const demoEl = document.getElementById('hoursDemo');
+  const demoCells = []; // 24 格引用：建一次，拖拽只切 class（重建 DOM 会丢 pointer 事件，禁止）
+  let dragging = false, dragStart = -1, dragMode = 'add'; // dragMode: add(选中) / remove(取消)
+
+  // 建格一次
+  for (let h = 0; h < 24; h++){
+    const d = document.createElement('div');
+    d.className = 'hour2' + (demoHours.has(h) ? ' on' : '');
+    d.textContent = h;
+    d.dataset.h = h;
+    demoEl.appendChild(d);
+    demoCells[h] = d;
+  }
+  function syncDemo(){
+    for (let h = 0; h < 24; h++){
+      demoCells[h].className = 'hour2' + (demoHours.has(h) ? ' on' : '');
+    }
+  }
+
+  // 拖拽：按下记录起点 + 模式（按起点格当前状态决定 add/remove）→ 划过格子批量设状态 → 松开结束
+  demoEl.addEventListener('pointerdown', e => {
+    const el = e.target.closest('.hour2');
+    if (!el) return;
+    dragging = true;
+    dragStart = +el.dataset.h;
+    dragMode = demoHours.has(dragStart) ? 'remove' : 'add';
+    applyRange(dragStart, dragStart);
+    e.preventDefault();
+  });
+  // document 级监听：拖动划过任意格（含跨格）都生效
+  document.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const el = e.target && e.target.closest ? e.target.closest('.hour2') : null;
+    if (!el) return;
+    applyRange(dragStart, +el.dataset.h);
+  });
+  function applyRange(a, b){
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    for (let h = lo; h <= hi; h++){
+      dragMode === 'add' ? demoHours.add(h) : demoHours.delete(h);
+    }
+    syncDemo();
+  }
+  window.addEventListener('pointerup', () => { dragging = false; });
+
+  // 清空 = 恢复全天
+  document.getElementById('hoursClear').addEventListener('click', () => {
+    demoHours.clear();
+    for (let h = 0; h < 24; h++) demoHours.add(h);
+    syncDemo();
+  });
+
+  /* ============ 2. 条目行时钟按钮 → popover 小时弹层 ============ */
+  // 每行 item 的时间集合（0=Kimi 2-23, 1=DeepSeek 全天, 2=GLM 8-22, 3=GLM 全天）
+  const itemHours = [
+    new Set([2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]),
+    new Set([...Array(24).keys()]),
+    new Set([8,9,10,11,12,13,14,15,16,17,18,19,20,21,22]),
+    new Set([...Array(24).keys()]),
+  ];
+  // 时钟按钮颜色状态（has-time / no-time）+ hover tooltip 文案
+  const clocks = [0,1,2,3].map(i => document.getElementById('clock' + i));
+  function fmtHours(set){
+    if (set.size === 24) return '全天可用';
+    const arr = [...set].sort((a,b)=>a-b);
+    const segs = [];
+    let s = arr[0], p = arr[0];
+    for (let i = 1; i <= arr.length; i++){
+      if (arr[i] === p + 1) { p = arr[i]; continue; }
+      segs.push(s === p ? `${pad(s)}:00` : `${pad(s)}:00–${pad(p)}:00`);
+      s = p = arr[i];
+    }
+    return segs.join(' + ');
+  }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function syncClock(i){
+    const set = itemHours[i];
+    const has = set.size !== 24;
+    clocks[i].className = 'clock-btn ' + (has ? 'has-time' : 'no-time');
+    const tip = clocks[i].parentElement.querySelector('.tip');
+    tip.textContent = has ? (fmtHours(set) + ' 可用') : '全天可用';
+  }
+  clocks.forEach((_, i) => syncClock(i));
+
+  // popover：点击时钟弹出 24 格面板（独立实例，同样拖拽）
+  let openPop = null; // { el, hours, cells }
+  function openPopover(btn, i){
+    closePopover();
+    const pop = document.createElement('div');
+    pop.className = 'pop';
+    pop.innerHTML = '<h4>' + btn.closest('tr').querySelector('td:nth-child(2)').textContent + ' · 时间条件（白名单小时）</h4>' +
+      '<div class="hours2" id="popHours"></div>' +
+      '<div class="pop-actions"><span class="pop-tip">拖拽选中/取消 · 可多段 · 清空=全天</span>' +
+      '<button class="ghost" id="popClear">清空</button></div>';
+    document.body.appendChild(pop);
+    // 定位：按钮下方
+    const r = btn.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 412)) + 'px';
+    pop.style.top = (r.bottom + 6) + 'px';
+    // 渲染格子（建一次；拖拽只切 class——重建 DOM 会丢 pointer 事件）
+    const grid = pop.querySelector('#popHours');
+    const set = new Set(itemHours[i]);
+    const popCells = [];
+    for (let h = 0; h < 24; h++){
+      const d = document.createElement('div');
+      d.className = 'hour2' + (set.has(h) ? ' on' : '');
+      d.textContent = h;
+      d.dataset.h = h;
+      grid.appendChild(d);
+      popCells[h] = d;
+    }
+    function syncPop(){
+      for (let h = 0; h < 24; h++){
+        popCells[h].className = 'hour2' + (set.has(h) ? ' on' : '');
+      }
+    }
+    let pDrag = false, pStart = -1, pMode = 'add';
+    grid.addEventListener('pointerdown', e => {
+      const el = e.target.closest('.hour2');
+      if (!el) return;
+      pDrag = true; pStart = +el.dataset.h;
+      pMode = set.has(pStart) ? 'remove' : 'add';
+      pApply(pStart, pStart);
+      e.preventDefault();
+    });
+    // 命名函数表达式名只在函数内部可见（close 闭包引用会 ReferenceError）→ 用 const
+    const pm = (e) => {
+      if (!pDrag) return;
+      const el = e.target && e.target.closest ? e.target.closest('.hour2') : null;
+      if (el) pApply(pStart, +el.dataset.h);
+    };
+    document.addEventListener('pointermove', pm);
+    function pApply(a, b){
+      const lo = Math.min(a,b), hi = Math.max(a,b);
+      for (let h = lo; h <= hi; h++) pMode === 'add' ? set.add(h) : set.delete(h);
+      syncPop();
+    }
+    window.addEventListener('pointerup', function up(){ pDrag = false; window.removeEventListener('pointerup', up); });
+    pop.querySelector('#popClear').addEventListener('click', () => {
+      set.clear(); for (let h = 0; h < 24; h++) set.add(h); syncPop();
+    });
+    // 关闭：点外部 / Esc
+    function onDoc(e){
+      if (!pop.contains(e.target) && !btn.contains(e.target)) closePopover();
+    }
+    function onEsc(e){ if (e.key === 'Escape') closePopover(); }
+    document.addEventListener('pointerdown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    openPop = {
+      el: pop, hours: set,
+      close(){
+        document.removeEventListener('pointerdown', onDoc);
+        document.removeEventListener('keydown', onEsc);
+        document.removeEventListener('pointermove', pm);
+        pop.remove();
+      },
+      commit(){ itemHours[i] = new Set(set); syncClock(i); },
+    };
+  }
+  function closePopover(){
+    if (openPop){ openPop.commit(); openPop.close(); openPop = null; }
+  }
+  clocks.forEach((btn, i) => btn.addEventListener('click', e => { e.stopPropagation(); openPopover(btn, i); }));
+
+  /* ============ 3. 熔断红绿灯（点击循环三态 + Open 倒计时） ============ */
+  // 初始状态：0=Closed, 1=Closed, 2=Open(42s), 3=HalfOpen
+  const lights = [0,1,2,3].map(i => document.getElementById('light' + i));
+  const lightState = ['closed','closed','open','halfopen'];
+  const countdowns = [null, null, 42, null]; // Open 倒计时（秒）
+  const LBL = { closed:'Closed', open:'Open', halfopen:'HalfOpen' };
+  const DESC = {
+    closed: 'Closed · 熔断关闭 = 模型开放可用',
+    open: 'Open · 熔断打开 = 模型被熔断不可用',
+    halfopen: 'HalfOpen · 半开 = 探测中',
+  };
+  const CD_EL = {};
+
+  function renderLight(i){
+    const el = lights[i];
+    const st = lightState[i];
+    el.className = 'light ' + st;
+    el.querySelector('.lbl').textContent = LBL[st];
+    // 倒计时元素
+    let cd = el.querySelector('.cd');
+    if (st === 'open'){
+      if (!cd){ cd = document.createElement('span'); cd.className = 'cd'; el.appendChild(cd); }
+      CD_EL[i] = cd;
+      updateCd(i);
+    } else {
+      if (cd) cd.remove();
+      delete CD_EL[i];
+    }
+    el.title = '点击循环切换三态 · ' + DESC[st];
+  }
+  function updateCd(i){
+    if (lightState[i] !== 'open' || !CD_EL[i]) return;
+    CD_EL[i].textContent = countdowns[i] + 's 后恢复探测';
+  }
+  // 倒计时每秒减 1；到 0 自动转 HalfOpen
+  setInterval(() => {
+    for (let i = 0; i < 4; i++){
+      if (lightState[i] === 'open' && countdowns[i] > 0){
+        countdowns[i]--;
+        updateCd(i);
+        if (countdowns[i] === 0){
+          lightState[i] = 'halfopen';
+          renderLight(i);
+        }
+      }
+    }
+  }, 1000);
+
+  // 点击循环：绿→红→黄→绿
+  lights.forEach((el, i) => el.addEventListener('click', () => {
+    const seq = { closed:'open', open:'halfopen', halfopen:'closed' };
+    lightState[i] = seq[lightState[i]];
+    if (lightState[i] === 'open') countdowns[i] = 60; // 进入 Open 重置 60s 倒计时
+    renderLight(i);
+  }));
+  lights.forEach((_, i) => renderLight(i));
+</script>
+</body>
+</html>

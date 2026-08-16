@@ -93,6 +93,7 @@ export async function consolidateSessionMemory(
     systemPrompt: '', // 未使用（forked 走 snapshot.system）
     client: buildLlmClient(model.providerId, model.modelId, deps.appConfig, deps.pluginManager),
     modelId: model.modelId,
+    providerId: model.providerId,
     dataDir: deps.dataDir, // memory_manage global/group 寻址数据根
     workdir: sessionWsDir, // memory_manage session scope 落 <workdir>/.rocky/memory/（dir store）
     appConfig: deps.appConfig,

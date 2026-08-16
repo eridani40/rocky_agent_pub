@@ -1,6 +1,6 @@
 # v{N}.{M} 变更计划书 — {版本简述}
 
-> **method 级 review 合同**。架构期冻结：planner 按本表切 task，coder 按本表实现，code-reviewer 按本表查偏离。coder/doc-modifier 不改本文件；事后偏差写进 `change_log.md`。
+> **method 级 review 合同**。架构期冻结：architect 按本表切 task，coder 按本表实现，code-reviewer 按本表查偏离。coder/doc-modifier 不改本文件；事后偏差写进 `change_log.md`。
 
 ## 列定义（8 列，行 = 一个函数/符号）
 

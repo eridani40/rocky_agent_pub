@@ -17,6 +17,8 @@ import type { Usage } from '../message/types';
  *   - `physical_wire_body`（onWire 钩子记录的 protocol.encode 产出，与逻辑层 input diff）
  *   - `errorCategory`（仅 error 路径，LlmErrorCategory 字符串值）
  *   - `retry_chain`（attemptLoop 每次 attempt 记录）
+ *   - [v0.0.353 T2] `providerId` / `providerName` / `modelId` / `logicalView`
+ *     （physical generation 真实 provider/model 透传；logical view 置 null 标识 A1 治理）
  *
  * @param m        GenMetadata 全量字段
  * @param category endGeneration 入参里的 errorCategory（与 m.errorCategory 同源，
@@ -34,6 +36,16 @@ export function mapGenMetadata(
     cacheWriteTokens: m.cacheWriteTokens,
   };
   if (m.durationMs !== undefined) out.durationMs = m.durationMs;
+  // [v0.0.353 T2] 真实 provider/model 透传（undefined 不写；null = A1 logical view 显式置空）
+  if (m.providerId !== undefined) out.providerId = m.providerId;
+  if (m.providerName !== undefined) out.providerName = m.providerName;
+  if (m.modelId !== undefined) out.modelId = m.modelId;
+  if (m.logicalView !== undefined) out.logicalView = m.logicalView;
+  // [v0.0.353 T5 D8] 生效路由方案（logical end 对称携带；undefined 不写）
+  if (m.routingPlan !== undefined) out.routingPlan = m.routingPlan;
+  // [v0.0.353 T5 D9] skipped 候选标记（skipped gen end 对称携带；undefined 不写）
+  if (m.skipped !== undefined) out.skipped = m.skipped;
+  if (m.skipReason !== undefined) out.skipReason = m.skipReason;
   // 物理层 wire body（可选，onWire 未注入时 undefined → 不写入）
   if (m.physicalWireBody !== undefined) {
     out.physical_wire_body = m.physicalWireBody;

@@ -3,7 +3,7 @@ type: interface
 title: System Prompt 构建（mapper / reducer）
 priority: P0
 status: active
-updated: 2026-08-02
+updated: 2026-08-15
 since: v0.0.8
 ---
 
@@ -110,6 +110,7 @@ reducer 链结束仍是 `PromptFragment[]`（不是 string），由 builder（§
 | `context_files` | context | 6 | AGENTS.md / 项目上下文（squad 两级：团队 + 个人差异叠加，各带来源标注） | **项目文件**（项目根 `AGENTS.md`/`CLAUDE.md` + squad 个人差异 `.rocky/agents/{名字}-{id}.md`，路径走 `config.cwd`；经 `ContextFilesHandler` 读取，见 `[P0]prompt_content_files.md` §4.1） |
 | `memory_user` | stable | 7 | 用户级长期记忆（跨 session）—— 只注入 L0（name+intro）；经 `selectMemoriesByQuota` 按 scope 分层配额截断（global ≤50，层内 manual→agent + updatedAt 倒序） | **app_config record `user_memory/default`**（`UserMemoryService.list`；native 注入，见 `../memory/[P0]memory_injection.md`） |
 | `memory_session` | context | 8 | session 级记忆 —— 只注入 L0（name+intro）；经同一 `selectMemoriesByQuota` 分层配额（session ≤20）；squad session 的 session 源与 group 同址时跳过（去重，见 `../memory/[P0]memory_injection.md` §2.3） | **`<session.workspaceDir>/.rocky/memory/` per-entry dir**（`listMetas`；native 注入，见 `../memory/[P0]memory_injection.md`） |
+| `session_states` | stable | 12 | session states 静态段——env / 工作目录 / 团队盘路径三小节（迁自退役 reminder provider env/workspace/squad_workspace，逻辑平移；团队盘小节仅 squad session）；fragment priority 810（rules 之后、squad_role 之前），代码 `prompt/session_states.ts` | **运行时计算**（config env/cwd/dataDir/squadId） |
 
 > **scope 级 mapper（不在 default 链）**：上表是 default scope 的链。scope yaml 可对 `system_prompt_mapper` 点声明全量替换列表——如 `playground-rocky.parent.main` scope 去 squad_role/team_roster/memory_group/parent_task（替换为更简的 mapper 集合）；`studio-{squad,leader,mate}.parent.main` 等 scope 也声明自己的列表。这些覆写经 §1 的 scopeId 解析生效。
 

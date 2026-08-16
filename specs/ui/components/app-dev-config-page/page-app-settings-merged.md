@@ -7,6 +7,7 @@
 
 > **[v0.0.318] 配置同步 tab**：通用区新增 `config_sync`（memory 紧邻下方），自渲染 `section-config-sync`（导入导出即时操作，**不进 page-tab dirty / 不走 SaveBar**）。tab 注册见 `app-settings-config-defs.ts`（`TabId` union + `APP_SETTINGS_TABS` memory 后插入 + `TAB_KV_GROUPS.config_sync=[]`）；路由见 `section-tab-panel.tsx` `case 'config_sync'`。
 > **[v0.0.319] 团队同步 tab**：通用区新增 `team_sync`（config_sync 之后），自渲染 `section-team-sync`（导入导出即时操作，**不进 page-tab dirty / 不走 SaveBar**）。tab 注册见 `app-settings-config-defs.ts`（`TabId` union + `APP_SETTINGS_TABS` config_sync 后插入 + `TAB_KV_GROUPS.team_sync=[]`）；路由见 `section-tab-panel.tsx` `case 'team_sync'`。
+> **[v0.0.349] 方案删除上抛清挂载态（BUG-004 修复）**：page 持 `onPlanDeleted(detached, planId)` 透传 `section-tab-panel` → `SectionModelRoutingPlans`；`detached` 含 `'playground'` 时调 `useAppSettingsConfig.clearPlaygroundMountState(planId)`——page 级跨 tab 存活的 mountDraft/mountSnapshot 若仍持已删 planId，会话 tab 合并 select trigger 会残显「方案 · <planId>」直到刷新。同版 BUG-003 修复该 hook 三个 useCallback（dirtyOfTab/saveTab/cancelTab）缺 mount deps 的 stale closure（首存 dirty 残留需二次保存收敛）。
 
 ## 保存交互（page-tab 级）
 **数据源**：REST CRUD 无 SSE——挂载 `useAppSettingsConfig` 并发 `GET /config/app?group=<g>&key=default`（5 个 KV group：default_models/llm_request/session/consolidation/logs）+ 自渲染 group（observability/web_search/see_image/web/providers/user_memory）各自加载；保存走 `PUT /config/app` body={group,key,data}（`app-settings-persist.ts`）。locale 走 `PUT /config/app` 整组（`locale` group）。

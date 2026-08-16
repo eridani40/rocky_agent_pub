@@ -15,6 +15,7 @@ import type { Tool, ToolCtx, ToolInput, ToolRunResult } from '../../tools/types'
 import { errorResult, textResult } from '../../tools/types';
 import { readRuntimeContext } from './runtime-context';
 import type { MemberRecord } from '../schema_defs/squad/member';
+import { fanoutStates } from '../../squad/squad-states-fanout';
 
 /**
  * presence 工具（单例导出，registry defaultTools 引用）。
@@ -84,6 +85,20 @@ export const presenceTool: Tool = {
     void _ca; void _ua; void _v;
 
     await rtc.memberStore.putMember({ ...(rest as object), currentWork } as MemberRecord);
+    // [v0.0.361 T4] presence 变化行写 reminder queue + fanout squad 全员（change_plan §1.5/§2 样例 C）。
+    // value = 已渲染行；key = presence:{memberId}（契约表权威）。写失败 catch 吞（best-effort，
+    // 不阻断工具返回）；dataDir 缺省 → no-op。member name 渲染用 selfName（rtc 权威）。
+    try {
+      const dataDir = (rtc.sessionDeps as { dataDir?: string } | undefined)?.dataDir;
+      if (dataDir && rtc.selfSquadId) {
+        const line = currentWork
+          ? `[squad:agents] ${rtc.selfName} presence: ${currentWork.text}`
+          : `[squad:agents] ${rtc.selfName} presence 已清除`;
+        await fanoutStates(
+          rtc.selfSquadId, `presence:${rtc.selfMemberId}`, line, { fsRoot: dataDir },
+        );
+      }
+    } catch { /* fanout 失败静默（不阻断工具返回） */ }
     return textResult(JSON.stringify({ ok: true }));
   },
 };

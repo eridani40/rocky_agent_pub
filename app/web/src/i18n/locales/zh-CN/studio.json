@@ -139,7 +139,9 @@
       "high": "高",
       "max": "超高"
     },
-    "save": "保存元信息"
+    "save": "保存元信息",
+    "routingPlanLabel": "模型路由方案（挂载）",
+    "routingPlanNone": "未挂载"
   },
   "saveBar": {
     "discardTitle": "放弃改动？",
@@ -326,5 +328,12 @@
       "archived": "{{id}} 已归档"
     },
     "barTotal": "{{label}} 共 {{count}} 条"
+  },
+  "modelOrPlan": {
+    "groupModels": "模型",
+    "groupPlans": "方案",
+    "placeholder": "选择模型或方案",
+    "emptyPlans": "暂无方案",
+    "planPrefix": "方案"
   }
 }

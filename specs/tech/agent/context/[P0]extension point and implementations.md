@@ -3,13 +3,13 @@ type: interface
 title: Context Extension Points & Implementations（索引）
 priority: P0
 status: active
-updated: 2026-08-04
+updated: 2026-08-15
 since: v0.0.13
 ---
 
 # Context Extension Points & Implementations（索引）
 
-> 管什么：context 子系统的 **11 个扩展点（EP）+ 57 个内置 ext impl（31 通用基线 + 1 default sink + 1 search 旁路 + 1 side_run_builder + 4 compact + 2 post-compact + 2 session_store（v0.0.66）+ 15 squad/academy-scoped）的整合索引**——各 EP 契约、各 impl 的 description / configSchema 归属、`rocky_context` builtin plugin manifest 结构。
+> 管什么：context 子系统的 **11 个扩展点（EP）+ 53 个内置 ext impl（manifest 实测；v0.0.361 静态三 provider 退役 + `session_states` mapper 新增 + reminder 双模式）的整合索引**——各 EP 契约、各 impl 的 description / configSchema 归属、`rocky_context` builtin plugin manifest 结构。
 > 不管什么：单个 EP 契约细节（→ 各 detail 文档）、cardinality 三态语义（→ `../../plugin_system/[P0]extension_point_interface.md`）、ext impl 字段（→ `../../plugin_system/[P0]ext_impl_and_manifest_interface.md`）、ContextEngine 怎么调框架（→ `[P0]context_engine.md` §3 + §3.5）。
 >
 > 本文是**整合索引**：11 EP / impl 的契约都在各 detail spec（§6 出处索引），不重新定义契约；只补「整合视图 + configSchema 显式 JSON Schema 字段 + manifest 结构」spec 缺口。
@@ -18,7 +18,7 @@ since: v0.0.13
 
 v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_prompt / system_reminder 四个执行点全部由 `PluginManager.getExtensionImpls(point)` 驱动跑 ordered 链。**[v0.0.40]** compact 触发也 plugin 化——新增 2 个 `exclusive` context EP（`context_should_compact` 谓词 + `context_do_compact` 动作），首批 exclusive context EP（既有 6 个 context EP 全是 ordered）。**[v0.0.49]** default scope 的 store sink 也 EP 化（`store_sink` impl，对称旁路 run 的 `store_sink`，替代 context-engine.ts 的 `if scopeId` 硬尾）。**[v0.0.51]** 新增 `context_post_compact` ordered EP（compact 完成后触发 memory/skill 整理）。**[v0.0.66]** session store 也 EP 化（`session_store` exclusive EP，main scope=`persistent_session_store` / 旁路 run scope=`in_memory_session_store`）+ 删 4 buffer/system impl（`buffer_sink`/`buffer_reader`/`append_passthrough`/`system_prompt`）+ 删旧 `memory` mapper（v0.0.51 已拆为 `memory_user`+`memory_session`，v0.0.66 manifest 计数对齐）。**[v0.0.126]** 新增 `search_indexing` ingest handler（派生索引旁路 sink，只 main scope active；旁路 run scope 经声明式 yaml 配置 disable）。**[v0.0.173]** 新增 `context_clean_view_reducer` ordered EP（面向 LLM 的清理 reducer 链，6 个清理 reducer 从 `context_assemble_reducer` 迁过来）+ 删 `prev_snapshot` mapper（snapshot 永远 rebuild 不再需要 prevMessages）。**[v0.0.178+v0.0.204]** 新增 `side_run_builder` assemble_reducer impl（v0.0.204 rename 自 `forked_builder`；旁路 run scope 专用，复用固定 parentSnapshot + summaryUpTo 后 in_memory 增量 upsert，替代旁路 run 复用 base_builder 的旧契约——base_builder 永远 rebuild 后无 parent transcript 透传，side_run_builder 修复 v0.0.173 silent regression）。v0.0.8 简化版（append-only ingest / head3+tail3 / 直填 systemPrompt）下沉为 builtin impl 的默认 config 兜底（design [D1.2]）。
 
-所有 context EP 归一个 builtin plugin：`rocky_context`（design [D1.3]），目录 `app/plugins/builtins/rocky_context/`，manifest 声明 **57 个** ext impl（31 通用基线 + 1 main sink（v0.0.49：`store_sink`）+ 1 history search 旁路（v0.0.126：`search_indexing`）+ 4 compact（v0.0.40：`context_should_compact` 谓词 2 个 = threshold + reject dummy；`context_do_compact` 动作 2 个 = summary + noop dummy）+ 2 post-compact（v0.0.51：`memory_skill_consolidation` + `noop_post_compact`）+ **2 session_store（v0.0.66：`persistent_session_store` + `in_memory_session_store`）**+ 1 side_run_builder assemble_reducer（v0.0.178 起，v0.0.204 rename 自 forked_builder）+ 15 squad/academy-scoped；v0.0.173 删 1 mapper（`prev_snapshot`）；squad-scoped impl 详见 `../../squad/[P1]prompt_sections.md`；compact impl 详见 `[P0]context_compact_detail.md §2c`；post-compact impl 详见 `[P0]context_compact_detail.md §2d`；session_store impl 详见 `[P0]context_engine.md §3.6`）。
+所有 context EP 归一个 builtin plugin：`rocky_context`（design [D1.3]），目录 `app/plugins/builtins/rocky_context/`，manifest 声明 **53 个** ext impl（39 通用/基建 + 14 squad/academy-scoped；按 EP：ingest 5 / assemble_mapper 2 / assemble_reducer 2 / clean_view 8 / compact 4 / post_compact 2 / session_store 2 / prompt_reducer 3 / prompt_mapper 21 / reminder 4；v0.0.361 退役 4 个 reminder provider（env/time/workspace/squad_workspace）+ 新增 `session_states` mapper）；squad-scoped impl 详见 `../../squad/[P1]prompt_sections.md`；compact impl 详见 `[P0]context_compact_detail.md §2c`；post-compact impl 详见 `[P0]context_compact_detail.md §2d`；session_store impl 详见 `[P0]context_engine.md §3.6`。
 
 ## 2. 11 个 context EP 清单
 
@@ -44,7 +44,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 
 > 10 EP 定义是**代码常量**（EP 是 contract，见 `extension_point_interface.md` §3.8），加在 `extension-point.ts` 的 `BUILTIN_EXTENSION_POINTS`（v0.0.13 前只有 `llm_provider` / `llm_protocol`，group=provider）。bootstrap 的 EP 注册循环自动带上。
 
-## 3. 57 个内置 impl 清单（按 EP 分组）
+## 3. 53 个内置 impl 清单（按 EP 分组）
 
 > 全部归 `rocky_context` plugin。**[v0.0.18]** impl 排序用 `ExtImplPolicyData.order`（per-point 连续 1..n），无 record 时按 manifest 登记序末尾补位；**无 configSchema 的 impl 仅 enable/disable + 调序**；**有 configSchema 的 8 个**见 §4 显式 JSON Schema 字段。manifest 不再有 `priority` 字段（已删），下方表「登记序」列即 manifest 声明顺序（用于补位），不显式写进 manifest。
 
@@ -54,7 +54,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 |---|---|---|---|
 | `query_truncate` | 1 | ✅ §4.1 | 截断过长 user query（原文 offload raw）；`context_ingest_detail.md` §3 |
 | `tool_result_truncate` | 2 | ✅ §4.2 | 截断过大 tool_result（原文 offload tool_result）；同上 |
-| `system_reminder_injector` | 3 | — | 跑 `system_reminder` provider 链聚合 reminder，追加到最后一条 user message content 末尾；同上 §3 + `system_reminder.md` §4 |
+| `system_reminder_injector` | 3 | — | 跑 `system_reminder` provider 链聚合 reminder，追加到最后一条触发 message（user/tool/a2a；v0.0.361 双模式：full 全量+queueClearAll / incremental 时间固定段+queueDrain）content 末尾；同上 §3 + `system_reminder.md` §4 |
 | `store_sink` ★ v0.0.49 D15 | 4 | — | **default + forked 都 active 的 sink**（写 store transcript / 内存数组）：`ctx.store.appendMessages(ctx.config.sessionId, messages)`；store 由 ContextEngine.ingest 经 session_store EP 按 scope 解析（v0.0.66：default 写持久 transcript / forked 写内存数组，同 impl 透传不同 store 实现）；同上 §3 |
 | `search_indexing` ★ v0.0.126 | 5 | — | **派生索引旁路 sink（只 default scope active；forked disable）**：`role∈{user,assistant}` 的 message 从 content ContentBlock[] 提取 `type=text` part 拼纯文本 → 投递 `HistoryIndexer.index({messageId: m.id, sessionId, role, ts: m.id, text})`（不 await、不阻塞 ingest，异常吞掉 + reconcile 兜底）。order=5 紧随 `store_sink`(4) 后：**失败一致性**（store_sink 抛错→chain 中断→不索引→永不孤儿）。message_id 由 ingest 入参 messages 自带（业务生成 ULID），store 不返回；契约同 `IngestHandler.handle(messages, ctx) → Message[]`（透传不 transform）；引擎见 `../../persistence/[P1]search_engine.md §3.3`；PRD `specs/prd/overall/11-history-search.md §11.2.3` |
 
@@ -80,7 +80,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 >
 > **[v0.0.178] side_run_builder 替代 base_builder 在旁路 run scope 的位置**（v0.0.204 rename 自 forked_builder）：v0.0.66-v0.0.177 旁路 run 复用 base_builder（依赖 v0.0.66 append 分支透传 parent transcript）；v0.0.173 删 append 分支后旁路 run 看不到 parent transcript（silent regression）→ v0.0.178 新建 forked_builder（同 EP，靠 scope 切换；主干 `ContextEngine.assemble` 零 forked 分支）。v0.0.204 implId rename forked_builder→side_run_builder，文件 `app/plugins/builtins/rocky_context/assemble/side_run_builder.ts`，类 `SideRunBuilderReducer`。详见 `[P0]context_assemble_detail.md` §5c。
 
-### 3.4 `system_prompt_mapper`（12 个 = 9 通用 + 3 squad-scoped）
+### 3.4 `system_prompt_mapper`（13 个 = 10 通用 + 3 squad-scoped）
 
 | implId | 登记序（补位用） | tier | configSchema | 职责（出处） |
 |---|---|---|---|---|
@@ -94,8 +94,9 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 | `memory_session` ★ v0.0.51 | 8 | context | — | context tier session 记忆 whole-file 注入（超预算可裁尾部）；同上 |
 | `memory_group` | 9 | stable | — | stable tier group（squad/classroom）记忆注入（同址去重见 `../memory/[P0]memory_injection.md` §2.3）；同上 |
 | `squad_role` | 10 | stable | — | **squad-scoped**：squad 角色 content fragment（leader/mate/squad_chat）；`../../squad/[P1]prompt_sections.md` |
-| `team_roster` | 11 | stable | — | **squad-scoped**：团队成员花名册 reminder；同上 |
-| `parent_task` | 12 | context | — | **squad-scoped**：父任务上下文；同上 |
+| `team_roster` | 11 | stable | — | **squad-scoped**：团队成员花名册（name+role+sessionId）；同上 |
+| `session_states` ★ v0.0.361 | 12 | stable | — | session states 静态段——env / 工作目录全 session + 团队盘小节仅 squad session（承接退役静态 reminder provider env/workspace/squad_workspace；fragment priority 810）；`system_prompt.md` §4 |
+| `parent_task` | 13 | context | — | **squad-scoped**：父任务上下文；同上 |
 
 > **[v0.0.66] 旧 `memory` 单 impl 已退役**：v0.0.51 拆为 `memory_user`(stable) + `memory_session`(context) 两个独立 impl 直接登记在 manifest；本表对齐当前 manifest 形态（无聚合 `memory` 行）。
 
@@ -107,18 +108,16 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 | `dedup` | 2 | — | 同 fragment.id 去重；同上 |
 | `budget_truncate` | 3 | ✅ §4.5 | token 预算裁剪（仅裁 context/volatile 动态段）；同上 §3/§7 |
 
-### 3.6 `system_reminder`（8 个 = 5 通用 + 3 squad-scoped）
+### 3.6 `system_reminder`（4 个 = 2 通用 + 2 squad-scoped）
 
 | implId | 登记序（补位用） | configSchema | 职责（出处） |
 |---|---|---|---|
-| `env` | 1 | — | 环境（test/dev/prod、平台、模型）；`system_reminder.md` §3 |
-| `time` | 2 | — | 系统时间（含时分 + 时区名，[v0.0.64] 修正）；同上 |
-| `workspace` | 3 | — | 工作目录、git 状态；同上 |
-| `tool_error` | 4 | — | 上轮工具错误；同上 |
-| `todo` | 5 | — | task 进度（**[D1.1] 依赖 task_tools 缺失 → no-op 返回空**）；同上 |
-| `squad_agents_status` | 6 | — | **squad-scoped**：统一全员状态块（可达对象 + running/idle + presence；[v0.0.273] 三合一取代 reachable_agents + squad_team_status）；`../../squad/[P1]prompt_sections.md` |
-| `squad_workspace` | 7 | — | **squad-scoped**：squad 工作目录 reminder；同上 |
-| `squad_task` | 8 | — | **squad-scoped**：工作项进度 reminder；同上 |
+| `tool_error` | 1 | — | 上轮工具错误；`system_reminder.md` §3 |
+| `todo` | 2 | — | todo 进度摘要（ReminderCtx.todoStore）；同上 |
+| `squad_agents_status` | 3 | — | **squad-scoped**：全员状态块动态半（running/idle + presence；v0.0.361 拆半——名单归 team_roster mapper）；`../../squad/[P1]prompt_sections.md` |
+| `squad_task` | 4 | — | **squad-scoped**：活跃 task 列表 reminder；同上 |
+
+> **[v0.0.361] 退役 4 个 reminder provider**：`env` / `workspace` / `squad_workspace`（静态半平移 `session_states` mapper，§3.4）+ `time`（平移 injector 内部时间固定段，输出语义/tz 不变，`system_reminder.md §4`）。reminder 双模式：full 轮跑上表链全量 + queueClearAll；incremental 轮时间固定段 + queueDrain（变化行由写侧经 `ReminderQueueStore` 投递）。
 
 ### 3.7 `context_should_compact` + `context_do_compact`（4 个，v0.0.40）
 
@@ -178,7 +177,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 >
 > **fallback**（无 pluginManager / 链空）：`ContextEngine.getCleanSnapshot` 返 messages 深克隆 fallback（不阻塞 LLM 调用）。
 
-> 合计 5+2+2+8+20+3+9+4+2+2 = **57** 个 impl（按 `plugin.json` manifest 实测）。31 通用基线 + 1 default+forked active sink（v0.0.49 `store_sink`）+ 1 history search 旁路（v0.0.126 `search_indexing`）+ 1 side_run_builder assemble_reducer + 4 compact + 2 post-compact + 2 session_store（v0.0.66）+ 15 squad/academy-scoped（§3.4/§3.6 表未逐行单列全部 scoped impl，契约归各业务 KB——squad 见 `../../squad/[P1]prompt_sections.md`、academy 见 `../../academy/`；scoped impl 不带 configSchema）；compact impl 契约归 `[P0]context_compact_detail.md §2c`；post-compact impl 契约归 `[P0]context_compact_detail.md §2d`；session_store impl 契约归 `[P0]context_engine.md §3.6` + `../../session/[P0]session_store.md §4`；search_indexing impl 契约归 `../../persistence/[P1]search_engine.md §3.3`；clean_view_reducer impl 契约归 `[P0]context_assemble_detail.md §5b`）。
+> 合计 5+2+2+8+21+3+2+2+2+2+4 = **53** 个 impl（按 `plugin.json` manifest 实测；v0.0.361：`system_reminder` 8→4（退役 env/time/workspace/squad_workspace）+ `system_prompt_mapper` 20→21（新增 `session_states`））。39 通用/基建 + 14 squad/academy-scoped（§3.4/§3.6 表未逐行单列全部 scoped impl，契约归各业务 KB——squad 见 `../../squad/[P1]prompt_sections.md`、academy 见 `../../academy/`；scoped impl 不带 configSchema）；compact impl 契约归 `[P0]context_compact_detail.md §2c`；post-compact impl 契约归 `[P0]context_compact_detail.md §2d`；session_store impl 契约归 `[P0]context_engine.md §3.6` + `../../session/[P0]session_store.md §4`；search_indexing impl 契约归 `../../persistence/[P1]search_engine.md §3.3`；clean_view_reducer impl 契约归 `[P0]context_assemble_detail.md §5b`。
 >
 > **[v0.0.66] 已退役 impl（manifest 不再登记，forked-scope-bootstrap disable 仅作幂等防御清历史 scope 残留 enabled）**：`system_prompt`（context_assemble_mapper，§3.2 已删，system 由 context-engine 独立调 builder）；`buffer_sink`（context_ingest_handler，由 `store_sink` + session_store EP 取代）；`buffer_reader`（context_assemble_mapper，由 `transcript_reader` + session_store EP 取代）；`append_passthrough`（context_assemble_reducer，forked 改用 `base_builder`）。
 >
@@ -310,7 +309,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
 
 ## 5. `rocky_context` plugin manifest 结构
 
-单 plugin，目录 `app/plugins/builtins/rocky_context/`，manifest 文件 `plugin.json`。`extImpls[]` 装 57 个 impl（31 通用 + 1 sink（v0.0.49 `store_sink`）+ 1 search 旁路（v0.0.126 `search_indexing`）+ 1 side_run_builder + 4 compact + 2 post-compact（v0.0.51）+ 2 session_store（v0.0.66 `persistent_session_store`/`in_memory_session_store`）+ 15 squad/academy-scoped），每个 impl 一个模块文件（导出类，非 activate；见 `plugin_manager_interface.md §3.4`）。impl 模块路径相对 plugin 目录。squad-scoped impl（`squad_role`/`team_roster`/`parent_task`/`squad_agents_status`/`squad_workspace`/`squad_task`）的契约文档归 squad KB（`../../squad/[P1]prompt_sections.md`），manifest 仅登记 impl 模块路径。compact impl（`threshold_should_compact`/`reject_should_compact`/`summary_do_compact`/`noop_do_compact`）契约归 `[P0]context_compact_detail.md §2c`；post-compact impl（`memory_skill_consolidation`/`noop_post_compact`）契约归 `[P0]context_compact_detail.md §2d`；session_store impl（`persistent_session_store`/`in_memory_session_store`）契约归 `[P0]context_engine.md §3.6`。
+单 plugin，目录 `app/plugins/builtins/rocky_context/`，manifest 文件 `plugin.json`。`extImpls[]` 装 53 个 impl（39 通用/基建 + 14 squad/academy-scoped，按 EP 计数见 §1），每个 impl 一个模块文件（导出类，非 activate；见 `plugin_manager_interface.md §3.4`）。impl 模块路径相对 plugin 目录。squad-scoped impl（`squad_role`/`team_roster`/`parent_task`/`squad_agents_status`/`squad_task`）的契约文档归 squad KB（`../../squad/[P1]prompt_sections.md`），manifest 仅登记 impl 模块路径。compact impl（`threshold_should_compact`/`reject_should_compact`/`summary_do_compact`/`noop_do_compact`）契约归 `[P0]context_compact_detail.md §2c`；post-compact impl（`memory_skill_consolidation`/`noop_post_compact`）契约归 `[P0]context_compact_detail.md §2d`；session_store impl（`persistent_session_store`/`in_memory_session_store`）契约归 `[P0]context_engine.md §3.6`。
 
 ```jsonc
 {
@@ -341,7 +340,7 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
     { "implId": "empty_message",            "point": "context_clean_view_reducer", "impl": "./assemble/empty_message.ts",         "description": "剔除空 content message（由 getCleanSnapshot 在深克隆副本上跑）" },
     { "implId": "role_merge",               "point": "context_clean_view_reducer", "impl": "./assemble/role_merge.ts",            "description": "★v0.0.173 合并相邻同 role message（只发生在深克隆副本，原 snapshot 不被触碰 → 不再吞 id → 不再乱序）" },
 
-    // system_prompt_mapper (7 通用基线，v0.0.51 memory 拆为 user+session)
+    // system_prompt_mapper (通用基线节选；完整 21 行 = 10 通用 + 3 squad + 8 academy，见 plugin.json)
     { "implId": "identity",                 "point": "system_prompt_mapper",     "impl": "./prompt/identity.ts",                "description": "agent 身份" },
     { "implId": "rules",                    "point": "system_prompt_mapper",     "impl": "./prompt/rules.ts",                   "description": "行为规则" },
     { "implId": "tool_guidance",            "point": "system_prompt_mapper",     "impl": "./prompt/tool_guidance.ts",           "description": "工具说明（读 config.tools）" },
@@ -349,18 +348,18 @@ v0.0.13 起 context 引擎**全面 plugin 化**：ingest / assemble / system_pro
     { "implId": "context_files",            "point": "system_prompt_mapper",     "impl": "./prompt/context_files.ts",           "description": "AGENTS.md/项目上下文（读 cwd）" },
     { "implId": "memory_user",              "point": "system_prompt_mapper",     "impl": "./prompt/memory-user.ts",             "description": "stable tier 用户记忆 whole-file 注入（v0.0.51）" },
     { "implId": "memory_session",           "point": "system_prompt_mapper",     "impl": "./prompt/memory-session.ts",          "description": "context tier session 记忆 whole-file 注入（v0.0.51）" },
+    { "implId": "session_states",           "point": "system_prompt_mapper",     "impl": "./prompt/session_states.ts",          "description": "__MSG_plugin.builtin.rocky_context.impl.session_states.description__（session states 静态段：env/工作目录/团队盘路径，v0.0.361）" },
 
     // system_prompt_reducer (3)
     { "implId": "tier_sort",                "point": "system_prompt_reducer",    "impl": "./prompt/tier_sort.ts",               "description": "按 tier 排序 stable→context→volatile" },
     { "implId": "dedup",                    "point": "system_prompt_reducer",    "impl": "./prompt/dedup.ts",                   "description": "同 fragment.id 去重" },
     { "implId": "budget_truncate",          "point": "system_prompt_reducer",    "impl": "./prompt/budget_truncate.ts",         "description": "token 预算裁剪（仅裁 context/volatile）", "configSchema": {/* §4.5 */}, "schemaConfig": {/* §4.5 */} },
 
-    // system_reminder (5)
-    { "implId": "env",                      "point": "system_reminder",          "impl": "./reminder/env.ts",                   "description": "环境（test/dev/prod、平台、模型）" },
-    { "implId": "time",                     "point": "system_reminder",          "impl": "./reminder/time.ts",                  "description": "系统时间（含时分 + 时区名，[v0.0.64] 修正）" },
-    { "implId": "workspace",                "point": "system_reminder",          "impl": "./reminder/workspace.ts",             "description": "工作目录、git 状态" },
+    // system_reminder (4，v0.0.361 退役 env/time/workspace/squad_workspace——静态半迁 session_states mapper，time 平移 injector 时间固定段)
     { "implId": "tool_error",               "point": "system_reminder",          "impl": "./reminder/tool_error.ts",            "description": "上轮工具错误" },
-    { "implId": "todo",                     "point": "system_reminder",          "impl": "./reminder/todo.ts",                  "description": "task 进度（D1.1 缺失时 no-op）" },
+    { "implId": "todo",                     "point": "system_reminder",          "impl": "./reminder/todo.ts",                  "description": "todo 进度（ReminderCtx.todoStore）" },
+    { "implId": "squad_agents_status",      "point": "system_reminder",          "impl": "./reminder/squad_agents_status.ts",   "description": "squad-scoped 全员状态块动态半（running/idle + presence；v0.0.361 拆半，名单归 team_roster）" },
+    { "implId": "squad_task",               "point": "system_reminder",          "impl": "./reminder/squad_task.ts",            "description": "squad-scoped 活跃 task 列表" },
 
     // context_should_compact + context_do_compact (4, v0.0.40，首批 exclusive context EP；各 EP = 真实现 + forked dummy)
     // 注册序：真实现在 dummy 之前 → default scope 无 exclusive 标记时 effective order 最小者（真实现）胜出

@@ -1,13 +1,15 @@
 /**
- * builtin rocky_context plugin — system_reminder provider: squad_agents_status（[v0.0.273] NEW）
+ * builtin rocky_context plugin — system_reminder provider: squad_agents_status（[v0.0.273] NEW；[v0.0.361] 拆动态半）
  * 参考: specs/tech/squad/[P1]squad_reminder_providers.md §3/§4（统一全员状态块 [squad:agents]）
  *       specs/tech/squad/[P1]prompt_sections.md §5（volatile reminder + 派生表 + user 永不在）
  *       specs/tech/multi_agent/[P1]a2a_protocol.md §2（AgentRef）+ §3（可达性派生表 1:1）
  *       specs/tech/version_logs/v0.0.273/change_plan.md 裁决 R6-R8
+ *       specs/tech/version_logs/v0.0.361/change_plan.md §1.6（拆半：名单静态半归 team_roster）
  *
- * 职责：统一全员状态块 `[squad:agents]`——取代旧 reachable_agents（有可达性无状态）+
- * squad_team_status（只列 running）两个 provider（老板 2026-08-07 拍板「统一设计」）。
- * 三合一：agent 列表（可达性 name+sessionId）+ running/idle 状态 + presence 标记。
+ * 职责：[squad:agents] 动态半——成员状态行（running/idle）+ presence 标记。
+ * [v0.0.361] 拆半：成员名单静态部分（name+role+sessionId）由 system prompt 既有 team_roster
+ * mapper 承载（v0.0.33.2 起在链）——本 provider 状态行去掉 role/sessionId 重复，仅保留 name 作
+ * 行内锚点 + 动态状态。a2a 寻址 sessionId 由 team_roster 提供（不丢）。
  *
  * **产出规则（readSessionType 分派，R7）**：
  *   squad    → leader + 全部 mate（群聊路由对端；squad 自身即 squadchat 不含自己）
@@ -18,7 +20,8 @@
  *
  * **关键保留**：全员列出（不按 running 过滤——做完的 mate 不消失；idle + presence = 疑似卡住可见）；
  *   benched 过滤（state !== 'benched'；state 缺失按 deployed 兼容旧数据）；270 enableGroupChat 门控
- *   （SquadChat 行随门控显隐）；mate 对端可达性不丢（name+sessionId 仍输出，a2a 语义不变）。
+ *   （SquadChat 行随门控显隐）。[v0.0.361] 拆半后状态行仅 name 锚点，a2a 寻址 sessionId 由
+ *   system prompt team_roster 提供（mate 对端可达性不丢——name 对齐 roster 行首名可关联）。
  *
  * **数据源**：squadContext（listMembers 返回 MemberEntity 含 name/role/sessionId/currentWork/state +
  *   isSessionRunning + getSquad 取 enableGroupChat/squadChatSessionId）；subagent 读
@@ -207,14 +210,17 @@ function readAgentRef(raw: unknown): AgentRef | null {
   return { type, sessionId, name };
 }
 
-/** 成员行格式（R8）：`- {name} ({role}, sessionId: {sid}) · {running|idle} · presence: {text|(无 presence)}` */
+/**
+ * 成员状态行格式（[v0.0.361] 拆半后）：`- {name} · {running|idle} · presence: {text|(无 presence)}`
+ * name 仅作行内锚点（对齐 team_roster 行首名）；role/sessionId 名单静态半由 team_roster 承载，不再重复。
+ */
 function formatMember(m: MemberRef, running: boolean): string {
   const status = running ? 'running' : 'idle';
   const presenceText =
     m.currentWork && typeof m.currentWork.text === 'string' && m.currentWork.text.trim()
       ? m.currentWork.text.trim()
       : '(无 presence)';
-  return `- ${m.name} (${m.role}, sessionId: ${m.sessionId}) · ${status} · presence: ${presenceText}`;
+  return `- ${m.name} · ${status} · presence: ${presenceText}`;
 }
 
 /** subagent parent 行（reachable 语义保持：无 squad 状态可查，仅可达性） */

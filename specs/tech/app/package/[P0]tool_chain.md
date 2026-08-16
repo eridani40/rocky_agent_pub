@@ -118,6 +118,19 @@ export default defineConfig({
       ['app/web/**/*.test.tsx', 'jsdom'],
       ['app/web/**/*.test.ts', 'jsdom'],
     ],
+    // [v0.0.351] 全量 UT worker 内存保护：限制并发 + 单 worker 堆上限，
+    //   缓解多 workspace 同时跑测试时 JS heap OOM（bun runtime 下 worker 数控制仍有效）。
+    //   注：Bun runtime 对 vitest threads pool 的 MessageChannel 支持不完整，
+    //   故使用 forks pool；maxWorkers 2 控制并发数，为主要 OOM 缓解手段。
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        maxWorkers: 2,
+        minWorkers: 1,
+        // Bun 非 V8，--max-old-space-size 不被识别；若未来切 Node worker 可启用。
+        // execArgv: ['--max-old-space-size=4096'],
+      },
+    },
   },
 });
 ```

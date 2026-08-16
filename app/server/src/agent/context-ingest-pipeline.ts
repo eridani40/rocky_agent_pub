@@ -31,10 +31,25 @@ import {
 } from '../plugin/extension-point';
 
 /**
+ * [v0.0.361 §1.2/§1.4] ingest 管线透传的 reminder queue 句柄（closure 注入避免 handler 持 store）。
+ * ContextEngine 构造期把 ReminderQueueStore 的方法以 closure 形态注入（同 reminderRunner 模式），
+ * plugin（system_reminder_injector）经 ctx 消费，不反向 import store（§1.8 载体分层）。
+ */
+export interface ReminderQueueHandles {
+  /** 当前 run 状态（injector 读 useFullReminder 决 full/incremental；undefined 视 true） */
+  runState?: { useFullReminder?: boolean };
+  /** incremental 消费：按序读 value + 清空队列 */
+  queueDrain?: (sessionId: string) => Promise<string[]>;
+  /** full 消费：清空队列 */
+  queueClearAll?: (sessionId: string) => Promise<void>;
+}
+
+/**
  * ingest handler 契约（context_ingest_detail.md §3）。
  * [v0.0.49 D15] 返回放宽为 `Message[] | Promise<Message[]>`（store_sink 需 await async appendMessages）；
  *   ctx 加 store（default scope 的 store 汇，store_sink handler 用）。
  * [v0.0.66 §2.7] ctx 删 buffer 字段（buffer_sink impl 删除，store 扩展点取代）。
+ * [v0.0.361 §1.2/§1.4] ctx 加 runState + queueDrain/queueClearAll（reminder queue 透传）。
  */
 interface IngestHandler {
   handle(
@@ -46,6 +61,10 @@ interface IngestHandler {
       store?: SessionStore;
       /** [v0.0.83] store 调用 opts（runId 等）；store_sink 透传到 appendMessages */
       opts?: StoreCallOpts;
+      /** [v0.0.361 §1.2/§1.4] reminder queue 句柄透传（injector 读 runState + drain/clearAll） */
+      runState?: { useFullReminder?: boolean };
+      queueDrain?: (sessionId: string) => Promise<string[]>;
+      queueClearAll?: (sessionId: string) => Promise<void>;
     },
   ): Message[] | Promise<Message[]>;
 }
@@ -129,6 +148,7 @@ export async function applyIngestPipeline(
   scopeId: string = 'default',
   store?: SessionStore,
   opts?: StoreCallOpts,
+  queueHandles?: ReminderQueueHandles,
 ): Promise<Message[]> {
   const finalMessages: Message[] = messages as unknown as Message[];
   // 无 pluginManager 降级（v0.0.8）：注入 store 的 scope 直 append；无 store（forked）不写
@@ -137,7 +157,11 @@ export async function applyIngestPipeline(
     return finalMessages;
   }
   // [v0.0.33.3] 预先 await reminders（provider 可能 async）→ 注入 sync runner（保 handle 同步契约）
-  const reminders = await runReminderProviders(pluginManager, config, extras, scopeId);
+  // [v0.0.361 §1.1 T3] incremental 跳过动态 provider 链：incremental 渲染只用时间固定段 + queue drain，
+  //   链产出对渲染零贡献（§1.1 心智模型），跳过省 todo/squad store 读 IO。
+  //   runState 缺席（UT fixture / forked）视 full 照跑（forked 恒 full，§1.4）。
+  const useFull = queueHandles?.runState ? queueHandles.runState.useFullReminder !== false : true;
+  const reminders = useFull ? await runReminderProviders(pluginManager, config, extras, scopeId) : [];
   const reminderRunner = (_ctx: unknown): { id: string; content: string; tier?: string }[] => reminders;
   const handlers = pluginManager.getExtensionImpls<IngestHandler>(
     ContextIngestHandlerPoint,
@@ -153,6 +177,9 @@ export async function applyIngestPipeline(
     reminderRunner: (ctx: unknown) => { id: string; content: string; tier?: string }[];
     store?: SessionStore;
     opts?: StoreCallOpts;
+    runState?: { useFullReminder?: boolean };
+    queueDrain?: (sessionId: string) => Promise<string[]>;
+    queueClearAll?: (sessionId: string) => Promise<void>;
   } = {
     config,
     reminderRunner,
@@ -161,6 +188,10 @@ export async function applyIngestPipeline(
     ...(store !== undefined ? { store } : {}),
     // [v0.0.83] opts 透传给 store_sink → appendMessages（runId 等）
     ...(opts !== undefined ? { opts } : {}),
+    // [v0.0.361 §1.2/§1.4] reminder queue 句柄透传（closure 注入避免 handler 持 store）
+    ...(queueHandles?.runState !== undefined ? { runState: queueHandles.runState } : {}),
+    ...(queueHandles?.queueDrain !== undefined ? { queueDrain: queueHandles.queueDrain } : {}),
+    ...(queueHandles?.queueClearAll !== undefined ? { queueClearAll: queueHandles.queueClearAll } : {}),
   };
   let acc: Message[] = finalMessages;
   for (const h of handlers) {

@@ -126,7 +126,12 @@ describe('runReActLoop ③ 段悬挂分流（mock store + engine）', () => {
 
     const { results, pending } = await executeAndEmit({
       toolEngine: {
-        execute: async (_config: unknown, calls: ToolCallBlock[]) => {
+        execute: async (
+          _config: unknown,
+          calls: ToolCallBlock[],
+          _allowed?: string[],
+          opts?: { onResult?: (r: { type: 'tool_result'; toolCallId: string }, i: number) => void },
+        ) => {
           // 假装 ask-question interaction 触发 → 悬挂
           const pendingOut: PendingToolCall[] = calls.map((c: ToolCallBlock) => ({
             sessionId: 's1',
@@ -147,6 +152,8 @@ describe('runReActLoop ③ 段悬挂分流（mock store + engine）', () => {
             subState: 'need_feedback' as const,
             data: { questions: [] },
           }));
+          // [v0.0.354 T1] mock 模拟真实引擎契约：每 result push 后调 onResult（executeAndEmit 依赖它 emit）
+          resultsOut.forEach((r, i) => opts?.onResult?.(r, i));
           return { results: resultsOut, pending: pendingOut };
         },
       } as never,

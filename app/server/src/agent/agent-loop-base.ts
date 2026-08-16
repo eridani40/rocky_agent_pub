@@ -204,6 +204,17 @@ export interface CallLLMInput {
    * 由 stage-llm/forked-agent 从 SessionConfig.logWriter 注入。
    */
   logWriter?: import('../dev-logs/log-writer').LogWriter;
+  /**
+   * [v0.0.347] 模型路由方案（SessionConfig.modelRoutingPlan 透传；分支 2 挂载才有）。
+   * 有 routingPlan → invoke 走 routingAttemptLoop（候选决策循环）；缺省 undefined → 现有路径。
+   */
+  routingPlan?: import('../llm/caller/llm_caller').InvokeContext['routingPlan'];
+  /**
+   * [v0.0.347] 按 (providerId, modelId) 真实组装 LlmClient 的 builder（routing 多候选模型用）。
+   * 缺省 undefined → clientFactory 占位（恒返回 client，向后兼容）。
+   * 由 stage-llm 从 SessionConfig.appConfig + pluginManager 注入 buildLlmClient。
+   */
+  clientBuilder?: (providerId: string, modelId: string) => import('../llm/client').LlmClient;
 }
 
 /**
@@ -314,7 +325,12 @@ export interface ExecuteToolsInput<TConfig> {
       config: TConfig,
       toolCalls: ToolCallBlock[],
       allowedTools?: string[],
-      opts?: { runId?: string; childRegistry?: ChildProcessRegistry },
+      opts?: {
+        runId?: string;
+        childRegistry?: ChildProcessRegistry;
+        /** [v0.0.354 T1] 增量结果回调（对齐 engine ExecuteRunCtx.onResult）：每 result 确定即调 */
+        onResult?: (result: ToolResultBlock, index: number) => void;
+      },
     ): Promise<{ results: ToolResultBlock[]; pending: PendingToolCall[] }>;
   };
   /** session 配置（透传给引擎） */
@@ -327,8 +343,13 @@ export interface ExecuteToolsInput<TConfig> {
    * [v0.0.101] run 上下文（runId 透传给引擎构造 PendingToolCall）。
    * [v0.0.130.hang] 加 childRegistry?（类型对齐 engine ExecuteRunCtx，沿 opts 透传链下沉到
    * tools/engine.ts ctx.childRegistry）
+   * [v0.0.354 T1] 加 onResult?（类型对齐 engine ExecuteRunCtx.onResult：每 result 确定即调）
    */
-  opts?: { runId?: string; childRegistry?: ChildProcessRegistry };
+  opts?: {
+    runId?: string;
+    childRegistry?: ChildProcessRegistry;
+    onResult?: (result: ToolResultBlock, index: number) => void;
+  };
 }
 
 /**

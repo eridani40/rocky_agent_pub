@@ -1,17 +1,20 @@
 /**
- * squad_agents_status reminder provider UT（[v0.0.273] 统一全员状态块 [squad:agents]）
+ * squad_agents_status reminder provider UT（[v0.0.273] 统一全员状态块 [squad:agents]；
+ * [v0.0.361] 拆动态半：状态行去掉 role/sessionId，名单静态半归 team_roster）
  * 参考: specs/tech/version_logs/v0.0.273/change_plan.md 裁决 R6-R8
  *       specs/tech/squad/[P1]squad_reminder_providers.md（统一块取代 reachable_agents + squad_team_status）
+ *       specs/tech/version_logs/v0.0.361/change_plan.md §1.6（拆半）
  *
  * 覆盖：
  *   1. 产出规则分派（leader/mate/squad/subagent/standalone 5 种 sessionType）
  *   2. 全员列出（running + idle 都保留，不 running 过滤——做完的 mate 不消失）
  *   3. presence（有 currentWork 文本 / 无 presence 兜底）
- *   4. benched 过滤（state==='benched' 不列）
- *   5. 270 enableGroupChat 门控（SquadChat 行随门控显隐）
- *   6. mate 视角：leader + peers 带状态（不含自己）
- *   7. subagent → [parent]；standalone → []
- *   8. 空 squad 降级「当前无成员」
+ *   4. [v0.0.361] 拆半：状态行仅 name + 状态 + presence（无 role/sessionId——归 team_roster）
+ *   5. benched 过滤（state==='benched' 不列）
+ *   6. 270 enableGroupChat 门控（SquadChat 行随门控显隐）
+ *   7. mate 视角：leader + peers 带状态（不含自己）
+ *   8. subagent → [parent]；standalone → []
+ *   9. 空 squad 降级「当前无成员」
  */
 import { describe, it, expect } from 'vitest';
 import SquadAgentsStatusReminderProvider from '../squad_agents_status';
@@ -222,11 +225,11 @@ describe('squad_agents_status provider — 全员列出（running/idle + presenc
       runningSessionIds: ['01SA'], // 只有 bob running，carol idle
     }));
     const content = out[0]!.content;
-    expect(content).toContain('bob (mate, sessionId: 01SA) · running');
-    expect(content).toContain('carol (mate, sessionId: 01SB) · idle');
+    expect(content).toContain('bob · running');
+    expect(content).toContain('carol · idle');
   });
 
-  it('成员行格式：{name} ({role}, sessionId: {sid}) · {running|idle} · presence: {text|(无 presence)}', async () => {
+  it('成员行格式（[v0.0.361] 拆半）：{name} · {running|idle} · presence: {text|(无 presence)}', async () => {
     const out = await mk().provide(mkCtx({
       sessionType: 'leader',
       squadId: 'SQ-1',
@@ -243,9 +246,29 @@ describe('squad_agents_status provider — 全员列出（running/idle + presenc
     }));
     const content = out[0]!.content;
     // 有 presence → 显示文本
-    expect(content).toContain('bob (mate, sessionId: 01SA) · running · presence: 正在写 UT');
+    expect(content).toContain('bob · running · presence: 正在写 UT');
     // 无 presence → 兜底 (无 presence)
-    expect(content).toContain('carol (mate, sessionId: 01SB) · idle · presence: (无 presence)');
+    expect(content).toContain('carol · idle · presence: (无 presence)');
+  });
+
+  it('[v0.0.361] 拆半：状态行无 role/sessionId（名单静态半归 system prompt team_roster，不重复）', async () => {
+    const out = await mk().provide(mkCtx({
+      sessionType: 'leader',
+      squadId: 'SQ-1',
+      memberId: LEADER.id,
+      members: ALL_MEMBERS,
+      runningSessionIds: ['01SA'],
+    }));
+    const content = out[0]!.content;
+    // SquadChat 行（群聊入口）保留 sessionId——它是可达性锚点非成员名单
+    expect(content).toContain('SquadChat (squad, sessionId: 01SC)');
+    // 成员状态行：无 (role, sessionId: ...) 括号段
+    expect(content).not.toContain('(mate, sessionId:');
+    expect(content).not.toContain('(leader, sessionId:');
+    // 成员 sessionId 不再出现在状态行（a2a 寻址由 team_roster 提供）
+    expect(content).not.toContain('01SA');
+    expect(content).not.toContain('01SB');
+    expect(content).not.toContain('01SL');
   });
 
   it('有 presence 没 running = 疑似卡住可见（idle + presence 同时出现）', async () => {
@@ -263,7 +286,7 @@ describe('squad_agents_status provider — 全员列出（running/idle + presenc
       runningSessionIds: [], // 不 running
     }));
     const content = out[0]!.content;
-    expect(content).toContain('bob (mate, sessionId: 01SA) · idle · presence: 疑似卡住的工作');
+    expect(content).toContain('bob · idle · presence: 疑似卡住的工作');
   });
 
   it('mate 视角能看到队友状态（peer 带 running/idle）', async () => {
@@ -279,8 +302,8 @@ describe('squad_agents_status provider — 全员列出（running/idle + presenc
       runningSessionIds: ['01SB'], // carol running
     }));
     const content = out[0]!.content;
-    expect(content).toContain('alice (leader, sessionId: 01SL) · idle');
-    expect(content).toContain('carol (mate, sessionId: 01SB) · running');
+    expect(content).toContain('alice · idle');
+    expect(content).toContain('carol · running');
   });
 });
 
@@ -379,6 +402,6 @@ describe('squad_agents_status provider — benched 过滤 / 门控 / 降级', ()
       members: [LEADER, noSid],
     }));
     const content = out[0]!.content;
-    expect(content).toContain('xavier (mate, sessionId: ) · idle'); // 无 sessionId → idle
+    expect(content).toContain('xavier · idle'); // 无 sessionId → idle
   });
 });

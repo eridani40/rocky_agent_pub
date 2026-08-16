@@ -50,6 +50,13 @@ describe('vite.config.ts proxy 路径覆盖（BUG-001/002 回归保护）', () =
     '/provider', // v0.0.7 provider/model CRUD
     '/skill', // v0.0.21 skill 管理（曾漏配，vite.config 注释 BUG-001）
     '/squad', // v0.0.33.1 squad CRUD + member（曾漏配 BUG-001/002）
+    '/mention', // v0.0.45 mention/search（曾漏配 BUG-001）
+    '/memory', // v0.0.77 memory CRUD（曾漏配 BUG）
+    '/consolidation', // v0.0.205 consolidation CRUD（曾漏配 BUG-001）
+    '/academy', // v0.0.210 academy CRUD（曾漏配，ET blocking 根因）
+    '/model-routing', // v0.0.347 模型路由 status/CRUD（v0.0.347 BUG-001，ET-3 实证红绿灯不渲染）
+    '/skills', // v0.0.166 skill 市场（复数，/skill 前缀覆盖不到，v0.0.347 全量排查补配）
+    '/bootstrap', // v0.0.150 bootstrap/status 启动迁移提示（v0.0.347 全量排查补配）
   ] as const;
 
   it.each(REQUIRED_PROXIES)('proxy 含 %s（前缀匹配，覆盖该路径整棵子树）', (prefix) => {

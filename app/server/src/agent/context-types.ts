@@ -91,6 +91,8 @@ export interface SessionConfig {
   client: LlmClient;
   /** compact 调 LLM 时传入 CanonicalRequest.modelId */
   modelId: string;
+  /** [v0.0.351] client 对应的 providerId，运行中按 session 最新 providerId/modelId 重建 client 用 */
+  providerId: string;
   /** 工具数组（task-4 引擎按 definition.name 路由；task-5 assemble 时透传 definition） */
   tools?: unknown[];
   /** 工作目录（task-4 bash/file 默认根；task-5 设为 <DATA_DIR>/workspace） */
@@ -272,6 +274,21 @@ export interface SessionConfig {
    * 安全 invariant：绿灯只动审批层；deny（策略层）+ 执行层沙箱不受影响。
    */
   approvalMode?: 'normal' | 'greenlight';
+  /**
+   * [v0.0.347] 模型路由方案（分支 2 才有；分支 1 = undefined → invoke 走现有路径）。
+   * 由 buildSessionConfigFromDeps 每次 run 现拉：先查挂载（studio=squad.modelRoutingPlanId /
+   * playground=model_routing.default.playgroundPlanId）→ 有挂载读方案实体合成候选链产出。
+   * 参考: specs/tech/agent/providers_and_models/[P0]model_routing.md §4（resolve 双分支）
+   */
+  modelRoutingPlan?: {
+    planId: string;
+    /** [v0.0.353 T5 D8] 方案名（resolveModelRoutingPlan 从方案实体带出；logical gen metadata 记录） */
+    planName?: string;
+    /** 合成后的候选链（session 显式模型已 priority 0 插入顶部；default/none/undefined = 方案 items 原序） */
+    items: import('../services/model-routing-validation').RoutingItem[];
+    /** 生效熔断参数（默认值填充后；方案 circuit 覆盖缺省用默认） */
+    circuit: import('../services/model-routing-validation').CircuitConfig;
+  };
 }
 
 /**

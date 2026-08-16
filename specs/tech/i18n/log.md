@@ -1,8 +1,14 @@
 ---
 type: log
 title: i18n KB 变更记录
-updated: 2026-07-08
+updated: 2026-08-15
 ---
+
+## 2026-08-15 · v0.0.357（picker 默认语义方案态 chat ns 新增 1 leaf）
+
+- **chat ns 新增 `planDefaultLabel`**：zh `方案 · {{name}}（默认）` / en `Plan · {{name}} (default)`——picker hover/菜单方案态默认项 label（`component-input-model-picker`，数据源 chrome `defaultRoutingPlan`）。
+- **收敛注记**：picker 旧「未配置」「（默认）」仍为硬编码中文（change_plan D4 可选收敛项未启用，本版只做必做新增）；后续动 picker 文案时再评估收敛。
+- 发布说明：`specs/tech/version_logs/v0.0.357/change_log.md` 修复 A。
 
 ## 2026-07-08 · v0.0.89（locale group 合并入 appearance — read-modify-write）
 
@@ -14,6 +20,13 @@ updated: 2026-07-08
 - **代码落点（T4 已 verified）**：`app/web/src/i18n/change-language.ts` GET appearance → 保留 theme → 合并 language → PUT 整组（含 theme+language 两 key）；`app/web/src/lib/locale-init.ts` GET 改 `?group=appearance&key=language`；`component-locale-card.tsx` onChange 调 changeLanguage（独立 PUT appearance，不进 page-tab dirty 流），testid 改 `key-card-language` / `key-select-language`（原 `key-card-locale-language` 简化）。
 
 详情：`specs/tech/version_logs/v0.0.89/change_log.md`
+
+## 2026-08-15 · v0.0.356（squad member 余额查询弹层 chat ns 扩展）
+
+- **chat ns 新增 26 leaf**：`floatMenu.quota`（余额查询）+ `quotaModal.*`（弹层标题/方案/图例/档位/时间/状态/脚注）。key 命名按 `[P0]i18n_overview.md §4` `<ns>.<scope>.<leaf>` 骆驼命名，zh-CN/en 同构，零硬编码中文。
+- **关键 key**：状态词四态 `legendWorking/legendOpen/legendHalf/legendOff`、档位 `tierFiveHour/tierWeekly/tierBalance`、单单位分支 `singleUnitDay/Hour/Minute/Zero`、时间条件 `timeAny/timeHit/timeMiss`、熔断 `retryIn`、半开 `halfProbing`、脚注 `lastUpdated/refreshHint`。
+- **使用方式**：`component-chat-float-menu` aria-label、`component-quota-entry-modal` 弹层文案、`component-quota-provider-card` 收起/展开态文案、`component-quota-ring` aria-label 由父级传入、`quota-format.formatSingleUnit` 接收 `SingleUnitLabels` i18n 驱动。
+- 跨版本发布说明：`specs/prd/version_logs/v0.0.356-squad-quota-entry/change_log.md` §6。
 
 ## 2026-07-04 · v0.0.62.i18n_migration（thin 架构 — 机械迁移到 v0.0.59 架构，无机制变更）
 

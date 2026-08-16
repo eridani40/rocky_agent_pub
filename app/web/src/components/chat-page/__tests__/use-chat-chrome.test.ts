@@ -43,6 +43,7 @@ function mkChrome(over: Partial<SessionChromeView> = {}): SessionChromeView {
     tag: '',
     sessionModel: null,
     defaultModel: null,
+    defaultRoutingPlan: null,
     effort: null,
     approvalMode: null,
     members: [],

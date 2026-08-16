@@ -88,6 +88,13 @@ export const SquadSchema = {
      * 参考: specs/tech/version_logs/v0.0.270/change_plan.md 裁决 1
      */
     enableGroupChat: { type: 'boolean', required: false },
+    /**
+     * [v0.0.347] 挂载的模型路由方案 id（指向 app_config model_routing_plans 组某 planId）。
+     * required:false：存量 squad 无字段 = 未挂载（走现有单模型分支 1）；指向不存在/被删方案 → 视为未挂载。
+     * PATCH !== undefined 才写；显式 null = 清空（解除挂载）。
+     * 参考: specs/api/overall/21-model-routing.md §2.5 + specs/tech/agent/providers_and_models/[P0]model_routing.md §2.2
+     */
+    modelRoutingPlanId: { type: 'string', required: false },
   },
 } as const satisfies SchemaDef;
 

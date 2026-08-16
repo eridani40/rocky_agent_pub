@@ -41,7 +41,8 @@ describe('[v0.0.53] ComponentProviderFields — protocol + 拼接地址', () => 
   it('含 protocol 单选控件（选项卡片按钮，非原生 <select>）', () => {
     const { container } = render(<ComponentProviderFields draft={baseDraft} onChange={() => {}} protocolOptions={protocols} />);
     // _conventions.md §10 硬规则：禁原生 select；KeyChoiceCards 渲染按钮卡片（aria-pressed 标记选中）
-    const card = container.querySelector('button[aria-pressed]') as HTMLElement;
+    // [v0.0.350] 类型卡插顶部后首卡锚失效 → 收敛到 protocol testid 容器内查询
+    const card = container.querySelector('[data-testid="provider-field-protocol"] button[aria-pressed]') as HTMLElement;
     expect(card).toBeTruthy();
     expect(card.tagName).not.toBe('SELECT');
     expect(card.textContent).toContain('anthropic_messages');
@@ -71,7 +72,8 @@ describe('[v0.0.53] ComponentProviderFields — protocol + 拼接地址', () => 
     const onChange = vi.fn();
     const { container } = render(<ComponentProviderFields draft={baseDraft} onChange={onChange} protocolOptions={protocols} />);
     // KeyChoiceCards 渲染按钮卡片（aria-pressed 标记选中）
-    fireEvent.click(container.querySelector('button[aria-pressed]')!);
+    // [v0.0.350] 类型卡插顶部后首卡锚失效 → 收敛到 protocol testid 容器内查询
+    fireEvent.click(container.querySelector('[data-testid="provider-field-protocol"] button[aria-pressed]')!);
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ protocolId: 'anthropic_messages' }));
   });
 

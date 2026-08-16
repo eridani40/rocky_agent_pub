@@ -550,6 +550,15 @@ describe('classify 主入口 + ClassifiedLlmError 组装', () => {
     expect(err.category).toBe(LlmErrorCategory.RATE_LIMITED);
   });
 
+  it('[v0.0.350] 4 native coding plan 无独立 classifier → ?? 兜底 anthropic adapter（Partial 化零行为变化）', () => {
+    // 探针 = anthropic 专有映射 529→PROVIDER_OVERLOADED（仅 AnthropicErrorClassifier 有）；
+    // 若 Partial 化引入回归（undefined 调用崩溃 / 兜底错 adapter），此处必红。
+    for (const name of ['kimi_coding_plan', 'glm_coding_plan', 'minimax_coding_plan', 'deepseek_api'] as const) {
+      const err = classify(wire(529, 'overloaded_error', 'overloaded'), name);
+      expect(err.category, `provider=${name}`).toBe(LlmErrorCategory.PROVIDER_OVERLOADED);
+    }
+  });
+
   it('ctx.hasMultipleKeys 传递到 hints（AUTH 多 key rotate）', () => {
     const err = classify(wire(401, 'authentication_error', 'bad key'), 'anthropic_compatible', {
       hasMultipleKeys: true,

@@ -27,6 +27,19 @@ export default defineConfig({
       ['app/web/**/*.test.tsx', 'jsdom'],
       ['app/web/**/*.test.ts', 'jsdom'],
     ],
+    // [v0.0.351] 缓解全量 UT 时多 worker 同时爆堆的 OOM：
+    //   限制并发 worker 数 + 给每个 worker 设堆内存上限。
+    //   pool 默认 'threads'；显式声明以便 poolOptions 生效。
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        maxWorkers: 2,
+        minWorkers: 1,
+        // 注意：Bun runtime 不是 V8，--max-old-space-size 不被识别；
+        // 主要防 OOM 手段是限制并发 worker 数。若未来切回 Node worker 可把本行加回。
+        // execArgv: ['--max-old-space-size=4096'],
+      },
+    },
     // bun:sqlite 等 bun 内置模块只存在于 bun runtime。
     // vitest 经 vite 的 loadAndTransform 解析模块时会把 bun:sqlite 当文件 URL 去磁盘找，
     // 触发 "Failed to load url bun:sqlite"。把它标记为 external，跳过 vite 的 transform，

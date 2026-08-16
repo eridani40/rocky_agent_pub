@@ -23,6 +23,8 @@ import { squadTimezone } from '../squad/budget/budget-aggregator';
 // modelDefault/model 写入校验（fail-fast；v0.0.156 A2 拆出到 squad-model-helpers）
 import type { AppConfigService } from '../config/app-config-service';
 import { checkModel, json } from './squad-model-helpers';
+// [v0.0.347] squad 挂载方案校验（modelRoutingPlanId 指向存在的方案）
+import { getPlan } from '../services/model-routing-store';
 
 /** SquadRuntime 结构端口（reloadSquad + getScheduler + disposeSquad；UT 可注入 mock） */
 export interface SquadRuntimePort {
@@ -133,6 +135,8 @@ interface PatchSquadBody {
   timezone?: string;
   /** [v0.0.116] squad 级心跳配置；null=清空回默认；undefined=不修改 */
   heartbeatConfig?: SquadHeartbeatConfig | null;
+  /** [v0.0.347] 挂载模型路由方案 id；undefined=不修改；null=清空（解除挂载） */
+  modelRoutingPlanId?: string | null;
 }
 
 /** [v0.0.279] effortDefault 合法值校验（canonical 语义键 4 档） */
@@ -183,6 +187,8 @@ export interface SquadDetail {
   timezone: string;
   /** [v0.0.116] squad 级心跳配置（null=未配=默认 interval15/全天/all） */
   heartbeatConfig: SquadHeartbeatConfig | null;
+  /** [v0.0.347] 挂载的模型路由方案 id（optional 回显：无字段省略——对齐「无 null 输出」） */
+  modelRoutingPlanId?: string;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -298,6 +304,8 @@ function toDetail(s: SquadEntity, members: MemberEntity[]): SquadDetail {
     enableGroupChat: s.enableGroupChat ?? true, // [v0.0.270] 存量无字段兜底=开
     timezone: squadTimezone(s),
     heartbeatConfig: (s.heartbeatConfig as SquadHeartbeatConfig | null | undefined) ?? null,
+    // [v0.0.347] 挂载方案回显（无字段省略——对齐「无 null 输出」；JSON.stringify 自动丢 undefined）
+    modelRoutingPlanId: (s as unknown as { modelRoutingPlanId?: string }).modelRoutingPlanId,
     version: s.version,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
@@ -476,6 +484,24 @@ async function handlePatchSquad(req: Request, id: string, deps: SquadHandlerDeps
     const bad = checkModel(deps.appConfig, body.modelDefault, body.modelDefaultProviderId);
     if (bad) return bad;
   }
+  // [v0.0.347] modelRoutingPlanId 校验：非空（非 null）时须指向存在的方案，否则 400（api §2.5）
+  if (body.modelRoutingPlanId !== undefined && body.modelRoutingPlanId !== null) {
+    if (typeof body.modelRoutingPlanId !== 'string' || body.modelRoutingPlanId.length === 0) {
+      return json(400, { error: 'modelRoutingPlanId must be a non-empty string' });
+    }
+    if (deps.appConfig) {
+      const plan = getPlan(deps.appConfig, body.modelRoutingPlanId);
+      if (!plan) return json(400, { error: `plan not found: ${body.modelRoutingPlanId}` });
+    }
+  }
+  // [v0.0.347 T6 决策㉝ 严格互斥] PATCH 载荷同时含非空 modelDefault + 非空 modelRoutingPlanId → 400
+  //（防 API 误用产生新双设；null/undefined 组合如「选模型带 planId:null」合法放行；只校验载荷组合不查落库状态）
+  if (
+    body.modelDefault && body.modelDefault.length > 0 &&
+    typeof body.modelRoutingPlanId === 'string' && body.modelRoutingPlanId.length > 0
+  ) {
+    return json(400, { error: 'modelDefault and modelRoutingPlanId are mutually exclusive' });
+  }
 
   const { squadStore, memberStore } = makeStores(deps);
   const existing = await squadStore.getSquad(id);
@@ -500,6 +526,10 @@ async function handlePatchSquad(req: Request, id: string, deps: SquadHandlerDeps
   if (body.timezone !== undefined) patch.timezone = body.timezone;
   // [v0.0.116] heartbeatConfig：undefined=不修改；null=清空；合法 object=写入
   if (body.heartbeatConfig !== undefined) patch.heartbeatConfig = body.heartbeatConfig ?? null;
+  // [v0.0.347] modelRoutingPlanId：undefined=不修改；null=清空；具体值=写入（PATCH !== undefined 才写）
+  if (body.modelRoutingPlanId !== undefined) {
+    patch.modelRoutingPlanId = body.modelRoutingPlanId === null ? undefined : body.modelRoutingPlanId;
+  }
 
   const updated = await squadStore.putSquad(patch as Parameters<typeof squadStore.putSquad>[0]);
   // 写后刷 scheduler（best-effort，失败不影响持久化）

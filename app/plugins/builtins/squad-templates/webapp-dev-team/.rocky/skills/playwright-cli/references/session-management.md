@@ -14,7 +14,7 @@ playwright-cli -s=auth open https://app.example.com/login
 playwright-cli -s=public open https://example.com
 
 # Commands are isolated by browser session
-playwright-cli -s=auth fill e1 "user@example.com"
+playwright-cli -s=auth fill e1 "user.com"
 playwright-cli -s=public snapshot
 ```
 
@@ -129,7 +129,7 @@ playwright-cli attach --cdp=msedge-dev
 
 Supported channels: `chrome`, `chrome-beta`, `chrome-dev`, `chrome-canary`, `msedge`, `msedge-beta`, `msedge-dev`, `msedge-canary`.
 
-When `--session` is not provided, the session is named after the channel (e.g. `--cdp=msedge` creates a session called `msedge`), so parallel attaches to Chrome and Edge don't collide on `default`. Pass `--session=<name>` to override.
+When `--session` is not provided, the session is named after the channel (e.g. `--cdp=msedge` creates a session called `msedge`), so parallel attaches to Chrome and Edge don't collide on `default`. Pass `--session=${NAME}` to override.
 
 ### Attach via CDP endpoint
 

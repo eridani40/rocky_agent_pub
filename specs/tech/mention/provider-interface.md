@@ -3,7 +3,7 @@ type: spec
 title: MentionProvider 接口 + Registry + 内置 Provider
 priority: P0
 status: active
-updated: 2026-08-14
+updated: 2026-08-15
 since: v0.0.45
 ---
 
@@ -143,7 +143,7 @@ class MentionProviderRegistry {
 
 - **name** = `'file'` / **label** = `'Files'`
 - **搜索范围**：`ctx.workspaceDir` 下递归遍历（含子目录）
-- **共用后端（v0.0.346）**：`search()` 调 `searchWorkspace(ctx.workspaceDir, ctx.query)`（`app/server/src/search/workspace-search-core.ts`）——与工作区搜索端点（`GET /session/:id/workspace/search`）**共用同一遍历/排除/上限核心**（纯函数，同步 DFS：readdirSync/statSync/lstatSync；IGNORED_NAMES 单一源在 `session-workspace.ts`；symlink 目录不递归防越权/循环）
+- **共用后端（v0.0.346）**：`search()` 调 `searchWorkspace(ctx.workspaceDir, ctx.query)`（`app/server/src/search/workspace-search-core.ts`）——与工作区搜索端点（`GET /session/:id/workspace/search`）**共用同一遍历/排除/上限核心**（纯函数，同步 DFS：readdirSync/statSync/realpathSync；IGNORED_NAMES 单一源在 `session-workspace.ts`；symlink 目录**受控跟随**——链式授权 + realpath visited 防循环，语义见 `specs/api/overall/04-agent-session.md` §2.6.8 行为 6）
 - **排除规则（v0.0.346 修订）**：仅 `IGNORED_NAMES`（`node_modules` + `.git`）；**点开头不再排除**（原隐藏文件 `.*` 排除移除，点开头目录/文件可命中）
 - **搜索算法**：与工作区搜索一致——q 含 `/` → 完整相对路径包含匹配（pathMode），否则 basename 包含匹配；大小写不敏感；**目录命中推入结果但不递归其下层**；无索引，实时遍历
 - **上限**：files+dirs 合计 ≥ **100** 早停 → `truncated: true`（v0.0.346 起，`SEARCH_LIMIT` 单一源在 workspace-search-core；原 5s 超时兜底移除）

@@ -16,7 +16,7 @@
  *   - 错误：GET scopeId 不存在 → 400。
  */
 // KV handler（app/dev）从独立文件 re-export（router.ts 仍 import { handleKvConfig } from './config'）
-export { handleKvConfig, handleKvConfigPut } from './kv-config-handlers';
+export { handleKvConfig, handleKvConfigPut, handleKvConfigDelete } from './kv-config-handlers';
 
 import type { PluginConfigService } from '../plugin/plugin-config-service';
 import { DEFAULT_SCOPE_ID } from '../plugin/plugin-scope-store';

@@ -1,15 +1,15 @@
 type: component
 purpose: chat-input-bar 底部按钮行内的 effort 推理强度选择器（4 档 enum，session 级持久化）
 since: v0.0.148
-updated: 2026-07-15
+updated: 2026-08-15
 
 # component-input-effort-picker
 
 ## 消费方
 
-- `components/chat-page/component-chat-session-input.tsx`
-- `components/chat-page/use-chat-chrome.ts`
-- `components/studio-page/component-manage-tab.tsx`
+- `components/chat-page/component-chat-session-input.tsx`（唯一渲染方）
+- `components/chat-page/use-chat-chrome.ts`（仅 import `EffortLevel` 类型）
+- `components/studio-page/component-manage-tab.tsx`（仅 import `EffortLevel` 类型，不渲染组件）
 
 ## 0. 职责
 session 级 effort 推理强度选择器（4 档 enum），位于 input-bar 按钮行**次左位**（审批模式 picker 右侧、模型选择左侧）。
@@ -26,7 +26,7 @@ session 级 effort 推理强度选择器（4 档 enum），位于 input-bar 按�
 
 ## Props
 - effort: 'default' | 'low' | 'high' | 'max' | null
-- disabled?: boolean
+- disabled?: boolean（v0.0.351 起主消费方 chat-session-input 恒传 `false`——**运行中可编辑**，改档下轮 iteration 边界生效；prop 保留供其他场景禁用）
 - onChange: (level: 'default' | 'low' | 'high' | 'max') => void
 
 ## 复用关系

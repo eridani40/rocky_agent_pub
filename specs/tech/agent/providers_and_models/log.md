@@ -1,13 +1,52 @@
 ---
 type: log
 title: Providers & Models KB 变更记录
-updated: 2026-07-31
+updated: 2026-08-15
 ---
 
 # Providers & Models KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-15 · v0.0.361（cache_control 三断点体系 — 删 wire drop/避让，历史块全保留）
+
+- **`[P0]cache_control.md`**：§1 定位改三断点（bp#1 system 末 + bp#T tools 末 + bp#2 messages 末固定落位）+ 历史 reminder 块全保留；§2.2/§2.3 决策依据改写（wire 无过滤，bp#2 前缀命中）；§3.2 改固定末位（删反向避让扫描）；§3.3 改历史块全保留（删 drop 分支）；§3.4 效果表加 tools 行；§4.1 密度行 + §5 两层关系 + §6 代码对齐表（`injectLastNonReminderCacheControl` 删 / `encodeMessage` drop 删 / `encodeTools` bp#T 新增）+ §7 边界 + §8 原则全同步；frontmatter `updated`。
+- **`anthropic_impl.md`**：§4 cache control 落地细节改三断点（2→3 breakpoint；JSON 示例加 tools；实现细节改 `encodeTools` bp#T + bp#2 固定末位 + 历史块全保留；删 v0.0.52 反向扫理由段）。
+- **`index.md`**：cache_control 概念行 + 导航表两行改三断点口径（删「最后非 reminder block + wire 过滤」旧表述）。
+
+## 2026-08-15 · v0.0.359（路由候选成功点写 success target registry）
+
+- **`[P0]model_routing.md §4` 路由循环伪码**：⑤ 成功分支补 `recordSuccessTarget(该候选 target)`——squad 用量统计归属记实际命中 physical model（registry 契约 → `../llm_caller/[P0]success_target_registry.md` 新）。
+- 详情：`specs/tech/version_logs/v0.0.359/change_log.md`
+
+## 2026-08-15 · v0.0.353（模型路由调用链路正确性：时区调度 + T4 根治 + T5 Langfuse 语义校准）
+
+- **`[P0]model_routing.md §2.1`**：TimeCondition 增 `timezone?`（合法 IANA，缺省 `Asia/Shanghai`，向后兼容；非法硬拒 400）。
+- **`[P0]model_routing.md §4`**：显式 session model 继承同 providerId+modelId 启用条目中首个带 `timeCondition` 者的时间条件；分支 2 `SessionConfig.modelRoutingPlan` 增 `planName?`；分支 2 `SessionConfig.modelId/providerId` 取 `sessionPersist` 口径（T4 根治）。
+- **`[P0]model_routing.md §5`**：wire body 一致性段改写为 T4 根治版——调用现场（`routing_loop.ts` / `llm_caller.ts`）在 `buildRequest` 前注入当前 target/candidate `modelId`，`buildRequest` 信任 caller 不再内部重写；旁路 run `recordSkippedCandidate` 逐条记录被跳候选。
+- 详情：`specs/tech/version_logs/v0.0.353/model-routing-trace-correctness/change_log.md`
+
+## 2026-08-15 · v0.0.350（四渠道 coding plan native + 额度/余额查询）
+
+- **`[P0]llm_provider_interface.md`**：ProviderName +4 native（kimi/glm/minimax coding plan + deepseek_api）；LlmProvider 加可选 `queryQuota?`（QuotaSnapshot/QuotaTier 统一形状，决策⑧）；实现表扩 4 impl 行（均 extends AnthropicCompatibleProvider，glm 裸 api_key 特例）；新增 §3.5（deriveQuotaBaseUrl 查询域推导 / impl 顺序约束 anthropic_compatible 首位 / 消费方=GET /provider/quota 聚合 + 前端 5min 轮询 LastGood）。
+- **api `02-llm-chat.md` 1.7→1.8**：§5.6 `GET /provider/quota` 聚合端点（Promise.all 并发 + 单渠道错误隔离；QuotaSnapshot 形状）+ §5.2 name 放宽 ProviderName union（白名单 5 值）。
+- **UI**：新组件 `component-coding-plans-quota-footer.md`（额度型两行/余额型/展开纯文本明细 boss 铁律）+ fields 类型选择器 + section-providers name 联动三边界 + primitive key-choice-cards +labels。
+- 详情：`specs/tech/version_logs/v0.0.350/change_log.md`
+
+## 2026-08-15 · v0.0.349（provider 删除入口 + 方案 dangling 双语义）
+
+- **`[P0]model_routing.md` §4 全 dangling 降级段**：挂载方案**所有候选** provider 已删（buildClientFromCandidates 全 throw）→ caller 段 try/catch 降级 `ModelNotConfiguredError`（400 MODEL_NOT_CONFIGURED，message 含「方案内所有模型不可用」，与分支 1 跑空同时机同构）；MUST NOT 静默回退默认模型（D11）。dangling 双语义（runtime 跳过 + 编辑拦保存）权威 = api `21-model-routing.md §2.7`（1.1.0）。
+- 详情：`specs/tech/version_logs/v0.0.349/change_log.md`（T1 后端降级 / T2 前端删除入口+dangling 预检 / T3 BUG-003·004 批修）
+
+## 2026-08-14 · v0.0.347（模型路由降级：组合方案 + attempt 内路由 + 三态熔断）
+
+- **`[P0]model_routing.md` 新增**：模型路由降级全谱（§1 概念 + §2 数据形状 + §3 resolve 双分支 + §4 挂载查询 + §5 routing 循环 + §6 熔断三态 + §7 差异化重试 + §8 app_config 存储 + §9 边界）。§4 含 **academy 排除**（Major-2 修复：`resolveModelRoutingPlan` 加 `isAcademy` 参数，academy 直接分支 1）+ 分支 2 client 组装（`buildClientFromCandidates` 按候选链 buildLlmClient）；§5 含装配链（clientBuilder 条件注入 + 占位回退）+ **方案级 circuit 覆盖**（Major-1 修复：registry 触点全传第 4 参 plan.circuit + entry 已存在同步更新 cfg）；§9 时间控件自研已发生（决策⑧ 兜底）+ **Task 4 UI v2 弹层化**（草稿态隔离 + 视觉语义翻转 + footer 校验）。
+- **`[P0]app_config.md`**：group 集合补 `model_routing_plans` + `model_routing`（v0.0.347 新增，指向 model_routing.md §8）。
+- **UI specs（Task 4 UI v2 后）**：`component-hour-grid-picker.md` / `component-model-routing-plan-editor.md` / `section-model-routing-plans.md` 按实际代码重写（弹层草稿态 / 7 列行委托 / 两层结构快照回滚）+ 新建 `component-plan-card.md` / `component-plan-item-row.md` / `model-routing-plan-lib.md`（300 行门禁拆分产物）。
+- **[P0]model_routing.md T5 增量**（老板 20:51 拍板「20 次失败 12 次就不请求」）：§2.1 CircuitConfig 加 `windowSize`（默认 20，校验整数 [1,1000] + 生效 minRequests≤windowSize）+ §6.1 熔断错误率轨道改**滑动窗口口径**（环形 buffer 最近 N 次请求，取代终身累计；窗口样本 < minRequests 时沉默、连续失败轨道兜底；状态转换不清窗；窗口重建仅 entry 新建/编辑改 windowSize）+ snapshot.errorRate 窗口口径（failureCount/totalRequests 终身保留）。i18n circuitMinRequests 标签改「窗口样本数」/ "Min Window Samples"。
+- **[P0]model_routing.md T6 增量**（老板 21:44+22:22 拍板严格互斥）：§2.2 挂载段加「二选一严格互斥」——单 select（上模型/下方案）、双向清（选模型清挂载、选方案清默认模型）、squad PATCH 双非空 400 `mutually exclusive`、playground 先清后写崩溃安全、存量双设不迁移、回退链重定义（方案删除→未设置态 400 引导，无休眠接管）。配套 UI spec `common/component-model-or-plan-picker.md`（新组件）+ `06-studio.md §3.2` 合并 select + `section-default-models-and-request.md`。
+- 详情：`specs/tech/version_logs/v0.0.347/change_plan.md` + `change_log.md`（T1/T2/T3 实现核对 + 偏离 + Major 修复 + 装配链回归 + Task 4 UI v2 改版）
 
 ## 2026-08-07 · v0.0.279（effort 覆盖链：成员 > 团队 effortDefault > 厂商默认）
 

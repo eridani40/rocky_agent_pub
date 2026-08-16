@@ -11,8 +11,8 @@
 
 ## 参与成员
 - orchestrator（协调）
-- prd / architect / planner / coder / code-reviewer
-- api-test-designer / api-test-executor / e2e-test-executor / verify-reviewer / doc-modifier
+- prd / architect / coder / code-reviewer / bug-analyst
+- api-test-designer / api-test-executor / e2e-test-executor / researcher / doc-modifier
 
 ## 任务概览
 <!-- 从 task.json 同步，简要展示每个 task 的状态 -->

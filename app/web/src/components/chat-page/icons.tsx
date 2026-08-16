@@ -253,3 +253,15 @@ export function TodoIcon({ size = 16, ...rest }: IconProps) {
   );
 }
 
+/** battery icon —— 「余额查询」悬浮菜单项（v0.0.356：电池（lucide battery-medium 同款路径），无 badge） */
+export function BatteryIcon({ size = 16, ...rest }: IconProps) {
+  return (
+    <svg {...base(size)} {...rest}>
+      <rect x="2" y="7" width="16" height="10" rx="2" />
+      <path d="M22 11v2" />
+      <path d="M6 11v2" />
+      <path d="M10 11v2" />
+    </svg>
+  );
+}
+

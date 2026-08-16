@@ -21,9 +21,9 @@ Automatically activates when:
 
 ---
 
-## OKF：tech specs 的组织方法（v0.0.35 起）
+## OKF：tech specs 的组织方法
 
-**`specs/tech/` 用 OKF（Open Knowledge Format）组织**——每个子系统目录 = 一个 OKF 知识库（KB）：
+**`${SPECS_DIR}/tech/` 用 OKF（Open Knowledge Format）组织**——每个子系统目录 = 一个 OKF 知识库（KB）：
 - 方法本身（业务无关）见 **`.rocky/skills/okf-skill/`**；tech 怎么用 OKF 见 **`references/tech-spec-rules.md`**（权威：index 5 章 + 单文件章节 + frontmatter + 两套 log）。
 - 核心：每 KB 一个 `index.md`（总起）+ `log.md`（变更倒序）；每文件 YAML frontmatter（`type` 必填 + priority/status/updated）；**正文 = 当前现状，变更去 log**（不再满篇 inline `[vX.Y]`）。
 - prd / api / ui **暂仍用** `overall/` + `version_logs/`（可后续按需迁 OKF）。
@@ -32,38 +32,40 @@ Automatically activates when:
 
 ## 项目文档目录
 
-所有项目文档统一存放在项目根目录的 `specs/` 下：
+> 文档根目录 = 变量区 `${SPECS_DIR}`（团队 AGENTS.md 定义，默认 `specs/`）。以下用 `${SPECS_DIR}` 代指项目文档根。
+
+所有项目文档统一存放在项目根目录的 `${SPECS_DIR}` 下：
 
 ```
-specs/
+${SPECS_DIR}/
 ├── research/                       # 调研报告（researcher 产出）
-│   └── {feature-slug}.md
+│   └── ${SLUG}.md
 ├── prd/
 │   ├── overall/                    # 全量产品文档（prd 产出）
 │   │   ├── 01-product-framework.md
 │   │   └── ...
 │   └── version_logs/
-│       └── v{N}.{M}/change_log.md
+│       └── v${VERSION}/change_log.md
 ├── tech/                           # ★ OKF 知识库（每个子系统目录=一个 KB；见 okf-skill + tech-spec-rules）
 │   ├── index.md                    # 顶层总起（子系统导航）
-│   ├── <子系统>/                    # 一个 KB：squad / agent / app / ...
+│   ├── ${SUBSYSTEM}/                    # 一个 KB：squad / agent / app / ...
 │   │   ├── index.md                # 子系统总起（5 章：是什么/边界/关系/原则/导航）
 │   │   ├── log.md                  # 本目录变更（ISO 倒序）
-│   │   └── {topic}.md              # spec 文件（frontmatter + 正文=现状）
+│   │   └── ${TOPIC}.md              # spec 文件（frontmatter + 正文=现状）
 │   └── version_logs/
-│       └── v{N}.{M}/change_log.md  # 跨版本发布说明（保留，§两套 log）
+│       └── v${VERSION}/change_log.md  # 跨版本发布说明（保留，§两套 log）
 ├── api/
 │   ├── overall/                    # API 全量文档（arch 产出，coder 细化）
 │   │   ├── 01-sessions.md
 │   │   └── ...
 │   └── version_logs/
-│       └── v{N}.{M}/change_log.md
+│       └── v${VERSION}/change_log.md
 ├── ui/
 │   ├── overall/                    # UI 协议文档（coder 产出；含 app-guide 作 ET executor 导航底图）
-│   │   ├── {page-name}.md
+│   │   ├── ${PAGE_NAME}.md
 │   │   └── ...
 │   └── version_logs/
-│       └── v{N}.{M}/change_log.md
+│       └── v${VERSION}/change_log.md
 ```
 
 ### 说明
@@ -91,12 +93,12 @@ specs/
 ## 文档产出链路
 
 ```
-researcher → specs/research/（调研报告）
+researcher → ${SPECS_DIR}/research/（调研报告）
 prd → prd/overall + prd/version_logs
     → arch 读 prd 产出 tech/ + api/
     → coder 读 tech/ 编码并细化 api/ + 产出/更新 ui/
-    → api-test-designer 读 api/ 设计 case / api-test-executor 跑 run_all 验证（不看代码）
-    → ET（v0.0.188 范式）：orchestrator 委派 e2e-test-executor，executor 用 playwright-cli 按 case.md + app-guide 玩 app（不看代码，留证 + 自由心证）
+    → api-test-designer 读 api/ 写 mjs case / api-test-executor 起 env + node --test 验证（不看代码）
+    → ET（范式）：orchestrator 委派 e2e-test-executor，executor 用 playwright-cli 按 case.md + app-guide 玩 app（不看代码，留证 + 自由心证）
     → doc-modifier 最终同步所有 overall
 ```
 

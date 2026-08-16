@@ -27,6 +27,7 @@ import {
   type TodoStatus,
 } from '../todo/todo-store';
 import type { TodoStore } from '../todo/todo-store';
+import { ReminderQueueStore } from '../system-reminder-queue';
 
 /** 允许的 action 集（todo_tools.md §3） */
 export const TODO_ACTIONS = [
@@ -34,6 +35,23 @@ export const TODO_ACTIONS = [
   'delete_item', 'list', 'cleanup_finished',
 ] as const;
 type TodoAction = (typeof TODO_ACTIONS)[number];
+
+/**
+ * [v0.0.361 T4] todo 变化行写 reminder queue（仅本 session；todo 是 session 级）。
+ * value = 已渲染注入行（change_plan §1.5/§2 样例 A）；key = `todo:{itemId}`。
+ * 写失败 catch 吞：reminder 是 best-effort 通知，绝不阻断工具返回（§1.5 AC）。
+ * fsRoot 取 rtc.sessionDeps.dataDir（DATA_DIR 绝对路径）；缺省 → no-op。
+ * queue 实例 per-call new：write 临界区纯同步 JS（readFileSync+atomicWriteSync），
+ * 事件循环串行，多实例并发写不交错（system-reminder-queue 设计注释）。
+ */
+async function writeTodoReminder(
+  dataDir: string | undefined, sid: string, itemId: string, value: string,
+): Promise<void> {
+  try {
+    if (!dataDir) return;
+    await new ReminderQueueStore({ fsRoot: dataDir }).write(sid, `todo:${itemId}`, value);
+  } catch { /* 写失败静默（不阻断工具返回） */ }
+}
 
 /** todoStore 鸭子类型（rtc.sessionDeps.todoStore 形状，避免窄类型耦合） */
 interface TodoStoreLike {
@@ -123,13 +141,15 @@ export const todoTool: Tool = {
     if (!store) return errorResult(`todo.${action}: runtime error: todoStore not injected (sessionDeps.todoStore missing)`);
     const sid = rtc.selfSessionId;
     if (!sid) return errorResult(`todo.${action}: runtime error: selfSessionId missing`);
+    // [v0.0.361 T4] reminder queue 写入根（DATA_DIR；缺省 → 变化行 no-op，不影响工具主路径）
+    const dataDir = (rtc.sessionDeps as { dataDir?: string } | undefined)?.dataDir;
     try {
-      if (action === 'add_item') return await runAddItem(input, store, sid);
-      if (action === 'update_item') return await runUpdateItem(input, store, sid);
-      if (action === 'add_step') return await runAddStep(input, store, sid);
-      if (action === 'update_step') return await runUpdateStep(input, store, sid);
-      if (action === 'delete_item') return await runDeleteItem(input, store, sid);
-      if (action === 'cleanup_finished') return await runCleanupFinished(store, sid);
+      if (action === 'add_item') return await runAddItem(input, store, sid, dataDir);
+      if (action === 'update_item') return await runUpdateItem(input, store, sid, dataDir);
+      if (action === 'add_step') return await runAddStep(input, store, sid, dataDir);
+      if (action === 'update_step') return await runUpdateStep(input, store, sid, dataDir);
+      if (action === 'delete_item') return await runDeleteItem(input, store, sid, dataDir);
+      if (action === 'cleanup_finished') return await runCleanupFinished(store, sid, dataDir);
       return await runList(store, sid);
     } catch (e) {
       return errorResult(`todo.${action}: ${e instanceof Error ? e.message : String(e)}`);
@@ -142,7 +162,7 @@ function isTodoAction(a: string): a is TodoAction {
 }
 
 /** add_item：建主 item（steps=[]），status 缺省 not_started（todo_tools.md §3） */
-async function runAddItem(input: ToolInput, store: TodoStoreLike, sid: string): Promise<ToolRunResult> {
+async function runAddItem(input: ToolInput, store: TodoStoreLike, sid: string, dataDir?: string): Promise<ToolRunResult> {
   const desc = String(input.desc ?? '').trim();
   if (!desc) return errorResult('todo.add_item: desc_required (desc is required)');
   const status = parseStatus(input.status, 'not_started');
@@ -160,11 +180,12 @@ async function runAddItem(input: ToolInput, store: TodoStoreLike, sid: string): 
     ...(input.memo != null ? { memo: String(input.memo) } : {}),
   };
   await store.upsertItem(sid, item);
+  await writeTodoReminder(dataDir, sid, item.id, `[todo] item「${desc}」→ ${status}`);
   return textResult(JSON.stringify({ itemId: item.id }));
 }
 
 /** update_item：改主 item 字段（partial，todo_tools.md §3） */
-async function runUpdateItem(input: ToolInput, store: TodoStoreLike, sid: string): Promise<ToolRunResult> {
+async function runUpdateItem(input: ToolInput, store: TodoStoreLike, sid: string, dataDir?: string): Promise<ToolRunResult> {
   const itemId = String(input.itemId ?? '').trim();
   if (!itemId) return errorResult('todo.update_item: item_not_found (itemId required)');
   const items = await store.listBySession(sid);
@@ -189,11 +210,12 @@ async function runUpdateItem(input: ToolInput, store: TodoStoreLike, sid: string
   if (typeof patch.memo === 'string') next.memo = patch.memo;
   else if (input.memo != null) next.memo = String(input.memo);
   await store.upsertItem(sid, next);
+  await writeTodoReminder(dataDir, sid, itemId, `[todo] item「${next.desc}」→ ${next.status}`);
   return textResult(JSON.stringify({ itemId }));
 }
 
 /** add_step：给主 item 加步骤（status 缺省 not_started，todo_tools.md §3） */
-async function runAddStep(input: ToolInput, store: TodoStoreLike, sid: string): Promise<ToolRunResult> {
+async function runAddStep(input: ToolInput, store: TodoStoreLike, sid: string, dataDir?: string): Promise<ToolRunResult> {
   const itemId = String(input.itemId ?? '').trim();
   if (!itemId) return errorResult('todo.add_step: item_not_found (itemId required)');
   const desc = String(input.desc ?? '').trim();
@@ -206,11 +228,12 @@ async function runAddStep(input: ToolInput, store: TodoStoreLike, sid: string): 
   const step: TodoStep = { id: store.nextId(), desc, status };
   const next: TodoItem = { ...item, steps: [...item.steps, step] };
   await store.upsertItem(sid, next);
+  await writeTodoReminder(dataDir, sid, item.id, `[todo] item「${item.desc}」step「${desc}」→ ${status}`);
   return textResult(JSON.stringify({ itemId, stepId: step.id }));
 }
 
 /** update_step：改步骤字段（todo_tools.md §3） */
-async function runUpdateStep(input: ToolInput, store: TodoStoreLike, sid: string): Promise<ToolRunResult> {
+async function runUpdateStep(input: ToolInput, store: TodoStoreLike, sid: string, dataDir?: string): Promise<ToolRunResult> {
   const itemId = String(input.itemId ?? '').trim();
   const stepId = String(input.stepId ?? '').trim();
   if (!itemId) return errorResult('todo.update_step: item_not_found (itemId required)');
@@ -234,15 +257,20 @@ async function runUpdateStep(input: ToolInput, store: TodoStoreLike, sid: string
   const steps = [...item.steps];
   steps[stepIdx] = step;
   await store.upsertItem(sid, { ...item, steps });
+  await writeTodoReminder(dataDir, sid, item.id, `[todo] item「${item.desc}」step「${step.desc}」→ ${step.status}`);
   return textResult(JSON.stringify({ itemId, stepId }));
 }
 
 /** delete_item：删主 item（含步骤，todo_tools.md §3） */
-async function runDeleteItem(input: ToolInput, store: TodoStoreLike, sid: string): Promise<ToolRunResult> {
+async function runDeleteItem(input: ToolInput, store: TodoStoreLike, sid: string, dataDir?: string): Promise<ToolRunResult> {
   const itemId = String(input.itemId ?? '').trim();
   if (!itemId) return errorResult('todo.delete_item: item_not_found (itemId required)');
+  const items = await store.listBySession(sid);
+  const desc = items.find((it) => it.id === itemId)?.desc;
   const removed = await store.removeItem(sid, itemId);
   if (!removed) return errorResult(`todo.delete_item: item_not_found (${itemId})`);
+  // 删除语义 = 显式「已删除」文本行（change_plan §1.2：LLM 可感知消失；非 tombstone）
+  await writeTodoReminder(dataDir, sid, itemId, `[todo] item「${desc ?? itemId}」已删除`);
   return textResult(JSON.stringify({ itemId }));
 }
 
@@ -253,8 +281,13 @@ async function runList(store: TodoStoreLike, sid: string): Promise<ToolRunResult
 }
 
 /** cleanup_finished：删所有 status ∈ {done, skipped} 的主 item（todo_tools.md §3） */
-async function runCleanupFinished(store: TodoStoreLike, sid: string): Promise<ToolRunResult> {
+async function runCleanupFinished(store: TodoStoreLike, sid: string, dataDir?: string): Promise<ToolRunResult> {
+  // 先读待清理明细（store 返 count，desc 需在删除前捕获）
+  const removedItems = (await store.listBySession(sid)).filter((it) => it.status === 'done' || it.status === 'skipped');
   const removed = await store.cleanupFinished(sid);
+  for (const it of removedItems) {
+    await writeTodoReminder(dataDir, sid, it.id, `[todo] item「${it.desc}」已删除`);
+  }
   return textResult(JSON.stringify({ removed }));
 }
 

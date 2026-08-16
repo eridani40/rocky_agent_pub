@@ -29,6 +29,7 @@ import { SectionSeeImageConfig } from './section-see-image-config';
 import { SectionBashConfig } from './section-bash-config';
 import { SectionLogsConfig } from './section-logs-config';
 import { SectionUserMemory } from './section-user-memory';
+import { SectionModelRoutingPlans } from './section-model-routing-plans';
 // [v0.0.318] 配置同步（导入导出）：自渲染即时操作，不走 SaveBar
 import { SectionConfigSync } from './section-config-sync';
 import { SectionTeamSync } from './section-team-sync';
@@ -44,6 +45,12 @@ export interface SectionTabPanelProps {
   defaultModelsDraft: DefaultModelsData;
   /** v0.0.158：default_models 只剩 chat 一列（summary 已删） */
   onDefaultModelsChange: (key: 'chat', value: string | undefined) => void;
+  /** [v0.0.347 T6] playground 方案挂载 draft（model_routing/default.playgroundPlanId；null=未挂载） */
+  mountDraft?: string | null;
+  /** [v0.0.347 T6] 挂载 draft 变更（planId=null=清除） */
+  onMountChange?: (planId: string | null) => void;
+  /** [v0.0.349 BUG-004] 方案库删除成功上抛（detached 含 'playground' 时 page 清本地挂载态） */
+  onPlanDeleted?: (detached: string[], planId: string) => void;
   onKeyChange: (groupId: string, key: string, next: unknown) => void;
   /** consolidation record draft */
   consolidationDraft: ConsolidationData;
@@ -70,6 +77,9 @@ export function SectionTabPanel({
   kvGroups,
   defaultModelsDraft,
   onDefaultModelsChange,
+  mountDraft,
+  onMountChange,
+  onPlanDeleted,
   onKeyChange,
   consolidationDraft,
   registerSection,
@@ -81,10 +91,22 @@ export function SectionTabPanel({
   // 可观测性 detail 视图（新增/编辑配置）独占 tab 内容区时，隐藏 tab 内其他 group（logs）。
   // 由 SectionObservability 通过 onDetailViewChange 同步上报（UI 展示态，与 providerViewLevel 同性质）。
   const [obsInDetail, setObsInDetail] = useState(false);
+  // [v0.0.347 T4] models tab 双 section view level（providers + 方案库）：任一进 detail 态
+  // 时独占 tab 内容区（其余 group 及标题全隐藏，独立详情页——老板拍板）。由各 section
+  // 通过 onViewLevelChange 上抛（同 obsInDetail 机制；provider 侧 v0.0.140 机制本次补接线）。
+  const [providerViewLevel, setProviderViewLevel] = useState<'list' | 'detail'>('list');
+  const [plansViewLevel, setPlansViewLevel] = useState<'list' | 'detail'>('list');
   // 切离 observability tab 时 SectionObservability 会 unmount（内部 detail state 丢失），
   // 同步把 obsInDetail 重置为 list 态，避免切回时 stale=true 错误隐藏 logs/标题。
   useEffect(() => {
     if (selectedTab !== 'observability') setObsInDetail(false);
+  }, [selectedTab]);
+  // [v0.0.347 T4] 同上：切离 models tab 时两 section unmount，重置防 stale。
+  useEffect(() => {
+    if (selectedTab !== 'models') {
+      setProviderViewLevel('list');
+      setPlansViewLevel('list');
+    }
   }, [selectedTab]);
 
   switch (selectedTab) {
@@ -117,6 +139,8 @@ export function SectionTabPanel({
           <SectionDefaultModelsAndRequest
             defaultModelsDraft={defaultModelsDraft}
             onDefaultModelsChange={onDefaultModelsChange}
+            mountDraft={mountDraft ?? null}
+            onMountChange={(planId) => onMountChange?.(planId)}
             llmRequestDraft={{
               stall_tool_s: Number(kvGroups.llm_request?.keys.find((k) => k.key === 'stall_tool_s')?.value ?? 120),
               max_attempts: Number(kvGroups.llm_request?.keys.find((k) => k.key === 'max_attempts')?.value ?? 3),
@@ -125,16 +149,38 @@ export function SectionTabPanel({
           />
         </>
       );
-    case 'models':
+    case 'models': {
+      // [v0.0.347 T4] detail 态独占 tab 内容区（独立详情页，老板拍板）：任一 section 进
+      // detail 时另一 section 及其 group 标题隐藏。互斥由构造保证：detail 态下另一
+      // section 列表不可见 → 无法进入其 detail。
+      // [T4-blocking 教训] 骨架恒定契约：顶层恒为 [div, div] 两容器，detail 态只用条件
+      // null 置空槽位内容——禁止 detail 分支裸 return Section（同位置节点类型 div→Section
+      // 变化会触发 React reconciliation 整树卸载重挂，Section 内部 view state 丢失重置
+      // list → onViewLevelChange 上抛 list → 详情闪回进不去）。
+      const providersInDetail = providerViewLevel === 'detail';
+      const plansInDetail = plansViewLevel === 'detail';
       return (
         <>
-          {/* 供应商和模型 group：独立 dirty（provider 编辑器自管 save，不进 page-tab dirty） */}
+          {/* 供应商和模型 group：独立 dirty（provider 编辑器自管 save，不进 page-tab dirty）。
+              槽位恒定：slot0 = h3|null，slot1 = SectionProviders|null —— providers 进 detail
+              时 SectionProviders 槽位不动不重挂（plans 进 detail 时才卸载隐藏） */}
           <div data-active="true">
-            <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.providers.label')}</h3>
-            <SectionProviders />
+            {providersInDetail || plansInDetail ? null : (
+              <h3 className="text-[15px] font-semibold text-fg mb-3 mt-0">{t('group.providers.label')}</h3>
+            )}
+            {plansInDetail ? null : <SectionProviders onViewLevelChange={setProviderViewLevel} />}
+          </div>
+          {/* [v0.0.347] 模型组合方案库（自渲染即时操作，不走 page-tab dirty；provider 独立 save 流同范式）。
+              槽位恒定：slot0 = SectionModelRoutingPlans|null —— plans 进 detail 时槽位不动不重挂；
+              detail 态去 mt-8（详情独占页顶对齐，与 provider 详情一致） */}
+          <div className={plansInDetail ? '' : 'mt-8'}>
+            {providersInDetail ? null : (
+              <SectionModelRoutingPlans onViewLevelChange={setPlansViewLevel} onPlanDeleted={onPlanDeleted} />
+            )}
           </div>
         </>
       );
+    }
     case 'tools':
       return (
         <>

@@ -88,6 +88,7 @@ function mkChrome(over: Partial<SessionChromeView> = {}): SessionChromeView {
     tag: '',
     sessionModel: { providerId: '01HZPROVIDERMOCK', modelId: 'glm-mock-1' },
     defaultModel: null,
+    defaultRoutingPlan: null,
     effort: null,
     approvalMode: null,
     members: [],

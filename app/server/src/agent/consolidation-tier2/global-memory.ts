@@ -64,6 +64,7 @@ export async function consolidateGlobalMemory(
     systemPrompt: '', // 未使用（forked 走 snapshot.system）
     client: buildLlmClient(model.providerId, model.modelId, deps.appConfig, deps.pluginManager),
     modelId: model.modelId,
+    providerId: model.providerId,
     dataDir: deps.dataDir, // memory_manage global scope 落 <dataDir>/memory/（dir store）
     appConfig: deps.appConfig,
     tools: [memoryManageTool],

@@ -77,7 +77,38 @@
     "cron": "定时任务",
     "skills": "技能",
     "todo": "待办",
-    "squadStatus": "团队状态"
+    "squadStatus": "团队状态",
+    "quota": "余额查询"
+  },
+  "quotaModal": {
+    "title": "模型方案额度",
+    "plan": "方案",
+    "legendWorking": "工作中",
+    "legendOpen": "熔断",
+    "legendHalf": "观察中",
+    "legendOff": "不在时间内",
+    "tierFiveHour": "5小时额度",
+    "tierWeekly": "周额度",
+    "tierBalance": "充值余额",
+    "timeAny": "不限时",
+    "timeHit": "当前命中",
+    "timeMiss": "当前未命中",
+    "retryIn": "{{sec}} 秒后自动重试",
+    "halfProbing": "半开探测中",
+    "notRouting": "不参与路由",
+    "used": "已用",
+    "time": "时间",
+    "resetAt": "重置 {{time}}",
+    "fast": "消耗偏快",
+    "insufficient": "余额不足",
+    "errorAuth": "凭证已失效，请检查 API Key",
+    "lastUpdated": "上次更新 {{time}}",
+    "refreshHint": "每 5 分钟自动刷新 · 失败保留上次成功值",
+    "empty": "暂无额度数据",
+    "singleUnitDay": "天",
+    "singleUnitHour": "小时",
+    "singleUnitMinute": "m",
+    "singleUnitZero": "0min"
   },
   "todoModal": {
     "title": "待办清单",
@@ -365,6 +396,7 @@
     "effort": "推理强度",
     "approvalMode": "审批模式"
   },
+  "planDefaultLabel": "方案 · {{name}}（默认）",
   "effort": {
     "pickerAria": "推理强度：{{level}}",
     "level": {

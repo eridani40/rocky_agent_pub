@@ -74,6 +74,7 @@ function mkConfig(sid?: string): SessionConfig {
     systemPrompt: 'ORIGINAL',
     client: { contextWindow: 10000 } as unknown as LlmClient,
     modelId: 'm',
+    providerId: 'p-m',
   };
 }
 
@@ -129,6 +130,7 @@ describe('P0-1 ContextEngine.assemble rebuild 不变量（base_builder 永远 re
       systemPrompt: 'ORIGINAL',
       client: { contextWindow: 100000 } as unknown as LlmClient,
       modelId: 'm',
+      providerId: 'p-m',
     };
     await store.createSession({ id: cfg.sessionId });
     const ids = Array.from({ length: 3 }, () => ulid());
@@ -174,6 +176,7 @@ describe('P2-3 base_builder ratio 动态化（同 tokenCap，ratio 小 → head 
       systemPrompt: 'ORIGINAL',
       client: { contextWindow: 100000 } as unknown as LlmClient,
       modelId: 'm',
+      providerId: 'p-m',
     };
     await store.createSession({ id: cfg.sessionId });
     // 10 条 head 候选（每条 1500 字符文本），summaryUpTo 设在末尾 → 全部成 head 候选

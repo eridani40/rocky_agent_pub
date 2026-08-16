@@ -60,10 +60,25 @@ export interface BuildInvokeContextInput {
   health?: ProviderHealthRegistry;
   /**
    * dev 调试日志（llm hook，spec dev-logs §3.1）。
-   * 透传到 InvokeContext.logWriter；invoke 末尾/catch 写一条 logs/llm.log。
-   * 缺省 undefined → 不写。
+   * 透传到 InvokeContext.logWriter；缺省 undefined → 不写（开关 false 也早 return 零开销）。
+   * 由 stage-llm/forked-agent 从 SessionConfig.logWriter 注入。
    */
   logWriter?: LogWriter;
+  /**
+   * [v0.0.347] 模型路由方案（SessionConfig.modelRoutingPlan 透传；分支 2 才有）。
+   * 有 routingPlan → invoke 走 routingAttemptLoop（候选决策循环）；缺省 undefined → 现有路径。
+   */
+  routingPlan?: import('./llm_caller').InvokeContext['routingPlan'];
+  /**
+   * [v0.0.347] 熔断注册表（进程内存单例；缺省 undefined → routing_loop 用 globalThis 单例）。
+   */
+  circuitRegistry?: import('./circuit_breaker_registry').CircuitBreakerRegistry;
+  /**
+   * [v0.0.347] 按 (providerId, modelId) 真实组装 LlmClient 的 builder（routing 多候选模型用）。
+   * 缺省 undefined → clientFactory 保持占位（恒返回 input.client，向后兼容）。
+   * 生产路径由装配层从 SessionConfig.appConfig + pluginManager 注入 buildLlmClient。
+   */
+  clientBuilder?: (providerId: string, modelId: string) => LlmClient;
 }
 
 /**
@@ -162,19 +177,32 @@ export function buildInvokeContext(input: BuildInvokeContextInput): InvokeContex
     config: input.llmRequestConfig,
     health: input.health,
     logWriter: input.logWriter,
+    // [v0.0.347] 模型路由方案 + 熔断注册表透传（分支 2；缺省 undefined → invoke 走现有路径/用单例）
+    routingPlan: input.routingPlan,
+    circuitRegistry: input.circuitRegistry,
     // fallback.client 经 withOnWire 绑本次 invoke 的 onWire
     // （resolveTarget 空 chain 路径用此 target；onWire 在 invoke 外层闭包里捕获 attempt 号）
     fallback: { provider, keyRef: 'default', model, client: input.client },
-    // clientFactory：每 attempt invoke 调 getClient 传 onWire，
-    // 用 withOnWire 派生绑 onWire 的 client（chain 非空时启用，spec §6.4）
+    // clientFactory：
+    //  - 生产路径注入 clientBuilder（routing 多候选模型）→ 按 (provider, model) 真实组装 client
+    //  - 缺省（旧测试 stub / 非 routing 场景）→ 占位：恒返回 input.client 绑 onWire（向后兼容）
+    //  - 两者都经 withOnWire 绑本次 invoke 的 onWire（spec §6.4）
     clientFactory: {
       getClient: (
-        _provider: LlmProviderConfig,
+        provider: LlmProviderConfig,
         _keyRef: string,
         _keyValue: string,
-        _model: LlmModelConfig,
+        model: LlmModelConfig,
         onWire?: (req: unknown, body: unknown, url: string) => void,
-      ): LlmClient => bindOnWire(input.client, onWire),
+      ): LlmClient => {
+        if (input.clientBuilder) {
+          // 真实按 (providerId, modelId) 组装（buildLlmClient 路径，装配层注入）
+          const built = input.clientBuilder(provider.id, model.modelId);
+          return bindOnWire(built, onWire);
+        }
+        // 占位路径（向后兼容）：恒返回 input.client
+        return bindOnWire(input.client, onWire);
+      },
     },
   };
 }

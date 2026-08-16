@@ -15,6 +15,7 @@
  *
  * 边界：不直接调 API（onSave/onCancel 上抛父级）。
  */
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface SaveBarProps {
@@ -30,10 +31,16 @@ interface SaveBarProps {
   onCancel: () => void;
   /** action-key 后缀模式：'tab'（缺省）= settings.tab.save/cancel；'detail' = settings.detail.save/cancel */
   variant?: 'tab' | 'detail';
+  /** [可选] 测试锚点 data-testid（不传 = 无 testid，既有消费方零影响） */
+  saveTestId?: string;
+  /** [可选] 测试锚点 data-testid（同上） */
+  cancelTestId?: string;
+  /** [v0.0.349][可选] 尾部插槽（渲染在保存按钮右端；如详情页 danger 删除按钮）。缺省不渲染，既有消费方零影响 */
+  trailing?: ReactNode;
 }
 
 /** 通用保存条（sticky bottom） */
-export function SaveBar({ dirty, saving, saved = false, onSave, onCancel, variant = 'tab' }: SaveBarProps) {
+export function SaveBar({ dirty, saving, saved = false, onSave, onCancel, variant = 'tab', saveTestId, cancelTestId, trailing }: SaveBarProps) {
   const { t } = useTranslation('common');
   // saved 反馈仅在「非 dirty 且非 saving」时可见
   const showSaved = saved && !dirty && !saving;
@@ -66,6 +73,7 @@ export function SaveBar({ dirty, saving, saved = false, onSave, onCancel, varian
       {/* 取消按钮：dirty 时可见，否则 visibility:hidden 预留空间（禁 display:none 避免位移） */}
       <button
         type="button"
+        data-testid={cancelTestId}
         data-action-key={cancelActionKey}
         onClick={onCancel}
         disabled={saving || !dirty}
@@ -76,6 +84,7 @@ export function SaveBar({ dirty, saving, saved = false, onSave, onCancel, varian
       </button>
       <button
         type="button"
+        data-testid={saveTestId}
         data-action-key={saveActionKey}
         disabled={saving}
         onClick={onSave}
@@ -89,6 +98,8 @@ export function SaveBar({ dirty, saving, saved = false, onSave, onCancel, varian
       >
         {saving ? t('saveBar.saving') : dirty ? `● ${t('saveBar.save')}` : t('saveBar.save')}
       </button>
+      {/* [v0.0.349] 尾部插槽（保存按钮右端；缺省不渲染，既有消费方零影响） */}
+      {trailing}
     </div>
   );
 }

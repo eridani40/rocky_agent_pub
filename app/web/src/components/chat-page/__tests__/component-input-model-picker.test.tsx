@@ -721,3 +721,61 @@ describe('InputModelPicker — click 菜单题目行（picker UI 统一）', () 
     expect(screen.queryByRole('heading', { name: '模型选择' })).toBeNull();
   });
 });
+
+describe('InputModelPicker — 方案维度默认（v0.0.357：hasDefaultRoute = hasDefault || hasPlan）', () => {
+  beforeEach(() => __setProvidersCacheForTest(FAKE_PROVIDERS));
+  const PLAN = { planId: 'plan-1', planName: '方案 甲' };
+
+  it('方案态 hover 预览显「方案 · 名（默认）」（isReservedDefault && !hasDefault && hasPlan）', async () => {
+    render(
+      <InputModelPicker
+        model={{ providerId: '', modelId: 'default' }}
+        defaultModel={null}
+        defaultPlan={PLAN}
+        onChange={() => {}}
+      />,
+    );
+    // trigger aria-label = previewLabel（方案态）
+    await waitFor(() => {
+      expect(getTrigger().getAttribute('aria-label')).toBe('方案 · 方案 甲（默认）');
+    });
+    // hover 出预览单条，显方案态 label（非「未配置」）
+    fireEvent.mouseEnter(getTrigger().parentElement!);
+    await screen.findByRole('listbox');
+    expect(screen.getByText('方案 · 方案 甲（默认）')).toBeTruthy();
+    expect(screen.queryByText('未配置')).toBeNull();
+  });
+
+  it('方案态菜单顶部有默认项（label=方案 · 名（默认），hasDefaultRoute 条件）', async () => {
+    render(
+      <InputModelPicker
+        model={{ providerId: '', modelId: 'default' }}
+        defaultModel={null}
+        defaultPlan={PLAN}
+        onChange={() => {}}
+      />,
+    );
+    fireEvent.click(getTrigger());
+    await screen.findByRole('listbox');
+    // 菜单顶部默认项（方案态 label）
+    expect(screen.getByText('方案 · 方案 甲（默认）')).toBeTruthy();
+    // 全量列表仍在
+    expect(getOption('OpenAI / GPT-4o')).toBeTruthy();
+  });
+
+  it('方案态点默认项 → onChange({providerId:\'\',modelId:\'default\'})（复用保留字写回）', async () => {
+    const onChange = vi.fn();
+    render(
+      <InputModelPicker
+        model={{ providerId: 'pid_openai', modelId: 'gpt-4o' }}
+        defaultModel={null}
+        defaultPlan={PLAN}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(getTrigger());
+    await screen.findByRole('listbox');
+    fireEvent.click(screen.getByText('方案 · 方案 甲（默认）'));
+    expect(onChange).toHaveBeenCalledWith({ providerId: '', modelId: 'default' });
+  });
+});

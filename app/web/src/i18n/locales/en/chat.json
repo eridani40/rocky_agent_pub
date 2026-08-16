@@ -77,7 +77,38 @@
     "cron": "Scheduled tasks",
     "skills": "Skills",
     "todo": "Todos",
-    "squadStatus": "Team status"
+    "squadStatus": "Team status",
+    "quota": "Balance & quota"
+  },
+  "quotaModal": {
+    "title": "Model plan quota",
+    "plan": "Plan",
+    "legendWorking": "Working",
+    "legendOpen": "Circuit open",
+    "legendHalf": "Observing",
+    "legendOff": "Outside hours",
+    "tierFiveHour": "5-hour quota",
+    "tierWeekly": "Weekly quota",
+    "tierBalance": "Prepaid balance",
+    "timeAny": "Any time",
+    "timeHit": "active now",
+    "timeMiss": "inactive now",
+    "retryIn": "retry in {{sec}}s",
+    "halfProbing": "half-open probing",
+    "notRouting": "not routed",
+    "used": "Used",
+    "time": "Time",
+    "resetAt": "Resets {{time}}",
+    "fast": "Burning fast",
+    "insufficient": "Insufficient balance",
+    "errorAuth": "Credentials expired. Please check the API key.",
+    "lastUpdated": "Updated {{time}}",
+    "refreshHint": "Auto-refresh every 5 min · last good value kept on failure",
+    "empty": "No quota data",
+    "singleUnitDay": "d",
+    "singleUnitHour": "h",
+    "singleUnitMinute": "m",
+    "singleUnitZero": "0min"
   },
   "todoModal": {
     "title": "Todo list",
@@ -365,6 +396,7 @@
     "effort": "Effort",
     "approvalMode": "Approval Mode"
   },
+  "planDefaultLabel": "Plan · {{name}} (default)",
   "effort": {
     "pickerAria": "Effort: {{level}}",
     "level": {

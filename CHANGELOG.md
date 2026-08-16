@@ -5,6 +5,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 
 > Rocky Agent ships one release per milestone. This file aggregates the **important** milestones rather than listing all 300+ patch releases; full per-version history lives in `git log`.
 
+## [0.0.347–0.0.365] — 2026-08 · Model routing, quota era & the prompt-cache rewrite
+
+The quota/provider era: coding-plan quotas became first-class, model routing grew a fallback ladder, and the context engine was rewritten around prompt caching.
+
+### Added
+- **Four-channel coding-plan native support** (v0.0.350): Anthropic/OpenAI/MiniMax/GLM coding-plan providers fetch quota & balance directly from upstream APIs
+- **Quota overview v2** (v0.0.352): grouped dual-bar usage display, fast-burn badge, balance with thousand separators, collapsible provider list with disabled-card visuals
+- **Squad quota entry** (v0.0.356): per-member balance popover from the squad panel — four-source hook, dual-state cards, i18n
+- **Global quota sync** (v0.0.363): 5-minute background task + store as single source of truth + incremental fetch on open + SSE push to open pages
+- **Model routing fallback ladder** (v0.0.347): composite-plan + per-attempt routing with three-state circuit breaker
+- **Live config during runs** (v0.0.351): model/effort/approval-mode changes take effect at each iteration boundary — no restart needed
+- **Per-tool SSE streaming** (v0.0.354): multi-tool results stream to the UI one by one instead of arriving as a batch
+
+### Changed
+- **Prompt-cache rewrite** (v0.0.361): session state (env/work-dir/team-roster) moved into the system prompt as a stable fragment; per-turn reminders became an ordered KV queue — run-first turn emits the full dynamic chain + queue clear, subsequent turns only the time segment + drained deltas (same-key supersede). Measured effect: per-turn non-cached input drops from ~4500 chars to ~179 tokens, cache hit rate 99.9%
+- Retired 4 reminder providers (time/env/workspace/squad_workspace) in favor of the queue + `session_states` system-prompt fragment
+- Token usage attribution now lands on the actually-hit physical model (v0.0.359), including plan-fallback paths
+- Workspace search follows symlinks with chain-of-authorization semantics aligned to the file tree (v0.0.360); mention file-picker and search now share one backend (`workspace-search-core`, v0.0.346)
+- Run-end reporting deduped (v0.0.362): mates that already reported via `send_message` in the last 3 turns no longer emit an exit notification
+
+### Fixed
+- Browser attach defaults + instance-key convergence + debug-state residue detection (v0.0.330)
+- A2A envelope blank-page root cure (v0.0.331)
+- Member panel live-status four-layer hydration (v0.0.348)
+- Worker-pool removal: tool layer back to true-async `fs.promises` after worker_threads shared-address-space crashes (v0.0.345)
+- Picker default semantics gained the plan dimension; quota-ring rendering (v0.0.356–357)
+- kimi-2 full-quota tier missing from the plan popover (v0.0.357); tier time-range display now renders the complement of excluded hours in reference format (v0.0.364)
+
 ## [0.0.320–0.0.329] — 2026-08 · File preview ecosystem & the Door
 
 The biggest UI milestone since Squad Studio: the chat area gained a **file preview column** with real editing, and the chat/preview split became a sliding **door**.

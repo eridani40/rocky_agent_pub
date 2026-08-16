@@ -1,7 +1,7 @@
 type: component
 purpose: chat-input-bar 底部按钮行内的模型选择器（21px 图标 trigger + hover/click 合并菜单 + 菜单右对齐左上延伸 + 前缩略 + 默认a/固定a 双项语义）
 since: v0.0.89
-updated: 2026-07-23
+updated: 2026-08-15
 
 # component-input-model-picker
 
@@ -18,14 +18,17 @@ updated: 2026-07-23
 - **click → 完整菜单**：默认项（若配了 defaultA）+ 全部选项
 - **hover 与 click 共用同一菜单样式**（同容器 className / 同几何 / 同前缩略），差别仅在内容条数（1 条 vs 全量）
 - 双项语义：配了 default → 顶部「a(默认)」+ 完整列表（a 重复）；未配 → 仅完整列表
+- **[v0.0.357] 默认语义双维度**：默认 = 默认模型 **or** 挂载方案（T6 互斥，方案优先）。`defaultPlan` prop（chrome.defaultRoutingPlan）提供方案维度默认；`hasDefaultRoute = hasDefault || hasPlan`，方案态 hover/菜单默认项显「方案 · 名（默认）」（i18n `planDefaultLabel`），onClick 复用保留字 `{providerId:'',modelId:'default'}`（写回后端零改动）
+- **disabled 语义（v0.0.351）**：prop 保留可禁用；主消费方 `component-chat-session-input.tsx` 恒传 `disabled={false}`——**运行中可编辑**，改模型经 PUT /session/:id 落库、main run 下轮 iteration 边界 `refreshRuntimeConfig` 生效（specs/api/overall/04a-session-chrome.md §5）
 
-## 3. trigger + hover 预览 + click 菜单（三态）
+## 3. trigger + hover 预览 + click 菜单（四态）
 | model 状态 | trigger 图标色调 | hover 预览内容（1 条） | click 菜单 |
 |---|---|---|---|
 | default + 配了 defaultA | accent/fg | `a（默认）`（selected 态高亮） | 默认项 + 全量 |
-| default + 未配 defaultA | muted | `未配置`（muted） | 全量（无默认项） |
-| 具体 modelB | accent/fg | `b` 或 `provider / b`（selected 态高亮） | 全量（b 项 selected） |
-| null（studio inherit 回退态） | accent/fg | 对应 defaultA 或 `未配置` | 同 default 态 |
+| default + 挂方案（无 defaultA，v0.0.357） | accent/fg | `方案 · <名>（默认）`（selected 态高亮） | 默认项（方案态 label）+ 全量 |
+| default + 未配 defaultA 且无方案 | muted | `未配置`（muted） | 全量（无默认项） |
+| 具体 modelB | accent/fg | `b` 或 `provider / b`（selected 态高亮） | 全量（b 项 selected）+ 默认项（若有 defaultRoute） |
+| null（studio inherit 回退态） | accent/fg | 对应 defaultA / 方案名 或 `未配置` | 同 default 态 |
 > hover 预览 = 把「当前生效的那一项」单独以菜单项样式展示（selected 高亮），让用户 hover 即知当前模型，**不必读图标色调**。click 才给完整选择列表。
 
 ## 复用关系

@@ -39,6 +39,7 @@ const squadStatusMocks = vi.hoisted(() => ({
   useSquadStatus: vi.fn(),
   ComponentSquadStatusModal: vi.fn(),
 }));
+const quotaModalMocks = vi.hoisted(() => ({ ComponentQuotaEntryModal: vi.fn() }));
 
 const memoryCrudPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../use-memory-crud'));
 const cronCrudPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../use-cron-crud'));
@@ -50,6 +51,7 @@ const skillsModalPath = vi.hoisted(() => require('node:path').resolve(__dirname,
 const todoModalPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../component-todo-modal'));
 const squadCtxPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../studio-page/squad-status-context'));
 const squadModalPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../../studio-page/component-squad-status-modal'));
+const quotaModalPath = vi.hoisted(() => require('node:path').resolve(__dirname, '../component-quota-entry-modal'));
 
 vi.mock(memoryCrudPath, () => memoryCrudMocks);
 vi.mock(cronCrudPath, () => cronCrudMocks);
@@ -61,6 +63,7 @@ vi.mock(skillsModalPath, () => skillsModalMocks);
 vi.mock(todoModalPath, () => todoModalMocks);
 vi.mock(squadCtxPath, () => ({ useSquadStatus: squadStatusMocks.useSquadStatus }));
 vi.mock(squadModalPath, () => ({ ComponentSquadStatusModal: squadStatusMocks.ComponentSquadStatusModal }));
+vi.mock(quotaModalPath, () => ({ ComponentQuotaEntryModal: quotaModalMocks.ComponentQuotaEntryModal }));
 
 beforeAll(async () => {
   await initI18n('zh-CN');
@@ -114,7 +117,6 @@ function mkTodoCrud(pendingCount: number) {
   };
 }
 
-/** 团队状态 Context value（缺省 leader running + mate idle；deriveRunningCount=1） */
 function mkSquadCtx(over: Record<string, unknown> = {}) {
   return {
     detail: {
@@ -138,7 +140,7 @@ function mkSquadCtx(over: Record<string, unknown> = {}) {
     onEnterChat: vi.fn(),
     refreshDetail: vi.fn(),
     ...over,
-  } as never;
+  } as unknown as import('../../studio-page/squad-status-context').SquadStatusContextValue;
 }
 
 /** chrome 夹具（团队状态 Modal currentMemberId 来源） */
@@ -182,6 +184,9 @@ beforeEach(() => {
   squadStatusMocks.useSquadStatus.mockReset().mockReturnValue(null);
   squadStatusMocks.ComponentSquadStatusModal.mockReset().mockImplementation(() => (
     <div>SQUAD_MODAL_STUB</div>
+  ));
+  quotaModalMocks.ComponentQuotaEntryModal.mockReset().mockImplementation(() => (
+    <div>QUOTA_MODAL_STUB</div>
   ));
 });
 afterEach(() => cleanup());
@@ -399,5 +404,30 @@ describe('ComponentChatFloatMenu — 团队状态第 4 菜单项（v0.0.269）',
     expect(screen.queryByRole('button', { name: '定时任务' })).toBeNull();
     expect(screen.getByRole('button', { name: '团队状态' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '待办' })).toBeTruthy();
+  });
+
+  it('[v0.0.356] 余额查询入口：有 modelRoutingPlanId 时显，位于团队状态上方（老板 20:15 拍板第 4 位）', () => {
+    const ctx = mkSquadCtx({ detail: { ...mkSquadCtx().detail, modelRoutingPlanId: 'plan-356' } });
+    squadStatusMocks.useSquadStatus.mockReturnValue(ctx);
+    render(<ComponentChatFloatMenu sessionId="s1" />);
+
+    expect(screen.getByRole('button', { name: '余额查询' })).toBeTruthy();
+
+    const buttons = screen.getAllByRole('button');
+    const names = buttons.map((b) => b.getAttribute('aria-label'));
+    const squadIdx = names.indexOf('团队状态');
+    const quotaIdx = names.indexOf('余额查询');
+    const todoIdx = names.indexOf('待办');
+    expect(squadIdx).toBeGreaterThan(-1);
+    expect(quotaIdx).toBeGreaterThan(-1);
+    expect(quotaIdx).toBeLessThan(squadIdx);
+    expect(todoIdx).toBeGreaterThan(squadIdx);
+  });
+
+  it('[v0.0.356] 余额查询入口：无 modelRoutingPlanId 时不显', () => {
+    const ctx = mkSquadCtx({ detail: { ...mkSquadCtx().detail, modelRoutingPlanId: undefined } });
+    squadStatusMocks.useSquadStatus.mockReturnValue(ctx);
+    render(<ComponentChatFloatMenu sessionId="s1" />);
+    expect(screen.queryByRole('button', { name: '余额查询' })).toBeNull();
   });
 });

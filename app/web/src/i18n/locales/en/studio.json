@@ -139,7 +139,9 @@
       "high": "High",
       "max": "Max"
     },
-    "save": "Save meta"
+    "save": "Save meta",
+    "routingPlanLabel": "Model Routing Plan (mount)",
+    "routingPlanNone": "Not mounted"
   },
   "saveBar": {
     "discardTitle": "Discard changes?",
@@ -326,5 +328,12 @@
       "archived": "{{id}} archived"
     },
     "barTotal": "{{label}}: {{count}} total"
+  },
+  "modelOrPlan": {
+    "groupModels": "Models",
+    "groupPlans": "Plans",
+    "placeholder": "Select a model or plan",
+    "emptyPlans": "No plans yet",
+    "planPrefix": "Plan"
   }
 }

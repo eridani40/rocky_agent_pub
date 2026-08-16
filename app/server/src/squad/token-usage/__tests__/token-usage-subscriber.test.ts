@@ -10,13 +10,15 @@
  *   - model 三级 fallback：session → squad → '__unknown__'
  *   - 错误隔离：statStore 抛错不传播
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   setTokenUsageSubscriberDeps,
   notifyTokenUsageSubscriber,
   __resetTokenUsageSubscriberForTest,
   type TokenUsageSubscriberDeps,
 } from '../token-usage-subscriber';
+// [v0.0.359 T1] registry 插头：model 归属优先级链测试
+import { recordSuccessTarget, __resetSuccessTargetRegistryForTest } from '../../../llm/caller/success-target-registry';
 import type { SessionUsageView } from '../../../agent/session-store-types';
 import type { TokenUsageStatStore, TokenUsageDelta, TokenUsageDimension } from '../../../persistence/token-usage-stat-store';
 
@@ -194,5 +196,73 @@ describe('TokenUsageSubscriber', () => {
     await expect(
       notifyTokenUsageSubscriber(SESSION_ID, makeView({ input_no_cache: 100 }), '2026-07-23T06:00:00Z'),
     ).resolves.toBeUndefined();
+  });
+});
+
+// ============================================================
+// [v0.0.359 T1] registry 插头：model 归属优先级链
+// registry 成功 target（运行时真实命中）> session 显式 > squad 默认 > __unknown__
+// ============================================================
+describe('[v0.0.359] registry 插头（model 归属优先级链）', () => {
+  // 每例独立 reset registry（change_plan MUST：防止进程级单例跨例污染）
+  afterEach(() => {
+    __resetSuccessTargetRegistryForTest();
+  });
+
+  it('①registry 命中 → 记真实 target（session/squad 配置不覆盖）', async () => {
+    const { deps, calls } = makeMockDeps(
+      mockSessionRecord({ providerId: PROVIDER_X, modelId: MODEL_X }),
+      mockSquadRecord(),
+    );
+    setTokenUsageSubscriberDeps(deps);
+    // llm_caller ok 分支同款写入（运行时真实命中 physical model）
+    recordSuccessTarget(SESSION_ID, {
+      providerId: 'routed-prov', providerName: 'openai_compatible', modelId: 'routed-model',
+    });
+
+    await notifyTokenUsageSubscriber(SESSION_ID, makeView({ input_no_cache: 100 }), '2026-07-23T06:00:00Z');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.dim.providerId).toBe('routed-prov');
+    expect(calls[0]!.dim.modelId).toBe('routed-model');
+  });
+
+  it('②registry miss + session 显式 → 现行为（session providerId/modelId）', async () => {
+    const { deps, calls } = makeMockDeps(
+      mockSessionRecord({ providerId: PROVIDER_X, modelId: MODEL_X }),
+    );
+    setTokenUsageSubscriberDeps(deps);
+
+    await notifyTokenUsageSubscriber(SESSION_ID, makeView({ input_no_cache: 100 }), '2026-07-23T06:00:00Z');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.dim.providerId).toBe(PROVIDER_X);
+    expect(calls[0]!.dim.modelId).toBe(MODEL_X);
+  });
+
+  it('③registry miss + session/squad 全空 → __unknown__（回归）', async () => {
+    const { deps, calls } = makeMockDeps(
+      mockSessionRecord({ providerId: undefined, modelId: undefined }),
+      mockSquadRecord({ modelDefault: undefined, modelDefaultProviderId: undefined }),
+    );
+    setTokenUsageSubscriberDeps(deps);
+
+    await notifyTokenUsageSubscriber(SESSION_ID, makeView({ input_no_cache: 100 }), '2026-07-23T06:00:00Z');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.dim.providerId).toBe('__unknown__');
+    expect(calls[0]!.dim.modelId).toBe('__unknown__');
+  });
+
+  it('④subagent 仍跳过（registry 命中也不写 stat）', async () => {
+    const { deps, calls } = makeMockDeps(
+      mockSessionRecord({ parentSessionId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }),
+    );
+    setTokenUsageSubscriberDeps(deps);
+    recordSuccessTarget(SESSION_ID, { providerId: 'routed-prov', modelId: 'routed-model' });
+
+    await notifyTokenUsageSubscriber(SESSION_ID, makeView({ input_no_cache: 100 }), '2026-07-23T06:00:00Z');
+
+    expect(calls).toHaveLength(0); // subagent 跳过先于 model 归属解析
   });
 });

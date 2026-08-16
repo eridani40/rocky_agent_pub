@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>模型路由方案库 v2 — Demo</title>
+<style>
+/* ============================================================
+ * 设计 token（内联自 app/web/src/styles/tokens.css :root）
+ * light-only 银灰中性主题（v0.0.165），CTA 黑白灰，状态色低饱和
+ * ============================================================ */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #e4e4e7;
+  --fg: #0a0a0a;
+  --fg-2: #3f3f46;
+  --fg-3: #52525b;
+  --muted: #71717a;
+  --muted-2: #a1a1aa;
+  --border: #e4e4e7;
+  --border-2: #d4d4d8;
+  --border-strong: #a1a1aa;
+  --btn-primary-bg: #18181b;
+  --btn-primary-hover: #000000;
+  --btn-primary-fg: #ffffff;
+  --btn-secondary-bg: #ffffff;
+  --btn-secondary-hover: #f4f4f5;
+  --btn-secondary-border: #d4d4d8;
+  --btn-secondary-fg: #18181b;
+  --btn-ghost-fg: #52525b;
+  --btn-ghost-hover-bg: #f4f4f5;
+  --btn-danger-bg: #dc2626;
+  --btn-danger-fg: #ffffff;
+  --success: #16a34a;
+  --success-bg: #dcfce7;
+  --warning: #f59e0b;
+  --warning-bg: #fef3c7;
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+  --info: #3b82f6;
+  --info-bg: #dbeafe;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.03);
+  --shadow-md: 0 4px 8px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg: 0 12px 24px rgba(0,0,0,0.06), 0 4px 8px rgba(0,0,0,0.04);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --shadow-focus: 0 0 0 3px rgba(24,24,27,0.15);
+  --z-popover: 50;
+  --z-modal: 1000;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ========== 页面容器 ========== */
+.demo-container { max-width: 760px; margin: 0 auto; padding: 40px 32px; }
+
+/* ========== 标题区 ========== */
+.demo-header { margin-bottom: 24px; }
+.demo-header h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.demo-header p { font-size: 13px; color: var(--muted); }
+
+/* ========== 工具栏 ========== */
+.demo-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.demo-toolbar h2 { font-size: 15px; font-weight: 600; }
+.btn-add {
+  background: var(--btn-primary-bg); color: var(--btn-primary-fg);
+  border: none; border-radius: var(--radius-sm); padding: 7px 16px;
+  font-size: 13px; font-weight: 500; font-family: var(--font-sans);
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-add:hover { background: var(--btn-primary-hover); }
+
+/* ========== 外层：方案列表卡片 ========== */
+.plan-list { display: flex; flex-direction: column; gap: 10px; }
+.plan-card {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 16px 18px;
+  cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.plan-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+.plan-card-main { flex: 1; min-width: 0; }
+.plan-card-name { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.plan-card-meta { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--muted); }
+.plan-card-count { flex-shrink: 0; }
+.plan-card-models {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mount-badge {
+  flex-shrink: 0; font-size: 11px; padding: 3px 8px;
+  border-radius: var(--radius-xs); white-space: nowrap;
+}
+.mount-badge.mounted { background: var(--success-bg); color: var(--success); }
+.mount-badge.unmounted { background: var(--surface-2); color: var(--muted); }
+.chevron-right { color: var(--muted-2); font-size: 16px; flex-shrink: 0; }
+
+/* ========== 内层：详情头部 ========== */
+.detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.btn-back {
+  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--radius-sm);
+  color: var(--fg-2); font-size: 14px; cursor: pointer; transition: all 0.15s;
+}
+.btn-back:hover { background: var(--surface-2); }
+.detail-title { font-size: 15px; font-weight: 600; }
+.detail-actions { margin-left: auto; display: flex; gap: 8px; }
+.btn-cancel-detail {
+  background: var(--btn-secondary-bg); border: 1px solid var(--btn-secondary-border);
+  color: var(--btn-secondary-fg); border-radius: var(--radius-sm); padding: 7px 18px;
+  font-size: 13px; cursor: pointer; font-family: var(--font-sans); transition: background 0.15s;
+}
+.btn-cancel-detail:hover { background: var(--btn-secondary-hover); }
+.btn-save {
+  background: var(--btn-primary-bg); border: none; color: var(--btn-primary-fg);
+  border-radius: var(--radius-sm); padding: 7px 18px;
+  font-size: 13px; font-weight: 500; cursor: pointer; font-family: var(--font-sans);
+  transition: background 0.15s;
+}
+.btn-save:hover { background: var(--btn-primary-hover); }
+
+/* ========== Item 列表（详情内） ========== */
+.item-list { display: flex; flex-direction: column; gap: 8px; }
+.item-row {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 12px 16px;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.item-row.disabled { opacity: 0.55; }
+.item-row.drag-over { border-color: var(--fg); box-shadow: var(--shadow-focus); }
+.item-row.dragging { opacity: 0.35; }
+
+/* ----- 列：拖拽手柄 ----- */
+.col-handle {
+  cursor: grab; color: var(--muted-2); transition: color 0.15s;
+  flex-shrink: 0; display: flex; align-items: center;
+}
+.col-handle:hover { color: var(--muted); }
+.col-handle:active { cursor: grabbing; }
+
+/* ----- 列：序号 ----- */
+.col-order {
+  font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  width: 16px; text-align: center; flex-shrink: 0;
+}
+
+/* ----- 列：模型选择 ----- */
+.col-model { flex: 0 0 220px; min-width: 0; position: relative; }
+.model-trigger {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 12px;
+  cursor: pointer; transition: border-color 0.15s; overflow: hidden;
+}
+.model-trigger:hover { border-color: var(--border-strong); }
+.model-trigger.unset { color: var(--muted); }
+.model-trigger .model-label {
+  font-size: 13px; font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.model-trigger .chevron { margin-left: auto; color: var(--muted-2); font-size: 10px; flex-shrink: 0; }
+
+.model-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0;
+  background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  z-index: var(--z-popover); width: 280px; overflow: hidden;
+}
+.model-dropdown input {
+  width: 100%; background: var(--surface-2); border: none;
+  border-bottom: 1px solid var(--border); color: var(--fg);
+  font-size: 13px; padding: 9px 12px; outline: none; font-family: var(--font-sans);
+}
+.model-dropdown .model-option {
+  padding: 8px 12px; font-size: 13px; cursor: pointer;
+  transition: background 0.1s; display: flex; align-items: center;
+}
+.model-dropdown .model-option:hover { background: var(--surface-2); }
+.model-dropdown .model-option.selected { color: var(--fg); font-weight: 500; }
+.model-dropdown .model-option .opt-model { font-family: var(--font-mono); }
+.model-dropdown .model-option .opt-provider { font-size: 11px; color: var(--muted); margin-left: 8px; }
+
+/* ----- 列：时间限制 ----- */
+.col-time { flex-shrink: 0; position: relative; }
+.time-icon-btn {
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); cursor: pointer; transition: all 0.15s; color: var(--muted-2);
+}
+.time-icon-btn:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.time-icon-btn.active { border-color: var(--fg); background: var(--surface-2); color: var(--fg); }
+
+.time-tooltip {
+  position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  margin-bottom: 6px; background: var(--fg); color: var(--surface);
+  font-size: 11px; font-family: var(--font-mono); padding: 4px 8px;
+  border-radius: var(--radius-xs); white-space: nowrap; pointer-events: none;
+  z-index: var(--z-popover); opacity: 0; transition: opacity 0.15s;
+}
+.time-icon-btn:hover .time-tooltip { opacity: 1; }
+
+/* 时间弹层（不可拖动） */
+.time-popover {
+  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  z-index: var(--z-popover); width: 504px; padding: 14px;
+}
+.time-popover-header { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.hour-grid {
+  display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px;
+  user-select: none; -webkit-user-select: none;
+}
+/* 格子语义：浅灰=关闭（不可用），深色=开启（该小时可用） */
+.hour-cell {
+  height: 26px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 9px; border-radius: var(--radius-xs);
+  background: var(--surface-2); color: var(--muted);
+  cursor: pointer; transition: background 0.1s;
+}
+.hour-cell:hover { background: var(--surface-3); }
+.hour-cell.on {
+  background: var(--btn-primary-bg); color: var(--btn-primary-fg); font-weight: 500;
+}
+.time-popover-footer {
+  margin-top: 12px; display: flex; align-items: center; gap: 8px;
+}
+.footer-selected {
+  font-size: 11px; font-family: var(--font-mono); color: var(--fg-2);
+  margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.footer-selected.none { color: var(--muted-2); }
+.footer-error {
+  font-size: 11px; color: var(--danger); margin-right: auto;
+}
+.btn-clear-time {
+  background: none; border: 1px solid var(--border-2); color: var(--btn-ghost-fg);
+  border-radius: var(--radius-sm); padding: 5px 12px; font-size: 12px;
+  cursor: pointer; font-family: var(--font-sans); transition: all 0.15s;
+}
+.btn-clear-time:hover { border-color: var(--danger); color: var(--danger); }
+.btn-confirm-time {
+  background: var(--btn-primary-bg); border: none; color: var(--btn-primary-fg);
+  border-radius: var(--radius-sm); padding: 5px 16px; font-size: 12px; font-weight: 500;
+  cursor: pointer; font-family: var(--font-sans); transition: background 0.15s;
+}
+.btn-confirm-time:hover { background: var(--btn-primary-hover); }
+
+/* ----- 列：熔断红绿灯 ----- */
+.col-circuit { flex-shrink: 0; display: flex; align-items: center; }
+.circuit-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; padding: 3px 8px; border-radius: var(--radius-xs);
+}
+.circuit-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.circuit-badge.normal { background: var(--success-bg); color: var(--success); }
+.circuit-badge.normal .circuit-dot { background: var(--success); }
+.circuit-badge.abnormal { background: var(--danger-bg); color: var(--danger); }
+.circuit-badge.abnormal .circuit-dot { background: var(--danger); }
+.circuit-badge.observing { background: var(--warning-bg); color: #b45309; }
+.circuit-badge.observing .circuit-dot { background: var(--warning); }
+.circuit-countdown { font-family: var(--font-mono); font-size: 11px; }
+
+/* ----- 列：开关 ----- */
+.col-toggle { flex-shrink: 0; margin-left: auto; }
+.toggle-switch {
+  position: relative; display: inline-flex; height: 20px; width: 36px;
+  align-items: center; border-radius: 100px; border: none;
+  cursor: pointer; transition: background 0.15s; padding: 0;
+}
+.toggle-switch.on { background: var(--btn-primary-bg); }
+.toggle-switch.off { background: var(--border-2); }
+.toggle-knob {
+  display: inline-block; height: 16px; width: 16px; border-radius: 50%;
+  background: var(--surface); box-shadow: var(--shadow-xs); transition: transform 0.15s;
+}
+.toggle-switch.on .toggle-knob { transform: translateX(18px); }
+.toggle-switch.off .toggle-knob { transform: translateX(2px); }
+
+/* ----- 列：更多 ----- */
+.col-more { flex-shrink: 0; position: relative; }
+.btn-more {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: var(--radius-xs);
+  color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; transition: all 0.15s;
+}
+.btn-more:hover { background: var(--surface-2); color: var(--fg-2); }
+.more-menu {
+  position: absolute; right: 0; top: calc(100% + 4px);
+  background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  z-index: var(--z-popover); overflow: hidden; min-width: 120px;
+}
+.more-menu-item { padding: 8px 14px; font-size: 13px; cursor: pointer; transition: background 0.1s; }
+.more-menu-item:hover { background: var(--surface-2); }
+.more-menu-item.danger { color: var(--danger); }
+.more-menu-item.danger:hover { background: var(--danger-bg); }
+
+/* ========== 熔断高级参数区 ========== */
+.circuit-section {
+  margin-top: 20px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 16px 18px;
+}
+.circuit-section-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+.circuit-params { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.circuit-param label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.circuit-param input {
+  width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px;
+  font-family: var(--font-mono); color: var(--fg); outline: none;
+}
+.circuit-param input:focus { border-color: var(--fg); }
+.circuit-param .param-default { font-size: 10px; color: var(--muted-2); margin-top: 3px; }
+
+/* ========== 删除确认弹窗 ========== */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.3);
+  display: flex; align-items: center; justify-content: center; z-index: var(--z-modal);
+}
+.modal-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 24px; min-width: 360px; box-shadow: var(--shadow-lg);
+}
+.modal-box h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+.modal-box p { font-size: 13px; color: var(--fg-2); margin-bottom: 20px; line-height: 1.6; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.btn-cancel {
+  background: var(--btn-secondary-bg); border: 1px solid var(--btn-secondary-border);
+  color: var(--btn-secondary-fg); border-radius: var(--radius-sm); padding: 7px 18px;
+  font-size: 13px; cursor: pointer; font-family: var(--font-sans); transition: background 0.15s;
+}
+.btn-cancel:hover { background: var(--btn-secondary-hover); }
+.btn-confirm {
+  background: var(--btn-danger-bg); border: none; color: var(--btn-danger-fg);
+  border-radius: var(--radius-sm); padding: 7px 18px; font-size: 13px;
+  cursor: pointer; font-family: var(--font-sans); transition: opacity 0.15s;
+}
+.btn-confirm:hover { opacity: 0.88; }
+
+/* ========== 底部说明 ========== */
+.demo-notes {
+  margin-top: 32px; padding: 16px 20px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  font-size: 12px; color: var(--fg-2); line-height: 1.7;
+}
+.demo-notes strong { color: var(--fg); }
+.demo-notes ul { padding-left: 18px; }
+.demo-notes li { margin-bottom: 3px; }
+.demo-notes code {
+  font-family: var(--font-mono); background: var(--surface-2);
+  padding: 1px 5px; border-radius: var(--radius-xs); font-size: 11px;
+}
+</style>
+</head>
+<body>
+
+<div class="demo-container">
+  <!-- ===== 标题 ===== -->
+  <div class="demo-header">
+    <h1>模型路由方案库 v2</h1>
+    <p>两层结构：方案列表卡片 → 方案详情编辑 | 风格对齐 app light-only 银灰主题</p>
+  </div>
+
+  <!-- ===== 外层：方案列表 ===== -->
+  <div id="listView">
+    <div class="demo-toolbar">
+      <h2>路由方案</h2>
+      <button class="btn-add" onclick="addPlan()">+ 新建方案</button>
+    </div>
+    <div class="plan-list" id="planList"></div>
+  </div>
+
+  <!-- ===== 内层：方案详情 ===== -->
+  <div id="detailView" style="display:none;">
+    <div class="detail-header">
+      <button class="btn-back" onclick="cancelDetail()" title="返回方案列表">←</button>
+      <span class="detail-title" id="detailTitle"></span>
+      <div class="detail-actions">
+        <button class="btn-cancel-detail" onclick="cancelDetail()">取消</button>
+        <button class="btn-save" onclick="savePlan()">保存</button>
+      </div>
+    </div>
+    <div class="demo-toolbar" style="margin-bottom:12px;">
+      <h2 style="font-size:13px;font-weight:500;color:var(--fg-2);">降级顺序（拖拽排序，序号即优先级）</h2>
+      <button class="btn-add" onclick="addItem()">+ 添加条目</button>
+    </div>
+    <div class="item-list" id="itemList"></div>
+    <div class="circuit-section">
+      <div class="circuit-section-title">熔断参数（高级）</div>
+      <div class="circuit-params" id="circuitParams"></div>
+    </div>
+  </div>
+
+  <!-- ===== 删除确认弹窗 ===== -->
+  <div id="deleteModal" style="display:none;"></div>
+
+  <!-- ===== 说明 ===== -->
+  <div class="demo-notes">
+    <strong>交互说明</strong>
+    <ul>
+      <li><b>两层结构</b>：外层方案卡片（名称 / 模型数 / 模型名 / 挂载状态）→ 点击进入详情编辑，返回回列表</li>
+      <li><b>拖拽排序</b>：拖动行首 <code>⋮⋮</code> 手柄，松手后序号自动重排（手柄为唯一拖拽源，弹层内拖选不受影响）</li>
+      <li><b>时间限制</b>：灰时钟 = 全天可用；点开弹层默认全灰（未配置时段），选中变深 = 该小时可用；确定保存（1-23 格），清除定时回全天</li>
+      <li><b>弹层底部</b>：左侧实时显示已选时段（与 hover tooltip 同格式），右侧「清除定时」「确定」</li>
+      <li><b>熔断状态</b>：🟢 正常 / 🔴 异常带倒计时 / 🟡 观察中；熔断参数在详情底部高级区</li>
+      <li><b>开关</b>：黑色 = 启用；关闭后行半透明灰显</li>
+    </ul>
+    <br>
+    <strong>设计 token</strong>：CSS 变量内联自 <code>app/web/src/styles/tokens.css</code>（light-only 银灰 v0.0.165）。
+  </div>
+</div>
+
+<script>
+// ========== 数据模型 ==========
+let plans = [
+  {
+    id: 'plan-1', name: '默认降级策略', mounted: 'MySquad',
+    items: [
+      { id: 'i1', providerId: 'minimax', modelId: 'MiniMax-M1', enabled: true,
+        hours: [2,3,4,5,6,7,8], circuit: { presentation: 'normal', remainingSeconds: null } },
+      { id: 'i2', providerId: 'anthropic', modelId: 'claude-sonnet-4-20250514', enabled: true,
+        hours: [], circuit: { presentation: 'abnormal', remainingSeconds: 45 } },
+      { id: 'i3', providerId: 'openai', modelId: 'gpt-4o', enabled: true,
+        hours: [21,22,23], circuit: { presentation: 'observing', remainingSeconds: null } },
+      { id: 'i4', providerId: 'deepseek', modelId: 'deepseek-v4-flash', enabled: false,
+        hours: [], circuit: { presentation: 'normal', remainingSeconds: null } },
+    ],
+    circuit: { failureThreshold: 4, successThreshold: 2, timeoutSeconds: 60, errorRateThreshold: 0.6, minRequests: 10 },
+  },
+  {
+    id: 'plan-2', name: '夜间经济套餐', mounted: null,
+    items: [
+      { id: 'i5', providerId: 'deepseek', modelId: 'deepseek-v4-flash', enabled: true,
+        hours: [0,1,2,3,4,5,6,7], circuit: { presentation: 'normal', remainingSeconds: null } },
+      { id: 'i6', providerId: 'google', modelId: 'gemini-2.5-flash', enabled: true,
+        hours: [], circuit: { presentation: 'normal', remainingSeconds: null } },
+    ],
+    circuit: { failureThreshold: 4, successThreshold: 2, timeoutSeconds: 60, errorRateThreshold: 0.6, minRequests: 10 },
+  },
+];
+
+const MODEL_OPTIONS = [
+  { providerId: 'minimax', modelId: 'MiniMax-M1', provider: 'MiniMax' },
+  { providerId: 'anthropic', modelId: 'claude-sonnet-4-20250514', provider: 'Anthropic' },
+  { providerId: 'anthropic', modelId: 'claude-haiku-3-5', provider: 'Anthropic' },
+  { providerId: 'openai', modelId: 'gpt-4o', provider: 'OpenAI' },
+  { providerId: 'openai', modelId: 'gpt-4o-mini', provider: 'OpenAI' },
+  { providerId: 'deepseek', modelId: 'deepseek-v4-flash', provider: 'DeepSeek' },
+  { providerId: 'google', modelId: 'gemini-2.5-pro', provider: 'Google' },
+  { providerId: 'google', modelId: 'gemini-2.5-flash', provider: 'Google' },
+];
+
+// ========== 视图状态 ==========
+let view = 'list';            // 'list' | 'detail'
+let currentPlanIdx = null;    // 详情当前方案下标
+let detailSnapshot = null;    // 进详情时快照（取消恢复）
+let openModelIdx = null, openTimeIdx = null, openMoreIdx = null;
+let timeDraft = [];           // 弹层草稿（确定才写回，取消丢弃）
+let timeError = null;         // 确定校验错误提示
+
+function currentPlan() { return plans[currentPlanIdx]; }
+
+// ========== 工具函数 ==========
+function hoursToRanges(h) {
+  if (!h || h.length === 0) return null;
+  const sorted = [...h].sort((a,b) => a - b);
+  const ranges = [];
+  let start = sorted[0], prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev + 1) { prev = sorted[i]; continue; }
+    ranges.push([start, prev + 1]);
+    start = sorted[i]; prev = sorted[i];
+  }
+  ranges.push([start, prev + 1]);
+  return ranges;
+}
+function formatRanges(ranges) {
+  if (!ranges) return '';
+  return ranges.map(([s, e]) =>
+    String(s).padStart(2,'0') + ':00-' + String(e).padStart(2,'0') + ':00'
+  ).join(', ');
+}
+function fmtHours(h) { return formatRanges(hoursToRanges(h)); }
+function findModel(pid, mid) {
+  return MODEL_OPTIONS.find(m => m.providerId === pid && m.modelId === mid);
+}
+
+// ========== SVG 图标 ==========
+const GRIP_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+  <circle cx="5" cy="3" r="1.2"/><circle cx="5" cy="8" r="1.2"/><circle cx="5" cy="13" r="1.2"/>
+  <circle cx="11" cy="3" r="1.2"/><circle cx="11" cy="8" r="1.2"/><circle cx="11" cy="13" r="1.2"/>
+</svg>`;
+
+const CLOCK_SVG = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>
+</svg>`;
+
+const CIRCUIT_ICONS = {
+  normal:    '<span class="circuit-dot"></span>正常',
+  abnormal:  '<span class="circuit-dot"></span>异常',
+  observing: '<span class="circuit-dot"></span>观察中',
+};
+
+// ========== 外层：方案列表渲染 ==========
+function renderPlans() {
+  const el = document.getElementById('planList');
+  el.innerHTML = '';
+  plans.forEach((plan, idx) => {
+    const names = plan.items.map(it => it.modelId).filter(Boolean);
+    const card = document.createElement('div');
+    card.className = 'plan-card';
+    card.onclick = () => openDetail(idx);
+    card.innerHTML = `
+      <div class="plan-card-main">
+        <div class="plan-card-name">${plan.name}</div>
+        <div class="plan-card-meta">
+          <span class="plan-card-count">${plan.items.length} 个模型</span>
+          <span class="plan-card-models">${names.length ? names.join(' · ') : '—'}</span>
+        </div>
+      </div>
+      <span class="mount-badge ${plan.mounted ? 'mounted' : 'unmounted'}">${plan.mounted ? '已挂载到 ' + plan.mounted : '未挂载'}</span>
+      <span class="chevron-right">›</span>
+    `;
+    el.appendChild(card);
+  });
+}
+
+// ========== 两层视图切换 ==========
+function openDetail(idx) {
+  currentPlanIdx = idx;
+  detailSnapshot = JSON.parse(JSON.stringify(plans[idx])); // 取消恢复快照
+  view = 'detail';
+  closeAllPopovers();
+  switchView();
+}
+function cancelDetail() {
+  if (detailSnapshot && currentPlanIdx !== null) plans[currentPlanIdx] = detailSnapshot;
+  detailSnapshot = null; currentPlanIdx = null; view = 'list';
+  closeAllPopovers();
+  switchView();
+}
+function savePlan() {
+  detailSnapshot = null; currentPlanIdx = null; view = 'list';
+  closeAllPopovers();
+  switchView();
+}
+function switchView() {
+  document.getElementById('listView').style.display = view === 'list' ? '' : 'none';
+  document.getElementById('detailView').style.display = view === 'detail' ? '' : 'none';
+  if (view === 'list') renderPlans();
+  else renderDetail();
+}
+function addPlan() {
+  plans.push({
+    id: 'plan-' + Date.now(), name: '未命名方案', mounted: null, items: [],
+    circuit: { failureThreshold: 4, successThreshold: 2, timeoutSeconds: 60, errorRateThreshold: 0.6, minRequests: 10 },
+  });
+  openDetail(plans.length - 1);
+}
+
+// ========== 弹层管理 ==========
+function closeAllPopovers() {
+  openModelIdx = null; openTimeIdx = null; openMoreIdx = null;
+  timeDraft = []; timeError = null;
+}
+function toggleModelDropdown(idx, ev) {
+  ev.stopPropagation();
+  const wasOpen = openModelIdx === idx;
+  closeAllPopovers();
+  openModelIdx = wasOpen ? null : idx;
+  renderDetail();
+}
+function selectModel(idx, pid, mid) {
+  const it = currentPlan().items[idx];
+  it.providerId = pid; it.modelId = mid;
+  openModelIdx = null;
+  renderDetail();
+}
+function toggleEnabled(idx, ev) {
+  ev.stopPropagation();
+  currentPlan().items[idx].enabled = !currentPlan().items[idx].enabled;
+  renderDetail();
+}
+function toggleMore(idx, ev) {
+  ev.stopPropagation();
+  const wasOpen = openMoreIdx === idx;
+  closeAllPopovers();
+  openMoreIdx = wasOpen ? null : idx;
+  renderDetail();
+}
+
+// ========== 时间弹层（草稿：确定才写回） ==========
+function toggleTimePopover(idx, ev) {
+  ev.stopPropagation();
+  const wasOpen = openTimeIdx === idx;
+  closeAllPopovers();
+  if (!wasOpen) {
+    openTimeIdx = idx;
+    timeDraft = [...(currentPlan().items[idx].hours || [])]; // 打开默认全灰（无既有配置即空）
+  }
+  renderDetail();
+}
+let dragSelecting = false;
+let dragSelectMode = null;
+function hourMouseDown(hour, ev) {
+  if (ev) ev.preventDefault(); // 阻止原生拖拽/文字选中
+  dragSelecting = true;
+  dragSelectMode = timeDraft.includes(hour) ? 'remove' : 'add';
+  toggleDraftHour(hour);
+}
+function hourMouseEnter(hour) {
+  if (!dragSelecting) return;
+  const has = timeDraft.includes(hour);
+  if ((dragSelectMode === 'add' && !has) || (dragSelectMode === 'remove' && has)) toggleDraftHour(hour);
+}
+document.addEventListener('mouseup', () => { dragSelecting = false; });
+function toggleDraftHour(hour) {
+  const pos = timeDraft.indexOf(hour);
+  if (pos >= 0) timeDraft.splice(pos, 1);
+  else timeDraft.push(hour);
+  timeError = null;
+  refreshTimePopoverDOM();
+}
+// 直接更新弹层 DOM（不整页重渲，保证拖拽连续选流畅）
+function refreshTimePopoverDOM() {
+  const pop = document.querySelector('.time-popover');
+  if (!pop) return;
+  pop.querySelectorAll('.hour-cell').forEach(cell => {
+    cell.classList.toggle('on', timeDraft.includes(parseInt(cell.dataset.h, 10)));
+  });
+  const sel = pop.querySelector('.footer-selected');
+  if (sel) {
+    const t = fmtHours(timeDraft);
+    sel.textContent = t || '未选择';
+    sel.classList.toggle('none', !t);
+  }
+}
+function confirmTime(idx) {
+  const n = timeDraft.length;
+  if (n === 0) { timeError = '至少选择 1 个小时（全不选 = 无效）'; renderDetail(); return; }
+  if (n === 24) { timeError = '全选 = 全天可用，直接「清除定时」即可'; renderDetail(); return; }
+  currentPlan().items[idx].hours = [...timeDraft].sort((a, b) => a - b);
+  openTimeIdx = null; timeDraft = []; timeError = null;
+  renderDetail();
+}
+function clearTime(idx) {
+  currentPlan().items[idx].hours = []; // 全天可用，icon 变灰
+  openTimeIdx = null; timeDraft = []; timeError = null;
+  renderDetail();
+}
+
+// ========== 拖拽排序（拖拽源 = grip 手柄，行不可拖） ==========
+let dragFromIdx = null;
+function handleDragStart(e, idx) {
+  dragFromIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(idx));
+  setTimeout(() => {
+    const row = e.target.closest('.item-row');
+    if (row) row.classList.add('dragging');
+  }, 0);
+}
+function handleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.item-row.drag-over').forEach(r => r.classList.remove('drag-over'));
+  e.currentTarget.classList.add('drag-over');
+}
+function handleDrop(e, idx) {
+  e.preventDefault();
+  const from = dragFromIdx;
+  if (from === null || from === idx) return;
+  const arr = currentPlan().items;
+  const moved = arr.splice(from, 1)[0];
+  arr.splice(idx, 0, moved);
+  dragFromIdx = null;
+  closeAllPopovers();
+  renderDetail();
+}
+function handleDragEnd() {
+  document.querySelectorAll('.item-row.dragging, .item-row.drag-over').forEach(r => r.classList.remove('dragging', 'drag-over'));
+  dragFromIdx = null;
+}
+
+// ========== 新增 / 删除 ==========
+function addItem() {
+  currentPlan().items.push({
+    id: 'i-' + Date.now(), providerId: '', modelId: '',
+    enabled: true, hours: [], circuit: { presentation: 'normal', remainingSeconds: null },
+  });
+  renderDetail();
+}
+let pendingDeleteIdx = null;
+function requestDelete(idx) {
+  pendingDeleteIdx = idx;
+  closeAllPopovers();
+  renderDeleteModal();
+}
+function confirmDelete() {
+  if (pendingDeleteIdx !== null) currentPlan().items.splice(pendingDeleteIdx, 1);
+  pendingDeleteIdx = null;
+  hideDeleteModal();
+  renderDetail();
+}
+function cancelDelete() { pendingDeleteIdx = null; hideDeleteModal(); }
+function hideDeleteModal() {
+  const m = document.getElementById('deleteModal');
+  m.style.display = 'none'; m.innerHTML = '';
+}
+function renderDeleteModal() {
+  const item = currentPlan().items[pendingDeleteIdx];
+  const label = item.modelId || '未命名条目';
+  const m = document.getElementById('deleteModal');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cancelDelete()">
+      <div class="modal-box">
+        <h3>删除路由条目？</h3>
+        <p>确定删除 <strong style="color:var(--fg)">${label}</strong>（序号 ${pendingDeleteIdx + 1}）吗？此操作不可撤销。</p>
+        <div class="modal-actions">
+          <button class="btn-cancel" onclick="cancelDelete()">取消</button>
+          <button class="btn-confirm" onclick="confirmDelete()">删除</button>
+        </div>
+      </div>
+    </div>`;
+  m.style.display = 'block';
+}
+
+// ========== 熔断参数 ==========
+function renderCircuitParams() {
+  const c = currentPlan().circuit;
+  const defs = [
+    ['failureThreshold', '失败阈值', '默认 4'],
+    ['successThreshold', '成功阈值', '默认 2'],
+    ['timeoutSeconds', '熔断时长(秒)', '默认 60'],
+    ['errorRateThreshold', '错误率阈值', '默认 0.6'],
+    ['minRequests', '最小请求数', '默认 10'],
+  ];
+  document.getElementById('circuitParams').innerHTML = defs.map(([k, label, def]) => `
+    <div class="circuit-param">
+      <label>${label}</label>
+      <input type="text" value="${c[k]}" oninput="setCircuit('${k}', this.value)">
+      <div class="param-default">${def}</div>
+    </div>`).join('');
+}
+function setCircuit(k, v) {
+  const n = parseFloat(v);
+  if (!isNaN(n)) currentPlan().circuit[k] = n;
+}
+
+// ========== 详情渲染 ==========
+function renderDetail() {
+  const plan = currentPlan();
+  if (!plan) return;
+  document.getElementById('detailTitle').textContent = '方案：' + plan.name;
+  const list = document.getElementById('itemList');
+  list.innerHTML = '';
+
+  plan.items.forEach((item, idx) => {
+    const model = findModel(item.providerId, item.modelId);
+    const modelLabel = model ? model.modelId : (item.modelId || '');
+    const hasTime = item.hours && item.hours.length > 0;
+    const timeText = fmtHours(item.hours);
+    const draftText = timeDraft.length ? fmtHours(timeDraft) : '';
+
+    const row = document.createElement('div');
+    row.className = 'item-row' + (item.enabled ? '' : ' disabled');
+    // 拖拽源 = grip 手柄（行本身不可拖，防弹层内格子拖选把行/弹层拖走）
+    row.addEventListener('dragover', (e) => handleDragOver(e));
+    row.addEventListener('drop', (e) => handleDrop(e, idx));
+
+    row.innerHTML = `
+      <span class="col-handle">${GRIP_SVG}</span>
+      <span class="col-order">${idx + 1}</span>
+      <div class="col-model">
+        <div class="model-trigger ${modelLabel ? '' : 'unset'}" onclick="toggleModelDropdown(${idx}, event)">
+          <span class="model-label">${modelLabel || '选择模型…'}</span>
+          <span class="chevron">▾</span>
+        </div>
+        ${openModelIdx === idx ? `
+          <div class="model-dropdown" onclick="event.stopPropagation()">
+            <input type="text" placeholder="搜索模型…" oninput="filterModels(this.value)" autofocus>
+            <div id="modelOptions">${MODEL_OPTIONS.map(m => `
+              <div class="model-option ${m.modelId === modelLabel ? 'selected' : ''}"
+                   onclick="selectModel(${idx}, '${m.providerId}', '${m.modelId}')">
+                <span class="opt-model">${m.modelId}</span>
+                <span class="opt-provider">${m.provider}</span>
+              </div>`).join('')}
+            </div>
+          </div>` : ''}
+      </div>
+      <div class="col-time">
+        <div class="time-icon-btn ${hasTime ? 'active' : 'inactive'}" onclick="toggleTimePopover(${idx}, event)">
+          ${CLOCK_SVG}
+          ${hasTime ? `<div class="time-tooltip">${timeText}</div>` : ''}
+        </div>
+        ${openTimeIdx === idx ? `
+          <div class="time-popover" draggable="false"
+               ondragstart="event.stopPropagation();event.preventDefault()"
+               ondragover="event.stopPropagation();event.preventDefault()"
+               ondrop="event.stopPropagation();event.preventDefault()"
+               onmousedown="event.stopPropagation()"
+               onclick="event.stopPropagation()">
+            <div class="time-popover-header">选择可用小时（拖拽连续段 / 点击单格）· 深色 = 该小时可用</div>
+            <div class="hour-grid">
+              ${Array.from({length: 24}, (_, h) => `
+                <div class="hour-cell ${timeDraft.includes(h) ? 'on' : ''}" data-h="${h}"
+                     onmousedown="hourMouseDown(${h}, event)"
+                     onmouseenter="hourMouseEnter(${h})">${String(h).padStart(2,'0')}</div>`).join('')}
+            </div>
+            <div class="time-popover-footer">
+              ${timeError
+                ? `<span class="footer-error">${timeError}</span>`
+                : `<span class="footer-selected ${draftText ? '' : 'none'}">${draftText || '未选择'}</span>`}
+              <button class="btn-clear-time" onclick="clearTime(${idx})">清除定时</button>
+              <button class="btn-confirm-time" onclick="confirmTime(${idx})">确定</button>
+            </div>
+          </div>` : ''}
+      </div>
+      <div class="col-circuit" data-circuit="${item.id}">
+        <span class="circuit-badge ${item.circuit.presentation}">
+          ${CIRCUIT_ICONS[item.circuit.presentation]}
+          ${item.circuit.presentation === 'abnormal' && item.circuit.remainingSeconds
+            ? `<span class="circuit-countdown">${item.circuit.remainingSeconds}s</span>` : ''}
+        </span>
+      </div>
+      <div class="col-toggle">
+        <button class="toggle-switch ${item.enabled ? 'on' : 'off'}" onclick="toggleEnabled(${idx}, event)">
+          <span class="toggle-knob"></span>
+        </button>
+      </div>
+      <div class="col-more">
+        <button class="btn-more" onclick="toggleMore(${idx}, event)">⋯</button>
+        ${openMoreIdx === idx ? `
+          <div class="more-menu" onclick="event.stopPropagation()">
+            <div class="more-menu-item danger" onclick="requestDelete(${idx})">删除</div>
+          </div>` : ''}
+      </div>`;
+
+    // 拖拽源 = grip 手柄（对齐 DragHandle primitive：draggable 在手柄上）
+    const handle = row.querySelector('.col-handle');
+    handle.draggable = true;
+    handle.addEventListener('dragstart', (e) => handleDragStart(e, idx));
+    handle.addEventListener('dragend', handleDragEnd);
+
+    list.appendChild(row);
+  });
+
+  renderCircuitParams();
+}
+
+// ========== 模型搜索 ==========
+function filterModels(query) {
+  const q = query.toLowerCase();
+  const filtered = MODEL_OPTIONS.filter(m =>
+    m.modelId.toLowerCase().includes(q) || m.provider.toLowerCase().includes(q));
+  const container = document.getElementById('modelOptions');
+  if (!container) return;
+  const cur = currentPlan().items[openModelIdx];
+  const curModel = cur ? findModel(cur.providerId, cur.modelId) : null;
+  container.innerHTML = filtered.map(m => `
+    <div class="model-option ${curModel && m.modelId === curModel.modelId ? 'selected' : ''}"
+         onclick="selectModel(${openModelIdx}, '${m.providerId}', '${m.modelId}')">
+      <span class="opt-model">${m.modelId}</span>
+      <span class="opt-provider">${m.provider}</span>
+    </div>`).join('');
+}
+
+// ========== 倒计时 ==========
+setInterval(() => {
+  plans.forEach(p => p.items.forEach(it => {
+    if (it.circuit.presentation === 'abnormal' && it.circuit.remainingSeconds > 0) {
+      it.circuit.remainingSeconds--;
+      const el = document.querySelector(`[data-circuit="${it.id}"] .circuit-countdown`);
+      if (el) el.textContent = it.circuit.remainingSeconds + 's';
+    }
+  }));
+}, 1000);
+
+// ========== 点击空白关闭弹层（弹层内点击已 stopPropagation） ==========
+document.addEventListener('click', () => {
+  if (openModelIdx !== null || openTimeIdx !== null || openMoreIdx !== null) {
+    closeAllPopovers();  // 时间弹层未点确定 → 丢弃草稿（等同取消）
+    renderDetail();
+  }
+});
+
+// ========== 初始渲染 ==========
+switchView();
+</script>
+</body>
+</html>

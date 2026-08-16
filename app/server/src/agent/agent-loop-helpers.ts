@@ -53,6 +53,13 @@ export interface RunState {
    * run 结束销毁（不落盘，spec §6.3）。callLLMViaInvoker 读此字段构造 InvokeContext。
    */
   llmErrorState?: import('../llm/caller/llm_error_state').LlmErrorState;
+  /**
+   * [v0.0.361 §1.4] full reminder 开关（零持久化，run 结束销毁）。
+   *   - undefined 视同 true：run 开始新建 RunState 天然 full（injector full 分支消费后置 false，T3）
+   *   - summary.version 变化 → run-react-loop 置回 true（T1）
+   * 参考: specs/tech/version_logs/v0.0.361/change_plan.md §1.4
+   */
+  useFullReminder?: boolean;
 }
 
 /** 业务 Message → MessageInput（剥信封字段 createdAt/updatedAt/version） */

@@ -30,11 +30,13 @@
  *   - running 仅 state∈{running,interrupting} 为 true（suspended 排除 running，INV-2）
  *   - state 完整透传（caller 据 state==='suspended' 显「?」，state∈{running,interrupting} 显 spinner）
  */
+import { useRef } from 'react';
 import { useLifecycle } from '../../lib/use-lifecycle';
 import { applyKeyed, type KeyedMap } from '../../lib/lifecycle-shapes';
-import { markSessionRead } from '../../lib/chat-api';
+import { markSessionRead, listSessionsByBiz } from '../../lib/chat-api';
+import { getSseClient } from '../../lib/sse-singleton';
 import type { SessionMetaUpdateEvent } from '../../store/chat-slice';
-import type { SessionState } from '../chat-page/types';
+import type { Session, SessionState } from '../chat-page/types';
 
 /** [v0.0.101] 三张独立 ctx map（unread / running / state）合一为一个 ctx 对象，三字段各管一摊。 */
 interface StudioMetaCtx {
@@ -44,6 +46,12 @@ interface StudioMetaCtx {
   runningMap: KeyedMap<string, boolean>;
   /** [v0.0.101] key=sessionId，完整 SessionState（含 suspended，caller 据 state 显「?」） */
   stateMap: KeyedMap<string, SessionState>;
+  /**
+   * [v0.0.348] 第四张内部 map：sid→updatedAt（ISO string）。
+   * 竞态仲裁基准（change_plan 决策④）：GET 在途新帧先到时，GET 响应后到不得回退更新的帧。
+   * 内部专用，不外露到 StudioUnreadMeta 返回值（决策⑥）。
+   */
+  metaMap: KeyedMap<string, string>;
 }
 
 /** hook 暴露态：三张 map（unread/running/state）+ 乐观清除并通知后端的 action */
@@ -73,7 +81,54 @@ function emptyCtx(): StudioMetaCtx {
     unreadMap: {} as KeyedMap<string, boolean>,
     runningMap: {} as KeyedMap<string, boolean>,
     stateMap: {} as KeyedMap<string, SessionState>,
+    metaMap: {} as KeyedMap<string, string>,
   };
+}
+
+/**
+ * [v0.0.348] GET 响应合并进 ctx —— 重建语义 + updatedAt 仲裁（决策④）。
+ * 以 sessions 为基线重建三 map+metaMap；ctx 中 updatedAt 比响应条目新的 sid 保留原样
+ * （GET 在途新帧先到场景，GET 响应后到不得回退新帧）；响应缺失但 ctx 有更新帧的 sid 也保留
+ * （新建会话帧先到），陈旧幽灵条目由下次 GET 清理（重建语义天然丢弃）。
+ * 纯函数无副作用；running 由 isRunningState(state) 派生（不直读 running 字段）。
+ */
+function mergeFromSessions(ctx: StudioMetaCtx, sessions: Session[]): StudioMetaCtx {
+  const unreadMap: KeyedMap<string, boolean> = {};
+  const runningMap: KeyedMap<string, boolean> = {};
+  const stateMap: KeyedMap<string, SessionState> = {};
+  const metaMap: KeyedMap<string, string> = {};
+  for (const s of sessions) {
+    if (!s?.id) continue;
+    const state = s.state as SessionState | undefined;
+    unreadMap[s.id] = s.unread === true;
+    runningMap[s.id] = isRunningState(state);
+    if (state !== undefined) stateMap[s.id] = state;
+    if (s.updatedAt) metaMap[s.id] = s.updatedAt;
+    // 仲裁：ctx 中该 sid 帧比 GET 响应新 → 四张 map 全保留 ctx 值（不回退）
+    const ctxAt = ctx.metaMap[s.id];
+    if (ctxAt && s.updatedAt && ctxAt > s.updatedAt) {
+      const cu = ctx.unreadMap[s.id];
+      if (cu !== undefined) unreadMap[s.id] = cu;
+      const cr = ctx.runningMap[s.id];
+      if (cr !== undefined) runningMap[s.id] = cr;
+      const cs = ctx.stateMap[s.id];
+      if (cs !== undefined) stateMap[s.id] = cs;
+      metaMap[s.id] = ctxAt;
+    }
+  }
+  // 响应缺失但 ctx 有更新帧的 sid：保留（新建会话帧先到；GET 基线未含）
+  for (const sid of Object.keys(ctx.metaMap)) {
+    if (sid in metaMap) continue;
+    const cu = ctx.unreadMap[sid];
+    if (cu !== undefined) unreadMap[sid] = cu;
+    const cr = ctx.runningMap[sid];
+    if (cr !== undefined) runningMap[sid] = cr;
+    const cs = ctx.stateMap[sid];
+    if (cs !== undefined) stateMap[sid] = cs;
+    const cm = ctx.metaMap[sid];
+    if (cm !== undefined) metaMap[sid] = cm;
+  }
+  return { unreadMap, runningMap, stateMap, metaMap };
 }
 
 /**
@@ -82,13 +137,25 @@ function emptyCtx(): StudioMetaCtx {
  * 命令式乐观清经 mutate 写入——同一 ref-latest 写回路径，无 overlay 分裂。
  */
 export function useStudioUnreadMeta(): StudioUnreadMeta {
+  // [v0.0.348] hydrate ref：onResumed 注册一次，回调读 ref 保持最新引用（对齐 use-squad-meta reloadRef 先例）
+  const hydrateRef = useRef<() => void>(() => {});
+  // [v0.0.348] onResumed 退订句柄：存 ref 供 onDestroy 回收（严于 use-squad-meta 先例——防 singleton 残留回调）
+  const resumedUnsubRef = useRef<(() => void) | null>(null);
+
   const { ctx, mutate } = useLifecycle<StudioMetaCtx, SessionMetaUpdateEvent>({
-    // onInit：订阅 session_meta `_all`（api.subscribe 内部走 getSseClient() 单例，修 G1）；返空 ctx（三张空 map）
+    // onInit：同步订阅 session_meta `_all`（api.subscribe 内部走 getSseClient() 单例，修 G1）+ 返空 ctx；
+    //   [v0.0.348] 追加三层 hydration（决策①⑦⑧）：订阅声明保持同步，hydrate() fire-and-forget 不 await
+    //   （await 会阻塞 onInit resolve → establishSubscriptions 滞后 → 丢帧窗口扩大，⑦时序禁），onResumed 断连兜底
     onInit: (api) => {
       api.subscribe('session_meta', '_all');
+      void hydrateRef.current();
+      resumedUnsubRef.current = getSseClient().onResumed(() => {
+        void hydrateRef.current();
+      });
       return emptyCtx();
     },
     // onEvent：biz 反向守卫 + 三张 map 各自 applyKeyed(set)（幂等：同值返原引用跳渲染）；
+    //   [v0.0.348] 帧写入三 map 同步写 metaMap[sid]=data.updatedAt（决策④，竞态仲裁基准）；
     //   SSE 推同 sid 新值会覆盖 mutate 写的 false（unread）/ 旧 state（running/state）
     onEvent: (ctx, evt, _from) => {
       // pre-init 守卫（onEvent 仅在 onInit resolve 后触发，ctx 理论非 null；TS null-safety）
@@ -113,18 +180,39 @@ export function useStudioUnreadMeta(): StudioUnreadMeta {
         state !== undefined
           ? applyKeyed(ctx.stateMap, { op: 'set', key: sid, value: state })
           : ctx.stateMap;
-      // 三张 map 至少一张变才返新 ctx（否则返原 ctx 跳渲染，applyKeyed 已幂等保证）
+      // [v0.0.348] updatedAt 缺失时跳过 metaMap 写（防御）不跳过三 map（决策④）
+      const nextMeta =
+        typeof incoming.updatedAt === 'string' && incoming.updatedAt
+          ? applyKeyed(ctx.metaMap, { op: 'set', key: sid, value: incoming.updatedAt })
+          : ctx.metaMap;
+      // 四张 map 全部未变才返原 ctx（否则返新 ctx；applyKeyed 已幂等保证）
       if (
         nextUnread === ctx.unreadMap &&
         nextRunning === ctx.runningMap &&
-        nextState === ctx.stateMap
+        nextState === ctx.stateMap &&
+        nextMeta === ctx.metaMap
       ) {
         return ctx;
       }
-      return { unreadMap: nextUnread, runningMap: nextRunning, stateMap: nextState };
+      return { unreadMap: nextUnread, runningMap: nextRunning, stateMap: nextState, metaMap: nextMeta };
+    },
+    // [v0.0.348] onDestroy：回收 onResumed 退订句柄（unmount 后 singleton 无本 hook 残留回调；幂等）
+    onDestroy: () => {
+      resumedUnsubRef.current?.();
+      resumedUnsubRef.current = null;
     },
     deps: [],
   });
+
+  // [v0.0.348] hydrate：GET /session?biz=studio 全量基线 → mergeFromSessions 合并进 ctx（决策①③）。
+  //   经 mutate（=mutateCtx ref-latest 单路径）写回；失败 console.warn 静默（SSE 仍活，下次 onResumed 重试）。
+  hydrateRef.current = () => {
+    void listSessionsByBiz('studio')
+      .then((list) => {
+        mutate((c) => (c ? mergeFromSessions(c, list) : undefined));
+      })
+      .catch((e) => console.warn('[studio-meta] hydrate failed:', e));
+  };
 
   /** 点击 chat 节点 → 乐观清红点（mutate 命令式写 ctx，走 ref-latest 不重订阅）+ 后台 POST /read（CAS false） */
   const markReadAndClear = (sessionId: string) => {

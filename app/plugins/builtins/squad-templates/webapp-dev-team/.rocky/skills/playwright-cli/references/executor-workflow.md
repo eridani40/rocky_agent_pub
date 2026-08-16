@@ -1,5 +1,6 @@
 # ET Executor 工作流详参（新范式）
 
+> 注：本文 case 名 / 端口 / DATA_DIR 前缀均为示例，按项目变量区替换。
 > 本文是 `.rocky/agents/e2e-test-executor.md` 的「我怎么干」详参（agent 定义是「我是谁/铁律」）；
 > 与 `app-e2e-real-run.md`（用户层「能用」验收）互补，本文聚焦 **executor agent 层** 工作流。
 > 命令清单见 `SKILL.md`，本文不重复列举，只讲组合范式与陷阱规避。
@@ -11,8 +12,8 @@
 - **成因**：上次跑剩的 chromium / electron 进程残留 listener 占着端口；env.sh stop 已清 server/web，但 CDP 端口（9222-9299）和 browser 自身不在 env.sh 管辖
 - **绕行**：
   - 先 `playwright-cli list` 看现有 session，`playwright-cli close` / `close-all` 清旧 session
-  - CDP 端口残留：`lsof -ti:<cdp_port> | xargs kill` 后重 attach
-  - 始终带 case_id 命名 session：`playwright-cli -s=et-<case_id> open ...` 防串
+  - CDP 端口残留：`lsof -ti:${CDP_PORT} | xargs kill` 后重 attach
+  - 始终带 case_id 命名 session：`playwright-cli -s=et-${CASE_ID} open ...` 防串
 
 ### 坑 2：snapshot 看得到元素但 click 报「element not visible」
 - **现象**：snapshot 里明明有 `[ref=e5] button "Send"`，`playwright-cli click e5` 报 element not visible / not attached
@@ -30,38 +31,38 @@
   - 轮询 snapshot 直到目标元素出现（如 assistant message bubble）：`while ! playwright-cli --raw snapshot | grep -q 'assistant-message'; do sleep 2; done`
   - 长轮询用 Bash run_in_background + until-loop（harness 前台 sleep 被挡）
   - 设定有界等待（最长 60-90s，超时即标 small/blocking 交 orchestrator）
-  - 若 case 是 LLM-heavy，preflight 用 minimax（快）而非 deepseek-v4-pro（反思重）
+  - 若 case 是 LLM-heavy，preflight 用快模型而非重反思模型
 
 ### 坑 4：case 切换后状态串到上一个 case
 - **现象**：跑了 case A 再跑 case B，B 看到 A 的会话历史 / 设置
-- **成因**：后端 DATA_DIR env.sh 已隔离（每 case 不同 `~/.rocky_agent_et_<cid>`）；但 browser session 用了 persistent profile 会跨 case
+- **成因**：后端 DATA_DIR env.sh 已隔离（每 case 不同 `$HOME/.${APP_NAME}_et_${CASE_ID}`）；但 browser session 用了 persistent profile 会跨 case
 - **绕行**：
   - playwright-cli 默认 in-memory profile（每 `open` 即新 profile）— 默认安全
   - **禁用 `--persistent` / `--profile=`**（除非 case 显式要求保留登录态）
   - 跑完 `playwright-cli close` 关 session（env.sh 不会替你关 browser）
-  - session 名也带 case_id：`playwright-cli -s=et-<cid>` 防互串
+  - session 名也带 case_id：`playwright-cli -s=et-${CASE_ID}` 防互串
 
 ### 坑 5：packaged app / 系统 chrome 残留混淆
 - **现象**：attach CDP 后看到的页面不对（不是测试 case 的），或 `requests` 看到无关流量
-- **成因**：系统装了 packaged rocky_agent.app 没退出 / Chrome 开着 / 其他 worktree 的 electron 在跑，占了 9222 段
+- **成因**：系统 packaged app 没退出 / Chrome 开着 / 其他 worktree 的 electron 在跑，占了 9222 段
 - **绕行**：
-  - env.sh start 前已 `lsof -ti:<port>` 清孤儿，但若 attach 时另一个进程抢了同端口，需重新确认
+  - env.sh start 前已 `lsof -ti:${PORT}` 清孤儿，但若 attach 时另一个进程抢了同端口，需重新确认
   - 显式指定：`playwright-cli attach --cdp=http://127.0.0.1:<本 case 的 cdp_port>`（不靠默认发现）
-  - 检查：attach 后 `playwright-cli eval "location.href"` 应是 `http://127.0.0.1:<web_port>/...`；不是就是连错了
+  - 检查：attach 后 `playwright-cli eval "location.href"` 应是 `http://127.0.0.1:${WEB_PORT}/...`；不是就是连错了
 
 ## 2. 启停协议（env.sh 调用契约）
 
 | 角色 | 职责 | 命令 |
 |------|------|------|
-| orchestrator | env 生命周期 | `bash tests/e2e/env.sh start <cid> [--mode=headless\|electron]` / `stop <cid>` |
-| executor | 只 attach + 玩 | `playwright-cli open <web_url>` 或 `attach --cdp=<cdp_url>` |
+| orchestrator | env 生命周期 | `bash ${TESTS_DIR}/e2e/env.sh start ${CASE_ID} [--mode=headless\|electron]` / `stop ${CASE_ID}` |
+| executor | 只 attach + 玩 | `playwright-cli open ${WEB_URL}` 或 `attach --cdp=${CDP_URL}` |
 
 env.sh start 成功后 stdout 打印：
 ```
-[env.sh] OK: case=<cid> mode=<mode>
-[env.sh]   API_URL=http://127.0.0.1:<api_port>
-[env.sh]   WEB_URL=http://127.0.0.1:<web_port>
-[env.sh]   CDP_URL=http://127.0.0.1:<cdp_port>   # 仅 electron 模式
+[env.sh] OK: case=${CASE_ID} mode=${MODE}
+[env.sh]   API_URL=http://127.0.0.1:${API_PORT}
+[env.sh]   WEB_URL=http://127.0.0.1:${WEB_PORT}
+[env.sh]   CDP_URL=http://127.0.0.1:${CDP_PORT}   # 仅 electron 模式
 ```
 
 **端口段约定（与 AT 隔离）**：
@@ -69,14 +70,14 @@ env.sh start 成功后 stdout 打印：
 - ET WEB: 8900-8999
 - ET CDP: 9222-9299（仅 electron 模式分配）
 
-**每 case 独立 DATA_DIR**：`~/.rocky_agent_et_<case_id>`（env.sh stop 时删除）
+**每 case 独立 DATA_DIR**：`$HOME/.${APP_NAME}_et_${CASE_ID}`（env.sh stop 时删除）
 
 ## 3. case 执行流程（snapshot 导航 → action-key 优先定位 → 留证 4 件套）
 
 ```
 1. Read case.md                 # 拿操作目标（自然语言）
 2. Read app-guide §相关章节     # 拿 nav 路径（哪个 nav-* 进，怎么走）
-3. playwright-cli open <url>    # 或 attach --cdp=<url>
+3. playwright-cli open ${URL}    # 或 attach --cdp=${URL}
 4. snapshot 导航主信息源（见下「snapshot 双层」）
 
 # 一步一留证循环
@@ -96,16 +97,16 @@ env.sh start 成功后 stdout 打印：
 ### snapshot 双层（a11y 基线 + action-key 增强）
 
 playwright snapshot = a11y tree，**故意丢所有 `data-*`**（含 `data-action-key`）。
-v0.0.211 铺的 action-key 住 DOM 但对 executor 不可见 → v0.0.218 引入 eval 增强：
+action-key 住 DOM 但对 executor 不可见 → 引入 eval 增强：
 
 - **a11y 基线 snapshot**（`playwright-cli snapshot`）：role/name/state/ref，全节点覆盖
-- **action-key 增强 snapshot**（`bash tests/e2e/snapshot-with-keys.sh`）：基线上对交互节点
+- **action-key 增强 snapshot**（`bash ${TESTS_DIR}/e2e/snapshot-with-keys.sh`）：基线上对交互节点
   逐 ref `eval dataset.actionKey`，有值则在 `[ref=eN]` 后注入 `[action-key=X]`
 
 ```bash
-# 增强脚本：session/cwd 自动复用（脚本继承 executor 的 cwd + 透传 -s=<session>）
-# 默认输出 stdout；--out=<path> 落盘（推荐落盘作留证 snapshot.yml）
-bash tests/e2e/snapshot-with-keys.sh --session=et-<cid> --out=steps/NN-post/snapshot.yml
+# 增强脚本：session/cwd 自动复用（脚本继承 executor 的 cwd + 透传 -s=${SESSION}）
+# 默认输出 stdout；--out=${PATH} 落盘（推荐落盘作留证 snapshot.yml）
+bash ${TESTS_DIR}/e2e/snapshot-with-keys.sh --session=et-${CASE_ID} --out=steps/NN-post/snapshot.yml
 # 留证的 snapshot.yml 推荐用增强版（带 action-key，给人/executor 复核都更清晰）
 ```
 
@@ -113,16 +114,16 @@ bash tests/e2e/snapshot-with-keys.sh --session=et-<cid> --out=steps/NN-post/snap
 
 | 优先级 | 写法 | 何时用 |
 |--------|------|--------|
-| 1（首选） | `playwright-cli click e8`（ref）+ 在增强 snapshot 里验 `[action-key=X]` 锁定 | 增强后有 action-key 的节点（v0.0.211 铺了 157 处，覆盖 nav / 主操作按钮） |
+| 1（首选） | `playwright-cli click e8`（ref）+ 在增强 snapshot 里验 `[action-key=X]` 锁定 | 增强后有 action-key 的节点（覆盖 nav / 主操作按钮） |
 | 2（降级） | `playwright-cli click "getByText('发送')"` / `getByRole(...)` 文案 locator | 增强后仍无 action-key（未铺的节点 / 纯文本） |
 
 **为何 action-key 优先**：改文案 / 切 i18n / 改 ref 编号都不会断（机器标识稳定）；
 文案 locator 只在 action-key 缺位时兜底。case.md 无需标 action-key，executor 执行时
-自动从增强 snapshot 里挑（零成本设计，对齐 v0.0.211 req）。
+自动从增强 snapshot 里挑（零成本设计）。
 
 **简化版**（步数多时合并 pre/post）：
 ```
-每个动作直接落 steps/NN-<action>/ 四件套：
+每个动作直接落 steps/NN-${ACTION}/ 四件套：
   screenshot.png / dom.html / snapshot.yml（增强版，含 action-key）/ meta.json
 （动作前后页面对比在 meta.json.my_observation 描述）
 ```
@@ -131,7 +132,7 @@ bash tests/e2e/snapshot-with-keys.sh --session=et-<cid> --out=steps/NN-post/snap
 
 ### 目录结构
 ```
-states/v0.0.188/verify/e2e/<case_id>/
+${STATES_DIR}/v${VERSION}/verify/e2e/${CASE_ID}/
 ├── verdict.json              # 最终判定（case 级汇总）
 └── steps/
     ├── 01-open-app/
@@ -139,7 +140,7 @@ states/v0.0.188/verify/e2e/<case_id>/
     │   ├── dom.html
     │   ├── snapshot.yml
     │   └── meta.json
-    ├── 02-click-nav-playground/
+    ├── 02-click-nav-target/
     │   └── ... (4 files)
     └── 03-send-message/
         └── ... (4 files)
@@ -150,7 +151,7 @@ states/v0.0.188/verify/e2e/<case_id>/
 {
   "step": 1,
   "action": "open-app",
-  "intent": "进入 app，看 nav-rail 可见 + 默认进 Playground",
+  "intent": "进入 app，主导航可见 + 落到默认页",
   "playwright_cmd": "playwright-cli goto http://127.0.0.1:8900",
   "console_errors": [],
   "console_warnings": [],
@@ -167,14 +168,14 @@ states/v0.0.188/verify/e2e/<case_id>/
 ### verdict.json（case 级汇总，跑完写）
 ```json
 {
-  "case_id": "playground-send-message",
+  "case_id": "sample-feature-flow",
   "verdict": "pass",
   "steps_total": 4,
   "steps_pass": 4,
   "steps_small": 0,
   "steps_blocking": 0,
   "summary": "成功发消息并收到 LLM 回复，主路径贯通",
-  "key_artifacts": ["02-click-nav-playground/screenshot.png", "04-verify-reply/snapshot.yml"]
+  "key_artifacts": ["02-click-nav-target/screenshot.png", "04-verify-reply/snapshot.yml"]
 }
 ```
 
@@ -197,14 +198,14 @@ states/v0.0.188/verify/e2e/<case_id>/
 ### executor 常用范式
 ```bash
 # attach 到 env.sh 起的 browser
-playwright-cli open http://127.0.0.1:<web_port>             # headless 模式
-playwright-cli attach --cdp=http://127.0.0.1:<cdp_port>     # electron 模式
+playwright-cli open http://127.0.0.1:${WEB_PORT}             # headless 模式
+playwright-cli attach --cdp=http://127.0.0.1:${CDP_PORT}     # electron 模式
 
 # 导航 + 看
 playwright-cli snapshot                          # a11y 基线（role/name/state，丢 data-*）
 playwright-cli --raw snapshot > path/snapshot.yml  # 留证用（基线）
 # action-key 增强（推荐留证用，见 §3 snapshot 双层）：注入 [action-key=X] 到交互节点
-bash tests/e2e/snapshot-with-keys.sh --session=et-<cid> --out=path/snapshot.yml
+bash ${TESTS_DIR}/e2e/snapshot-with-keys.sh --session=et-${CASE_ID} --out=path/snapshot.yml
 playwright-cli find "Send"                       # 找元素
 playwright-cli find --regex "/Sign (in|up)/i"
 
@@ -219,8 +220,8 @@ playwright-cli eval "document.documentElement.outerHTML"  # → 重定向到 dom
 playwright-cli console                          # 看 console error/warning
 
 # 视觉辅助判定（按需，不强制）
-python3 tests/e2e/vision_check.py path/screenshot.png '[{"id":1,"check":"页面有 nav-rail"}]'
-python3 tests/e2e/vision_check.py compare path/impl.png path/design.png '[{"id":1,"dimension":"layout","check":"三栏布局"}]'
+python3 ${TESTS_DIR}/e2e/vision_check.py path/screenshot.png '[{"id":1,"check":"页面有 nav-rail"}]'
+python3 ${TESTS_DIR}/e2e/vision_check.py compare path/impl.png path/design.png '[{"id":1,"dimension":"layout","check":"三栏布局"}]'
 
 # 收尾
 playwright-cli close
@@ -235,7 +236,7 @@ playwright-cli close
 - **正解**：
   - 看页面状态用 `playwright-cli snapshot`（文本，可 grep）
   - 留证用 `playwright-cli screenshot --filename=...`（直接落盘，不 Read）
-  - 真需要视觉判定（视觉保真 compare）按需 `python3 tests/e2e/vision_check.py ...`，脚本吐 JSON，你读 JSON
+  - 真需要视觉判定（视觉保真 compare）按需 `python3 ${TESTS_DIR}/e2e/vision_check.py ...`，脚本吐 JSON，你读 JSON
 
 **理由**：snapshot 是结构化的（ref / role / text），可机器对比；截图靠人眼 / vision model，慢且 flaky。功能验证一律走 snapshot + dom 断言，视觉保真才上 vision_check。
 
@@ -246,7 +247,7 @@ playwright-cli close
 | 本文（executor-workflow.md） | 工作流详参（我怎么干） | 详参：环境坑/留证/判定/命令范式 |
 | `app-e2e-real-run.md` | 用户层「能用」验收方法 | 互补（用户层 vs agent 层） |
 | `SKILL.md` | playwright-cli 命令清单 | 命令速查 |
-| `specs/ui/overall/00-app-guide.md` | app 导航底图 | 操作路径权威源 |
-| `tests/e2e/<case_id>/case.md` | 单 case 操作目标 | 你跑这个 |
-| `tests/e2e/env.sh` | env 启停 | orchestrator 管，你不直接调 |
-| `tests/e2e/vision_check.py` | 视觉辅助判定脚本 | 按需 Bash 调用 |
+| `${SPECS_DIR}/ui/overall/00-app-guide.md` | app 导航底图 | 操作路径权威源 |
+| `${TESTS_DIR}/e2e/${CASE_ID}/case.md` | 单 case 操作目标 | 你跑这个 |
+| `${TESTS_DIR}/e2e/env.sh` | env 启停 | orchestrator 管，你不直接调 |
+| `${TESTS_DIR}/e2e/vision_check.py` | 视觉辅助判定脚本 | 按需 Bash 调用 |

@@ -3,25 +3,25 @@ type: interface
 title: Squad Reminder Provider 详细
 priority: P1
 status: active
-updated: 2026-08-07
+updated: 2026-08-15
 since: v0.0.33.3
 related: [[P1]panorama_builtin.md, [P1]data_model.md, [P1]prompt_sections.md]
 ---
 
-# Squad Reminder Provider 详细（squad_workspace / squad_agents_status / squad_task）
+# Squad Reminder Provider 详细（squad_agents_status / squad_task）
 
-> 定位：定义 `squad_workspace`（静态路径型，v0.0.111）+ `squad_agents_status`（[v0.0.273] 统一全员状态块，取代旧 `squad_team_status` + `reachable_agents`）+ `squad_task`（[v0.0.240] 活跃 task 列表）三个 squad `system_reminder` provider 的**产出格式 + 角色 filter + 数据源**，以及 ReminderCtx 扩展 + 角色注入矩阵。
+> 定位：定义 `squad_agents_status`（[v0.0.273] 统一全员状态块；v0.0.361 拆半——名单归 team_roster，本 provider 只出状态行）+ `squad_task`（[v0.0.240] 活跃 task 列表）两个 squad `system_reminder` provider 的**产出格式 + 角色 filter + 数据源**，以及 ReminderCtx 扩展 + 角色注入矩阵。`squad_workspace` 已于 v0.0.361 退役（§2）。
 > 参考：`reqs/v0.0.33.3/req7`（reminder 机制）/ `req8`（统一机制）/ `req11`（provider 详细，权威）；`../agent/context/[P0]system_reminder.md`（system_reminder EP + SystemReminder 契约）；`[P1]prompt_sections.md`（贡献点总表 + 固定/动态归属）；`[P1]panorama_builtin.md §5`（task reminder provider 挂载点）。
-> 哲学：动态上下文不进 system prompt（破 cache），由 reminder 在 ingest 时流式注入；这三个 provider 都是**静态/瞬时值**型——不走 shouldProduce 变化检测，每轮直接产出，交 dedup reducer 收敛（不引 `lastWriteMessageId`）。
+> 哲学：动态上下文不进 system prompt（破 cache），由 reminder 在 ingest 时流式注入；两个 provider 都是**瞬时值**型——不走 shouldProduce 变化检测，每轮直接产出，交 dedup reducer 收敛（不引 `lastWriteMessageId`）；v0.0.361 起增量轮由 reminder queue 承接状态变化行。
 
 ---
 
 ## 0. 定位
 
-- 3 个 squad provider（EP=`system_reminder`，注册 `rocky_context/plugin.json`）：`squad_workspace` / `squad_agents_status` / `squad_task`。
+- 2 个 squad provider（EP=`system_reminder`，注册 `rocky_context/plugin.json`）：`squad_agents_status`（动态半）/ `squad_task`；`squad_workspace` 已退役（§2——静态半迁 system prompt `session_states` mapper）。
 - 每个 provider 按 `config.sessionType` 决策产出。
 - 复用现有 system_reminder ingest 链（req7 §3）：`contextEngine.ingest` → `applyIngestPipeline` → `system_reminder_injector`（priority 400）跑 provider 链 → 聚合 reminder 追加 text block 到末尾触发 message（`metadata.isSystemReminder=true`）→ `appendMessages` 落库（写一次冻结进 transcript，assemble 只读回）。
-- **数据源**：`squad_workspace` 用 `config.squadId + config.dataDir` 推路径；`squad_agents_status` 用 `squadContext`（`listMembers` + `isSessionRunning` + `getSquad`）。都不读 okf md、不依赖 store workitem。
+- **数据源**：`squad_agents_status` 用 `squadContext`（`listMembers` + `isSessionRunning` + `getSquad`）；`squad_task` 用 `squadContext.listActiveTasks`。都不读 okf md、不依赖 store workitem。
 - **不走 shouldProduce 变化检测**：路径静态 / 状态是运行时瞬时值——每轮直接产出，dedup reducer 收敛（不引 `lastWriteMessageId`，不扫 transcript）。
 
 > 注：squad 此前还有 `squad_charter` / `task` / `squad_board` 三个数据变化型 provider（走 shouldProduce），已随 charter/task/goal/requirement/board 工作项链路于 v0.0.237 一并移除。`todo` reminder provider 是 session 级独立 provider（非 squad 范畴，见 `specs/api/overall/20-todo.md`）。
@@ -49,21 +49,16 @@ interface ReminderCtx {
 
 ---
 
-## 2. `squad_workspace` provider（v0.0.111，leader+mate 团队盘根路径）
+## 2. `squad_workspace` provider（v0.0.111 引入，v0.0.361 退役）
 
-- **角色 filter**：leader + mate → 产出；SquadChat / subagent / standalone → 不产出（`readSessionType(ctx) ∉ {leader, mate}` 返 `[]`；无 squadId 天然返空）。
-- **数据源**：`config.squadId`（leader/mate 必有）+ `config.dataDir`（session 通用）→ `path.join(dataDir, 'squads', squadId)` = 团队盘根（等价 `squad-store.ts.squadRootDir`）。任一缺 → `[]`。
-- **产出格式**：单条 `[{ id:'squad_workspace', tier:'info', content:'Team workspace: <团队根>' }]`，配合 system prompt「团队盘」outputs/reports/交付/temp 规范（`squad_workspace.md`）。
-- **与个人 workspace 并存**：个人盘由通用 `reminder/workspace.ts`（个人 ws provider）继续注入，两条**各司其职**——`squad_workspace.ts` 只管团队根，**不塞进 workspace.ts**（单一职责）。
-- **不做变化检测/去重**：路径静态（不随 store 变），每轮直接产出，交 dedup reducer 收敛。
-- 代码：`app/plugins/builtins/rocky_context/reminder/squad_workspace.ts`（`SquadWorkspaceReminderProvider` default export，构造器 `(implId, cfg)`）+ `plugin.json` `system_reminder` EP 注册（`implId=squad_workspace`，i18n key `__MSG_...squad_workspace.description__`）。
+**已退役**：静态路径型内容不再走 reminder——逻辑平移进 system prompt `session_states` mapper（`app/plugins/builtins/rocky_context/prompt/session_states.ts` 的「团队盘」小节，仅 squad session 输出；路径推算 `path.join(dataDir, 'squads', squadId)` 语义不变）。五链同步：plugin.json EP 条目删除 + scopes yaml 清残留 + i18n 双 locale key 删除 + 计数断言修正。同批退役通用 `env` / `workspace` provider（time 平移 injector 时间固定段，见 `../../agent/context/[P0]system_reminder.md §3`）。
 
 ---
 
 ## 3. `squad_agents_status` provider（[v0.0.273] 统一全员状态块，取代 `squad_team_status` + `reachable_agents`）
 
 - **角色 filter**（`readSessionType` 分派，R7）：squad / leader / mate → 产出统一块；subagent → `[parent]`（可达性拓扑保持，reachable 语义迁移）；standalone（`!sessionType`）→ `[]`。
-- **职责**：统一全员状态块 `[squad:agents]`——**三合一**：agent 列表（可达性 name + sessionId）+ running/idle 状态 + presence 标记（`member.currentWork`）。取代旧 `reachable_agents`（有可达性无状态）+ `squad_team_status`（只列 running）两个 provider（老板 2026-08-07 拍板「统一设计」）。
+- **职责**：统一全员状态块 `[squad:agents]`——**动态半**（v0.0.361 拆半）：running/idle 状态 + presence 标记（`member.currentWork`），行内仅保留 name 作锚点；成员名单（name+role+sessionId）归 system prompt `team_roster` mapper 承载（a2a 寻址 sessionId 由 roster 提供，不丢）。取代旧 `reachable_agents`（有可达性无状态）+ `squad_team_status`（只列 running）两个 provider（老板 2026-08-07 拍板「统一设计」）。
 - **全员列出（核心修复）**：逐 member 查 running 但**不过滤**——running + idle 都保留（旧 `squad_team_status` L66 `if (!running) continue` 跳过非 running 已删）。**presence 有但 run 不在跑 = 卡住可见**（老板核心诉求）。
 - **数据源**：`squadContext`（`listMembers` 返回 MemberEntity 含 name/role/sessionId/currentWork/state + `isSessionRunning` + `getSquad` 取 enableGroupChat/squadChatSessionId）；subagent 读 `config.agentToolContext.parent`（canonical AgentRef）。provide 为 async（isSessionRunning await）。
 - **分派表**（可达性派生表迁移）：
@@ -75,11 +70,11 @@ interface ReminderCtx {
   standalone（!sessionType）→ []
   ```
 - **关键保留**：**benched 过滤**（`state !== 'benched'`；state 缺失按 deployed 兼容旧数据，readMembers 单点过滤）；**270 enableGroupChat 门控**（`enableGroupChat !== false`，undefined=旧 record=开；**[v0.0.340] 新建团队默认 false=关**；SquadChat 行随门控显隐，成员私聊不受影响）；**mate 对端可达性不丢**（name + sessionId 仍输出，a2a 语义不变）。
-- **产出格式**（成员行 R8）：
+- **产出格式**（成员行 = name 锚点 + 动态状态；role/sessionId 归 team_roster 不重复）：
   ```
   [squad:agents] 团队当前状态：
   - SquadChat (squad, sessionId: {sid}) · 群聊        ← [v0.0.270] enableGroupChat=false 或空 squad 时不渲染
-  - {name} ({role}, sessionId: {sid}) · {running|idle} · presence: {text|(无 presence)}
+  - {name} · {running|idle} · presence: {text|(无 presence)}
   - ...
   （无可见成员时：「当前无成员」——连 SquadChat 行也不发，空 squad 无成员可协作）
   ```
@@ -126,9 +121,10 @@ interface ReminderCtx {
 
 | provider | leader | mate | SquadChat | subagent |
 |---|---|---|---|---|
-| `squad_workspace`（v0.0.111） | 团队盘根路径 | 团队盘根路径 | — | — |
-| `squad_agents_status`（[v0.0.273]，取代 squad_team_status + reachable_agents） | 全员（SquadChat 门控）+ running/idle + presence | 全员（SquadChat 门控 + 不含自己）+ running/idle + presence | 全员（不含 SquadChat 自身） | `[parent]` |
+| `squad_agents_status`（动态半） | 全员状态行（SquadChat 门控）+ running/idle + presence | 全员状态行（门控 + 不含自己）+ running/idle + presence | 全员状态行（不含 SquadChat 自身） | `[parent]` |
 | `squad_task`（[v0.0.240]） | 全队活跃 task | owner∪依赖我的 task | — | — |
+
+> `squad_workspace` 行已删（v0.0.361 退役，§2）——团队盘路径归 system prompt `session_states` mapper。
 
 ---
 
@@ -140,10 +136,24 @@ interface ReminderCtx {
 
 ---
 
-## 7. injector 触发扩展（req7 §8.4）
+## 7. injector 触发（双模式）
 
-- 现 injector 只对末尾 `role==='user'` 追加（`system_reminder_injector.ts`）。
-- squad a2a message（`source==='agent'`）也需触发 reminder → **扩条件**：末尾 message `role==='user' || source==='agent'` 都跑 provider 链。
+- 触发条件（v0.0.274 放宽后现状）：末尾 message `role==='user' || role==='tool' || sender.source==='agent'`（a2a）都跑 provider 链；assistant/system 不触发。
+- v0.0.361 双模式：full 轮（run 首轮/summary 重建后）跑动态 provider 链全量 + `queueClearAll`；incremental 轮只出 injector 时间固定段 + `queueDrain` 增量行（`../../agent/context/[P0]system_reminder.md §4`）。
+
+## 7b. reminder queue 写入接线（squad-states-fanout，v0.0.361）
+
+增量轮的 reminder 变化行由**写侧主动投递**进 per-session reminder queue（`app/server/src/agent/system-reminder-queue.ts:ReminderQueueStore`，`{DATA_DIR}/sessions/{sid}/reminder_queue.json`；同 key 重写删旧追加尾，drain 拿锁按序读+清空）。fanout 模块 `app/server/src/squad/squad-states-fanout.ts` 三入口：
+
+| 入口 | key | value（已渲染行） | audience | 写点代码 |
+|---|---|---|---|---|
+| `fanoutStates`（presence 工具） | `presence:{memberId}` | `[squad:agents] {name} presence: {text}` / `presence 已清除` | 全员 + SquadChat（逐 session 失败隔离） | `agent/tools/presence-tool.ts` |
+| `notifyMemberState`（state machine） | `member_state:{sessionId}` | `[squad:agents] {name} → {state}` | 全员 + SquadChat | `agent/session-state-machine.ts` |
+| `notifyTaskTransition`（task transition） | `task:{taskId}` | `[task] {id}「{title}」→ {中文状态}（owner: {ownerName}）` | leader ∪ owner ∪ dependencies[].owner（写侧过滤，不含 squadChat） | `squad/panorama/tool/panorama-tool-data-actions.ts` + `squad/panorama/http/panorama-routes-impl.ts`（两入口同调，不重复实现） |
+
+- **todo 工具**（session 级，非 fanout）：`agent/tools/todo-tool.ts` 写 `todo:{itemId}`，仅本 session。
+- **失败语义**：逐 session `.catch()` 隔离 + 外层 try/catch 静默——reminder 是 best-effort 通知，绝不阻断工具返回/状态迁移。
+- queue 实例 per-call new（write 临界区纯同步 JS，多实例不交错）；消费侧 injector `queueDrain` 拼进 incremental 轮 reminder，full 轮 `queueClearAll` 作废 pending。
 
 ---
 
@@ -151,9 +161,11 @@ interface ReminderCtx {
 
 | 零件 | 归属 |
 |---|---|
-| 3 squad provider（squad_workspace 静态路径 + squad_agents_status 统一全员状态块 + squad_task 活跃 task 列表）产出格式 + 角色 filter + ReminderCtx 扩展 + 角色矩阵 | 本文 ✅ |
+| 2 squad provider（squad_agents_status 动态半 + squad_task 活跃 task 列表）产出格式 + 角色 filter + ReminderCtx 扩展 + 角色矩阵 + queue 写入接线（§7b） | 本文 ✅ |
+| session states 静态段（env / workspace / 团队盘路径三小节，承接退役的 squad_workspace 静态半） | `../../agent/context/[P0]system_prompt.md §4`（`session_states` mapper 行） |
+| reminder queue store（reminder_queue.json 读写锁语义）+ injector 双模式消费 | `../../agent/context/[P0]system_reminder.md §4` |
 | task system entity（task entity 字段/状态机/view 定义 + system 标记 + lazy migration + 自动依赖 hook） | `[P1]panorama_builtin.md` |
-| 个人 workspace（个人盘根路径，非 squad） | `reminder/workspace.ts`（通用 provider，与 squad_workspace 并存） |
+| 个人 workspace 路径（个人盘根，非 squad；通用 `workspace` provider 已随 v0.0.361 退役） | `../../agent/context/[P0]system_prompt.md §4`（`session_states` mapper 工作目录小节） |
 | todo reminder provider（session 级 todos，非 squad 范畴） | `specs/api/overall/20-todo.md` |
 | 固定 vs 动态归属 + 贡献点总表 + 生命周期 | `[P1]prompt_sections.md` |
 | SystemReminder / system_reminder EP / ReminderCtx 基础契约 | `../agent/context/[P0]system_reminder.md` |

@@ -8,7 +8,7 @@
 
 ### M1：formatMateExitNotify 退出原因行条件追加（commit 70beab2e7）
 
-- `app/server/src/agent/mate-exit-notify.ts:96-103`：`退出原因: ${input.stopReason}` 改为条件分支——`stopReason === 'interrupted'` → `退出原因: interrupted（由用户中断，如需要可向用户查证）`；其他 6 种 reason（no_tool_call/no_new_messages/max_iterations/doom_loop/error/tool_pending）输出逐字节不变。
+- `app/server/src/agent/mate-exit-notify.ts:96-103`：`退出原因: ${input.stopReason}` 改为条件分支——`stopReason === 'interrupted'` → `退出原因: interrupted（由用户主动中断，无需处理）`；其他 6 种 reason（no_tool_call/no_new_messages/max_iterations/doom_loop/error/tool_pending）输出逐字节不变。
 - 纯函数签名不变；不改 stopReason 值本身（仍原样输出枚举值）；不动 run-lifecycle-port.ts / agent-event-types.ts / 投递流程。
 
 ## 实现核对（method 级）
@@ -34,6 +34,6 @@
 
 ## 文档同步
 
-- **`specs/tech/agent/agent_interface_and_loop/[P0]agent_loop_unified.md`**：§3.2 mateExitNotify 装配段通知内容补「退出原因行（`[v0.0.338]` 条件追加）」——interrupted → 「退出原因: interrupted（由用户中断，如需要可向用户查证）」，其余 6 种逐字节不变。
+- **`specs/tech/agent/agent_interface_and_loop/[P0]agent_loop_unified.md`**：§3.2 mateExitNotify 装配段通知内容补「退出原因行（`[v0.0.338]` 条件追加）」——interrupted → 「退出原因: interrupted（由用户主动中断，无需处理）」，其余 6 种逐字节不变。
 - **`specs/tech/agent/agent_interface_and_loop/log.md`**：v0.0.338 变更记录条目。
 - 注：`specs/prd/version_logs/v0.0.273.mate_exit_notify/prd.md` 为历史版本快照，不更新（惯例保留当时现状）。

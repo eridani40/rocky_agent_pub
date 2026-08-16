@@ -20,9 +20,9 @@ squad = **一个自主协作单元**——在 multi_agent 地基之上，加「�
 | **todo** | mate/leader 的轻量任务清单（独立 TodoStore，session 级 todos.json，不耦合 squad entity） |
 | **SquadChat** | 哑路由 session（`type=squad`），reactive only，`<EOS>` 静默结束当前 run |
 | **enableGroupChat** | [v0.0.270] 群聊可见性开关（`squad.enableGroupChat: boolean`）：**[v0.0.340] 新建团队默认 false=关**；存量 squad 无字段读 `?? true`=开（不受影响）。false → squad_agents_status 不渲染 SquadChat 行 + UI 群聊入口隐藏 + `send_message('squadchat')` 门控返 null（全私聊语义）；squad 实体/session 恒存在，仅控可见性。schema `required:false` + 读取 `?? true` 兜底。权威 `data_model.md §1.1` + `../multi_agent/[P1]a2a_protocol.md §3` |
-| **reminder** | 动态上下文 provider（todo / squad_agents_status / squad_workspace / squad_task），`shouldProduce` 去重 + `lastWriteMessageId` 变化检测 |
+| **reminder** | 动态上下文 provider（todo / squad_agents_status 动态半 / squad_task），瞬时值每轮产出交 dedup 收敛；增量变化行经 reminder queue 写侧投递（v0.0.361，`squad_reminder_providers.md §7b`）；`squad_workspace` 已退役（静态半迁 `session_states` mapper） |
 | **scheduler** | [v0.0.116] squad 级统一心跳——一 squad 一 job，到点整队按 scope 逐成员 `deliverTo` 固定心跳提示词（proactive）；配置 `squad.heartbeatConfig`（权威 `../scheduling/`） |
-| **presence** | [v0.0.116] 成员当前工作标记（`member.currentWork` 自由文本，`presence` 工具 set/clear）；squad_agents_status 统一块展示 running/idle + presence（[v0.0.273] 三合一，取代旧 leader-only team-status） |
+| **presence** | [v0.0.116] 成员当前工作标记（`member.currentWork` 自由文本，`presence` 工具 set/clear）；squad_agents_status 展示 running/idle + presence（[v0.0.361] 拆半：状态行动态半 + 名单归 team_roster）；presence 变化经 reminder queue 扇出全员（`squad-states-fanout`） |
 | **panorama** | [v0.0.189] 业务全景（Panorama）——squad leader 用 DSL 搭建的业务数据看板（kanban/table/bar_chart）；DSL 驱动四层校验 + 迁移 + 泛化实体 store（不建 SchemaDef）；agent 工具 `panorama(action)` 单工具 8 action。[v0.0.243] task 普通 entity + system 标记：task 落盘进 squad schema（和 book 平级，get_schema 可见），system:true 标记 + lazy migration（ensureSystemEntities chokepoint）+ 自动依赖 transition + reminder 注入（不造专用工具）|
 
 ## ② 边界

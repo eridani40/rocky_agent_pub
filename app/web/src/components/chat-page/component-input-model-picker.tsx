@@ -36,6 +36,8 @@ interface InputModelPickerProps {
   defaultModelProviderId?: string;
   /** defaultA 派生（playground 走 default_models.chat）；undefined=父级未传→内部自拉；null=显式无默认 */
   defaultModel?: ModelSelection | null;
+  /** [v0.0.357] 该 kind 挂载的默认方案（chrome.defaultRoutingPlan 透传）；null/undefined = 无方案维度默认 */
+  defaultPlan?: { planId: string; planName: string } | null;
   /** session running 时 disabled（仍可见，不响应点击） */
   disabled?: boolean;
   /** 选中变更上抛（顶部「a(默认)」→ {providerId:'',modelId:'default'}；列表 a → 具体 ModelRef） */
@@ -73,6 +75,7 @@ export function InputModelPicker({
   defaultModelId,
   defaultModelProviderId,
   defaultModel,
+  defaultPlan,
   disabled,
   onChange,
 }: InputModelPickerProps) {
@@ -156,15 +159,22 @@ export function InputModelPicker({
   const hasDefault = effectiveDefault !== null && effectiveDefault !== undefined;
   void internalLoaded;
 
+  // [v0.0.357] 默认语义双维度：默认模型 or 挂载方案（T6 互斥，方案优先口径与 resolve 一致）
+  const hasPlan = defaultPlan != null;
+  const hasDefaultRoute = hasDefault || hasPlan;
+
   const isReservedDefault = model?.modelId === 'default';
-  const isUnconfigured = isReservedDefault ? !hasDefault : !model;
+  const isUnconfigured = isReservedDefault ? !hasDefaultRoute : !model;
   const triggerTone = isUnconfigured ? 'text-muted' : 'text-fg';
 
-  // hover 预览单条内容（spec §3 三态）
+  // hover 预览单条内容（spec §3 四态；方案优先于「未配置」）
   let previewLabel: string;
   let previewSelected: boolean;
   if (isReservedDefault && hasDefault) {
     previewLabel = `${formatModelDisplay(effectiveDefault, providers)}（默认）`;
+    previewSelected = true;
+  } else if (isReservedDefault && hasPlan) {
+    previewLabel = t('planDefaultLabel', { name: defaultPlan!.planName });
     previewSelected = true;
   } else if (isReservedDefault || !model) {
     previewLabel = '未配置';
@@ -195,12 +205,15 @@ export function InputModelPicker({
     setOpen(false);
   };
 
-  // extraTopItems: 「a(默认)」项（用户裁决：保留 default 项 + 全量列表 a 重复出现一次）
-  const extraTopItems = hasDefault
+  // extraTopItems: 默认项（模型态「a(默认)」/ 方案态「方案 · 名（默认)」；用户裁决：保留 default 项 + 全量列表 a 重复出现一次）
+  // onClick 复用保留字 {providerId:'',modelId:'default'}（写回链路后端零改动，use-chat-chrome L102-114）
+  const extraTopItems = hasDefaultRoute
     ? [
         {
           key: 'default',
-          label: `${formatModelDisplay(effectiveDefault, providers)}（默认）`,
+          label: hasDefault
+            ? `${formatModelDisplay(effectiveDefault, providers)}（默认）`
+            : t('planDefaultLabel', { name: defaultPlan!.planName }),
           selected: isReservedDefault,
           onClick: () => handleSelect({ providerId: '', modelId: 'default' }),
         },

@@ -9,10 +9,10 @@
 
 ## 目录结构
 
-PRD 文档位于 `specs/prd/overall/`，按编号拆分为多个文件，**每个文件不超过 200 行**。
+PRD 文档位于 `${SPECS_DIR}/prd/overall/`，按编号拆分为多个文件，**每个文件不超过 200 行**。
 
 ```
-specs/prd/
+${SPECS_DIR}/prd/
 ├── overall/                           # 全量产品文档
 │   ├── 01-product-framework.md        # 产品框架：定位、用户画像、功能全景
 │   ├── 02-session-management.md       # 会话管理
@@ -23,7 +23,7 @@ specs/prd/
 │   ├── 07-mcp.md                      # MCP
 │   └── 08-sandbox.md                  # 沙箱
 └── version_logs/                      # 版本增量产品文档
-    └── v{N}.{M}/change_log.md
+    └── v${VERSION}/change_log.md
 ```
 
 ### Section 3 拆分规则
@@ -37,7 +37,7 @@ specs/prd/
 - `3-features-agent-core.md` — Agent 核心
 - `3-features-file-browser.md` — 文件浏览器
 
-命名格式：`3-features-{module-slug}.md`。当某个功能模块内容接近 200 行时，按子功能进一步拆分（如 `chat-ui-1`、`chat-ui-2`）。
+命名格式：`3-features-${MODULE_SLUG}.md`。当某个功能模块内容接近 200 行时，按子功能进一步拆分（如 `chat-ui-1`、`chat-ui-2`）。
 
 ### contents.md 模板
 
@@ -84,7 +84,7 @@ specs/prd/
 ### 2.3 通用组件风格 [vX.Y]
 ```
 
-### §3 功能需求（`3-features-{slug}.md`）
+### §3 功能需求（`3-features-${SLUG}.md`）
 
 ```markdown
 ## 3. 功能需求（{模块名}）

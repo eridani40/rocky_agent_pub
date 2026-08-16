@@ -1,13 +1,18 @@
 ---
 type: log
 title: Config KB 变更记录
-updated: 2026-08-13
+updated: 2026-08-14
 ---
 
 # Config KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-14 · v0.0.347（模型路由 group 登记）
+
+- **`[P0]app_config.md` group 集合补 2 新 group**：`model_routing_plans`（方案库，key=planId 多实例权威值组）+ `model_routing`（playground 挂载单实例）——v0.0.347 新增，指向 `../agent/providers_and_models/[P0]model_routing.md §8`（存储层权威）。
+- 详情：`specs/tech/version_logs/v0.0.347/change_plan.md` + `change_log.md`
 
 ## 2026-08-13 · v0.0.302（KvConfigService 读缓存）
 

@@ -3,22 +3,20 @@
  * 参考: specs/tech/agent/context_and_memory/[P0]extension point and implementations.md §3.1
  *       specs/tech/agent/context_and_memory/[P0]context_ingest_detail.md §3（priority 400）
  *       specs/tech/agent/context_and_memory/[P0]system_reminder.md §4
+ *       specs/tech/version_logs/v0.0.361/change_plan.md §1.1（双模式）/§1.6（time 退役）
  *
- * 职责（system_reminder.md §4 注入规则）：
- *   - 跑 system_reminder provider 链聚合 reminder
- *   - 只针对 ingest 进来的 messages 最后一条；触发条件：
- *     · role="user"（user 发消息）—— 既有路径
- *     · [v0.0.274] role="tool"（tool_result 消息）—— 工具循环中也刷新 reminder
- *       （解决 BUG-reminder-only-on-user-message-not-tool：tool 循环中后期 LLM 上下文 reminder 全消失）
- *     · [v0.0.33.3] sender.source="agent"（a2a 消息）—— squad 协作场景必需
- *       （squad_reminder_providers §8：a2a message 也需触发 reminder，leader/mate 群聊交互频繁）
- *   - assistant/system role 不触发（agent 输出/系统消息不是输入，显式排除）
- *   - 把 reminder 聚合成一个 text content block，追加到该 message content 末尾
- *   - 经 ingest 落库 → 持久化进 transcript；后续 assemble 透明读
+ * 职责（v0.0.361 T3 双模式重构，§1.1 心智模型）：
+ *   - full（ctx.runState.useFullReminder !== false，undefined 视 true——run 首 / summary 重建后首
+ *     / forked 恒 full）：跑瘦身动态 provider 链全量产出（todo/squad_task/squad_agents_status 动态半）
+ *     + 时间固定段 + queueClearAll（full 已涵盖最新态，pending 作废）+ 置 useFullReminder=false
+ *   - incremental（run 内后续轮）：时间固定段 + queueDrain 按序读 value（value 已渲染，直接拼行）
+ *   - 触发条件不变（user/tool/a2a；assistant/system 显式排除）+ 块级 isSystemReminder 标记不变
+ *   - 时间固定段逻辑自 reminder/time.ts 平移（v0.0.361 time provider 退役）；
+ *     渲染格式按 change_plan §2 硬性样例：行首不加 `- ` 前缀、时间行无尾句点
  *
- * 注入器需要跑 provider 链，但 handler 不能直接持 PluginManager（避免循环依赖 +
- * plugin_manager 不该被 ext impl 反向依赖）。链执行通过 IngestCtx.reminderRunner
- * 回调注入（ContextEngine 构造期 closure 注入 PluginManager.getExtensionImpls）。
+ * 注入器需要跑 provider 链，但 handler 不能直接持 PluginManager（避免循环依赖）。
+ * 链执行通过 IngestCtx.reminderRunner 回调注入（ContextEngine 构造期 closure 注入）；
+ * queue 句柄（runState/queueDrain/queueClearAll）由 ContextEngine.ingest 装配透传（T3 接线）。
  *
  * EP: context_ingest_handler，priority 400（truncate 之后）。
  */
@@ -33,8 +31,12 @@ import {
 /** reminder 聚合块的标头（让 LLM 知道这是系统提醒） */
 const REMINDER_HEADER = '[system_reminder]';
 
+/** 进程本地时区名（Electron server = client tz；逻辑自 reminder/time.ts 平移） */
+const LOCAL_TZ =
+  (typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
+
 /**
- * system_reminder_injector impl：跑 provider 链、聚合 reminder、追加到最后一条 user message。
+ * system_reminder_injector impl：双模式渲染 reminder 块、追加到末尾 user/tool/a2a message。
  * 构造器签名约定 (implId, cfg)（plugin_manager §3.4 实例化）。
  */
 export default class SystemReminderInjectorHandler
@@ -46,35 +48,46 @@ export default class SystemReminderInjectorHandler
   }
 
   /**
-   * 注入 reminder：跑 provider 链 → 聚合 → 追加到末尾 user/tool/a2a message。
-   * 无 reminder / 空链 / 末尾 assistant/system message → 不动 messages。
+   * [v0.0.361] 双模式注入（async 化：drain/clearAll 是 async 句柄）。
+   * full=动态链全量+时间+清 queue+置 false；incremental=时间+drain 增量。
+   * 句柄缺席（UT fixture 直调 / forked 无 fsRoot）→ 降级 full（时间+链产出），不 throw。
    */
-  handle(messages: Message[], ctx: IngestCtx): Message[] {
+  async handle(messages: Message[], ctx: IngestCtx): Promise<Message[]> {
     if (messages.length === 0) return messages;
-    const runner = ctx.reminderRunner;
-    if (!runner) return messages; // 未注入 runner（如单元测试）→ 不动
-
-    const reminders = runner(ctx);
-    if (!reminders || reminders.length === 0) return messages;
-
     const last = messages[messages.length - 1]!;
-    // [v0.0.33.3] 触发扩展：末尾 message role='user' OR sender.source='agent'（squad a2a）
-    //   - 修前仅 role='user' 触发 → mate/leader 群聊交互（a2a message）不注入 reminder
-    //   - 修后 a2a message 也触发（squad_reminder_providers §8 / req7 §8.4）
-    //   - 注：tool/assistant/system role 不触发（既不接 user 也不接 a2a）
-    // [v0.0.274] 触发再放宽：role='tool'（tool_result 消息）也触发——工具循环中刷新 reminder
-    //   - 修前 tool 循环（tool_call → tool_result → ...）期间不注入 → LLM 上下文 reminder 全消失
-    //   - 修后 tool_result 也注入（wire 层 encodeMessage 保证 LLM 只保留最末一个聚合块，不堆积）
-    //   - assistant/system 显式排除（agent 输出/系统消息不是输入）
+    // 触发条件（v0.0.274/v0.0.33.3 不变）：user / tool / a2a（sender.source=agent）
     if (!shouldTriggerReminder(last)) return messages;
 
-    const text = formatReminders(reminders);
-    if (!text) return messages;
+    // undefined 视同 true（§1.4：run 首新建 RunState 天然 full，零额外初始化接线）
+    const useFull = ctx.runState?.useFullReminder !== false;
+    let text: string;
+    if (useFull) {
+      const runner = ctx.reminderRunner;
+      const reminders = runner ? runner(ctx) : [];
+      text = renderFullBlock(reminders);
+      // ④ full 已涵盖最新态 → pending queue 作废（拿锁清；失败降级不阻断注入，下轮 drain 兜底）
+      if (ctx.queueClearAll) {
+        try {
+          await ctx.queueClearAll(ctx.config.sessionId);
+        } catch {
+          // 清失败降级：pending 留存，下轮 incremental drain 兜底消费
+        }
+      }
+      // ⑤ 消费后置 false（run 内后续轮转 incremental；summary 版本变由 run-react-loop 置回 true）
+      if (ctx.runState) ctx.runState.useFullReminder = false;
+    } else {
+      let values: string[] = [];
+      if (ctx.queueDrain) {
+        try {
+          values = await ctx.queueDrain(ctx.config.sessionId);
+        } catch {
+          // drain 失败降级：本轮空增量（时间固定段仍注入）
+        }
+      }
+      text = renderIncrementalBlock(values);
+    }
 
-    // [v0.0.39] reminder block 设块级 isSystemReminder 标记（前端按块精确过滤，只隐这一块 text）。
-    // [v0.0.50] 停写消息级 metadata.isSystemReminder（块级 TextBlock.isSystemReminder 为唯一权威，
-    //   见 system_reminder.md §4 + change_log §0.5）。metadata 字段本身经 ...last 透传（其他 kv 存活）。
-    // LLM 零侵入：protocol-encode.ts encodeContentBlock 对 text block 只读 b.text，此字段不进 wire。
+    // 块级 isSystemReminder 唯一权威（v0.0.50；前端按块过滤；LLM 零侵入——encode 只读 text）
     const reminderBlock = { type: 'text' as const, text, isSystemReminder: true };
     const newLast: Message = {
       ...last,
@@ -84,29 +97,46 @@ export default class SystemReminderInjectorHandler
   }
 }
 
+/** 时间固定段（逻辑平移自 reminder/time.ts；格式按 change_plan §2 样例：无尾句点） */
+export function timeLine(): string {
+  // new Date() 本地方法 = 进程本地 = client tz（Electron server 跑用户机器）
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const HH = String(now.getHours()).padStart(2, '0');
+  const MM = String(now.getMinutes()).padStart(2, '0');
+  return `Current date and time: ${yyyy}-${mm}-${dd} ${HH}:${MM} (${LOCAL_TZ})`;
+}
+
 /**
- * 聚合 reminder 列表为单 text block 文本。
- * 格式：标头 + 各 reminder 顺序拼接（id + content；warn tier 加 [warn] 标记）。
+ * full 块渲染：时间固定段 + 动态链产出（provider content 原文逐行；warn tier 加 [warn] 标记）。
+ * [v0.0.361] 行首不再加 `- ` 前缀（对齐 §2 样例；provider content 自带栏目前缀如 [todo]）。
  */
-export function formatReminders(reminders: SystemReminder[]): string {
-  const lines = reminders.map((r) => {
-    const tag = r.tier === 'warn' ? '[warn] ' : '';
-    return `- ${tag}${r.content}`;
-  });
+export function renderFullBlock(reminders: SystemReminder[]): string {
+  const lines = [
+    timeLine(),
+    ...reminders.map((r) => (r.tier === 'warn' ? `[warn] ${r.content}` : r.content)),
+  ];
   return `${REMINDER_HEADER}\n${lines.join('\n')}`;
 }
 
 /**
- * [v0.0.33.3] 判定末尾 message 是否触发 reminder 注入。
- * 触发条件（squad_reminder_providers §8 / req7 §8.4 / v0.0.274 R1）：
+ * incremental 块渲染：时间固定段 + drain 按序 value（value 已渲染注入行，不二次渲染）。
+ */
+export function renderIncrementalBlock(values: string[]): string {
+  return `${REMINDER_HEADER}\n${[timeLine(), ...values].join('\n')}`;
+}
+
+/**
+ * 判定末尾 message 是否触发 reminder 注入（v0.0.274/v0.0.33.3 语义不变）：
  *   - role='user'（user 发消息，既有路径）
- *   - role='tool'（tool_result 消息，v0.0.274 新放宽——工具循环中也刷新 reminder）
+ *   - role='tool'（tool_result 消息，工具循环中也刷新 reminder）
  *   - sender.source='agent'（a2a message，squad 协作场景）
- * 不触发：assistant/system role（agent 输出/系统消息不是输入）或 sender.source 非 agent。
+ * 不触发：assistant/system role 或 sender.source 非 agent。
  */
 function shouldTriggerReminder(msg: Message): boolean {
   if (msg.role === 'user' || msg.role === 'tool') return true;
-  // a2a message：sender.source='agent'（user/tool role 之外的独立触发源）
   const sender = (msg as { sender?: { source?: string } }).sender;
   return sender?.source === 'agent';
 }

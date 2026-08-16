@@ -119,6 +119,15 @@ export function buildRunDeps(opts: BuildRunDepsOpts): { spec: RunSpec; loop: Run
     runId,
     sessionId: sid,
     modelId: opts.config.modelId,
+    // [v0.0.353 T3] run 级 provider 快照（TraceMetadata.providerId，可选；generation 级走 physical 子 span）。
+    // SessionConfig.providerId 由 v0.0.351 引入（分支未合入本基线）：合入前此处 undefined（startTrace 跳过），
+    // 合入后自动生效（cast 兼容两种形态，零运行时差异）。
+    providerId: (opts.config as typeof opts.config & { providerId?: string }).providerId,
+    // [v0.0.353 T5 D8] 生效路由方案透传（有方案才带；无方案零行为变化）。
+    // 与 invoke 侧 ctx.routingPlan 同源（config.modelRoutingPlan），logical gen metadata 记录方案名。
+    ...(opts.config.modelRoutingPlan !== undefined
+      ? { routingPlan: { planId: opts.config.modelRoutingPlan.planId, planName: opts.config.modelRoutingPlan.planName } }
+      : {}),
     sessionKind: kind.canonicalId(),
     runKind,
     fallbackSystemPrompt: opts.config.systemPrompt,

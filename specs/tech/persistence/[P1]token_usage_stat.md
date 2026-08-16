@@ -3,7 +3,7 @@ type: spec
 title: token_usage_stat 时序表（squad token 用量统计）
 priority: P1
 status: active
-updated: 2026-07-23
+updated: 2026-08-15
 since: v0.0.194
 ---
 
@@ -125,7 +125,7 @@ LLM 调用 → accumulateUsage(current) → session.usage.current += usage
                                             notifyTokenUsageSubscriber(sid, view, evt.createdAt)
                                                        ↓ 1. 查 SessionSchema(ssid) 拿 squadId/memberId/providerId/modelId
                                                        ↓ 2. subagent (无 memberId) 跳过
-                                                       ↓ 3. model 解析:session.providerId/modelId ?? squad.modelDefault/modelDefaultProviderId ?? '__unknown__'
+                                                       ↓ 3. model 解析:success-target-registry 命中(运行时真实命中,最高优先) ?? session.providerId/modelId ?? squad.modelDefault/modelDefaultProviderId ?? '__unknown__'
                                                        ↓ 4. hour = format(event.createdAt, squad.timezone, 'YYYY-MM-DD HH')
                                                        ↓ 5. delta = per-field diff(view.total, lastSeen[ssid])(首见记 0)
                                                        ↓ 6. upsert (sessionId,hour,providerId,modelId) += delta → CrudStore.put (sync)
@@ -141,7 +141,7 @@ LLM 调用 → accumulateUsage(current) → session.usage.current += usage
 - 写入失败不阻塞主流程(fire-and-forget + try/catch + 调用点 catch,PRD §2.5)
 - subagent session(无 memberId / parentSessionId 非空)跳过(usage 已通过 accumulate 递归 'sub' 上报 parent session.usage.sub)
 - **首次见记 0**(不灌历史累计);重启后 lastSeen 清空 → 下次 event 把当前 view.total 当 delta 全量记一次(时间分布失真但总量准确,PRD §2.6 兜底)
-- **model 解析三级 fallback**:session 显式选 → squad 默认 → `__unknown__` 兜底(防御性,理论不应到这)
+- **model 归属优先级链**（registry 命中最高优先，运行时真实命中 physical model）：`getSuccessTarget(sid)` → session 显式选 → squad 默认 → `__unknown__` 兜底。registry（`../agent/llm_caller/[P0]success_target_registry.md`，进程级内存、重启即清）由 llm_caller 两个成功 return 点写入——统计口径对齐「调用成功那一下」；miss 时（进程重启后/旧 session 补记/测试注入）三级 fallback 原样兜底，零回归
 - delta 按 Usage 字段 key 计算(input_no_cache/cache_read/.../llmCallCount per-field diff)
 
 **写入走 sync CrudStore.put(非 putAsync)**:

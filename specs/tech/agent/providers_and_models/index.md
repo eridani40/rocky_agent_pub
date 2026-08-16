@@ -21,7 +21,7 @@ providers_and_models = **LLM 调用的「4 件套」声明层**——定义「�
 | **ext impl** | provider / protocol 各是项目扩展点（`llm_provider` / `llm_protocol`）的一个 impl（per-type，无状态代码） |
 | **anthropic_messages** | 当前唯一实现的 protocol impl（同时服务 Anthropic 原生 + minimax 兼容端点） |
 | **credentials union** | 单 key `{key}` ↔ 多 key `{keys[]}`（v0.0.25 多 key 支持 fallback chain 换 key） |
-| **cache_control** | protocol encode 层策略：注入显式 breakpoint（system 末 + 最后非 reminder block）+ wire 层过滤历史 reminder，保稳定段 prompt cache 命中（每轮 reminder 不破前缀 cache） |
+| **cache_control** | protocol encode 层策略：三断点注入显式 breakpoint（bp#1 system 末 + bp#T tools 末 + bp#2 messages 末固定末位），历史 reminder 块 append-only 全保留，保稳定段 prompt cache 命中 |
 | **model resolve** | v0.0.89 统一 resolve 入口：`resolveModel({sessionType,session,squad,classroom}) → {providerId,modelId}`；v0.0.155 ModelRef 复合（`{providerId?, modelId}`）+ resolve 链去 member.model + `resolveDefaultModel` 单点出口（INV-A1/A2/A5/B1）；**v0.0.158 删「独立 summary 模型」层——chat 单链 + 唯一入口 `agentManager.resolveConfigBySid(sid)`**（chat/手动 compact/自动 compact/T1 记忆整理都从此入口取 config；无 `task` 参数、无 body override）；**v0.0.230 academy 收窄两档链 `session → classroom.defaultModel → throw`**（去 app 默认兜底——app 默认是 playground 个体级概念，群体级无应用层默认；playground → `default_models.chat` / studio → `squad.modelDefault` / academy → `classroom.defaultModel`）；保留字 `default`/`""`/`undefined` 视为「继续 fallback」；fallback 链跑空抛 `ModelNotConfiguredError`（detail 只含 sessionType，无 task 字段） |
 
 ## ② 边界
@@ -85,9 +85,9 @@ providers_and_models = **LLM 调用的「4 件套」声明层**——定义「�
 | **公共层（protocol 上游）** | | |
 | `[P0]llm_logical_view.md` | 业务 Message[] → LLM 视图 Message[] 公共 encoder（sender 展平入首块 TextBlock 前缀；6 类 source 前缀表 + 注入策略 + 调用点） | [link]([P0]llm_logical_view.md) |
 | **impl** | | |
-| `anthropic_impl.md` | anthropic_messages impl（encode + cache control 2 breakpoint + parseStream + usage 映射 + minimax 校准点） | [link](anthropic_impl.md) |
+| `anthropic_impl.md` | anthropic_messages impl（encode + cache control 3 breakpoint + parseStream + usage 映射 + minimax 校准点） | [link](anthropic_impl.md) |
 | **protocol 层策略** | | |
-| `[P0]cache_control.md` | prompt cache 显式 breakpoint 注入（bp#1 system 末 + bp#2 最后非 reminder block）+ 历史 reminder wire 层过滤；与 context 层 reminder 持久化两层独立 | [link]([P0]cache_control.md) |
+| `[P0]cache_control.md` | prompt cache 三断点注入（bp#1 system 末 + bp#T tools 末 + bp#2 messages 末）+ 历史 reminder 块全保留；与 context 层 reminder 持久化两层独立 | [link]([P0]cache_control.md) |
 | **model resolve** | | |
 | `[P0]model_resolve.md` | v0.0.89 统一 resolve 入口（resolveModel + ModelNotConfiguredError）；v0.0.155 ModelRef 复合 + resolveDefaultModel 单点出口；**v0.0.158 chat 单链 + 唯一入口 `resolveConfigBySid`**（chat/compact/T1 记忆整理同链）；**v0.0.230 academy 两档链收窄（去 app 默认）** | [link]([P0]model_resolve.md) |
 

@@ -1,10 +1,20 @@
 ---
 type: log
 title: Tools KB 变更记录
-updated: 2026-08-13
+updated: 2026-08-15
 ---
 
 # Tools KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-15 · v0.0.361（todo 工具接 reminder queue — 增量变化行写侧投递）
+
+- **`[P1]todo_tools.md`**：§6 新增 reminder queue 接线段——各写 action 成功后 `ReminderQueueStore.write(sid, 'todo:{itemId}', 已渲染行)`，写失败 catch 吞（best-effort 不阻断工具返回），per-call new 实例；消费侧 incremental 轮 `queueDrain`；frontmatter `updated`。
+
+## 2026-08-15 · v0.0.354（engine 增量回调 onResult — 多 tool 结果逐个 SSE 推送）
+
+- **`[P0]tool_execution_engine.md`**：§3 引擎接口 `execute` 签名补第 4 参 `opts?: ExecuteRunCtx`（`onResult?: (result, index) => void` 增量结果回调——每个 result push 同时立即调用，不等整批；7 条产出路径全覆盖；回调抛错 fail-silent；不传=零行为变化）；§4 串行流程伪代码 `pushResult` helper 化（push + try/catch 调回调），`for...of` → indexed loop。
+- **消费方**：`agent-loop-stage-tool.ts executeAndEmit`（emit/span 逐个化，见 agent_interface_and_loop KB 同日条目）。
+- 详情：`specs/tech/version_logs/v0.0.354/change_log.md`
 
 ## 2026-08-13 · v0.0.345（撤 worker pool + 工具层 fs.promises 真异步）
 

@@ -30,7 +30,11 @@
         "description": "Anthropic LLM 内置插件（provider 鉴权 + messages 协议翻译）",
         "impl": {
           "anthropic_compatible": { "description": "Anthropic 兼容 API 鉴权与模型元数据（API Key / 基础 URL / 模型列表）" },
-          "anthropic_messages": { "description": "Anthropic Messages API 请求/响应协议翻译（请求体 shaping + path/contentType）" }
+          "anthropic_messages": { "description": "Anthropic Messages API 请求/响应协议翻译（请求体 shaping + path/contentType）" },
+          "kimi_coding_plan": { "description": "Kimi Coding Plan 套餐（Anthropic 协议直连 + 5 小时/本周额度查询）" },
+          "glm_coding_plan": { "description": "智谱 GLM Coding Plan 套餐（Anthropic 协议直连 + 5 小时/本周额度查询）" },
+          "minimax_coding_plan": { "description": "MiniMax Coding Plan 套餐（Anthropic 协议直连 + 5 小时/本周额度查询）" },
+          "deepseek_api": { "description": "DeepSeek 按量付费（Anthropic 协议直连 + 账户余额查询）" }
         }
       },
       "zhipu_web_search": {
@@ -111,6 +115,7 @@
           "memory_group": { "description": "[v0.0.205] system prompt group 级共享记忆片段（squad 共享 ws 下 .rocky/memory/ L0 注入，stable tier，priority 400）" },
           "squad_role": { "description": "[v0.0.33.3] squad 角色规范片段（leader/mate/squad_chat.md 固定 fragment；subagent/standalone 返空；priority 950 stable；替代 member.systemPrompt 作身份正文）" },
           "team_roster": { "description": "[v0.0.33.2] squad 花名册片段（subagent 不可见，stable tier；memberIds → name+role+sessionId）" },
+          "session_states": { "description": "[v0.0.361] session states 静态段（env/workspace/团队盘路径三小节进 system prompt；逻辑平移自退役的 env/workspace/squad_workspace reminder provider）" },
           "parent_task": { "description": "[v0.0.33.2] parent task 片段（subagent only，stable tier；spawn 入参 task）" },
           "tier_sort": { "description": "system prompt reducer 按 tier 排序片段（identity > rules > 其余）" },
           "dedup": { "description": "system prompt reducer 去重片段（同 key 后写覆盖）" },
@@ -148,13 +153,9 @@
           "role_merge": { "description": "assemble reducer 合并相邻同 role 消息（连续 user/assistant 合并）" },
           "snip_handler": { "description": "assemble reducer 处理 snip 标记（压缩边界处的占位处理）" },
           "append_passthrough": { "description": "[v0.0.40 D1=B] forked scope 专属 reducer：原样返回 buffer 不 rebuild/head-tail/summary（default scope disable）" },
-          "env": { "description": "system reminder 环境信息（OS/shell/cwd 等运行时环境上下文）" },
-          "time": { "description": "system reminder 当前时间（当前日期，供 LLM 时间感知）" },
-          "workspace": { "description": "system reminder 工作区状态（当前 workspace/grep 上下文）" },
           "tool_error": { "description": "system reminder 工具错误提示（工具调用失败时的引导）" },
           "todo": { "description": "system reminder 待办清单（todo 进度跟踪提示）" },
           "squad_agents_status": { "description": "[v0.0.273] squad 统一全员状态 reminder（leader/mate/squad/subagent 分派；全员列出 running/idle + presence；SquadChat 行随 enableGroupChat 门控；取代 reachable_agents + squad_team_status）" },
-          "squad_workspace": { "description": "[v0.0.111] squad 团队盘 reminder（leader + mate；注入团队盘根 <dataDir>/squads/<squadId>；与个人 workspace 并存）" },
           "squad_task": { "description": "[v0.0.240] squad 待办任务 reminder（leader 看全队活跃 / mate 看 owner∪依赖我的；task = panorama builtin entity，归档不进；每轮直出交 dedup）" },
           "threshold_should_compact": {
             "description": "[v0.0.40] compact 谓词：(totalTokens+maxOutputTokens)/tokenLimit > compactRatio(默认0.6) → true；提前压非撞墙压",

@@ -3,9 +3,9 @@ type: interface
 title: LlmCaller 调用编排层
 priority: P0
 status: active
-updated: 2026-07-02
+updated: 2026-08-15
 since: v0.0.25
-related: [[P0]error_normalization.md, [P0]provider_health_registry.md, [P0]retry_and_timeout.md, [P0]length_handling.md, [P0]llm_request_config.md, ../providers_and_models/[P0]llm_client_interface.md, ../observability/[P0]observability_interface.md]
+related: [[P0]error_normalization.md, [P0]provider_health_registry.md, [P0]retry_and_timeout.md, [P0]length_handling.md, [P0]llm_request_config.md, [P0]success_target_registry.md, ../providers_and_models/[P0]llm_client_interface.md, ../observability/[P0]observability_interface.md]
 ---
 
 # LlmCaller — 调用编排层（策略层）
@@ -71,7 +71,7 @@ interface InvokeContext {
   errorState: LlmErrorState;            // agent loop 的 RunState.llmErrorState（跨 iteration 继承 overlay）
   sessionId?: string;                   // health registry 按 (sessionId,provider,key,model) 四元组存储
   controller: AgentLoopAbortController; // agent loop 的 AbortController（用户中断信号源）
-  observability?: ObservabilityPort;    // observability 端口（recordWireBody / endGenerationOk / endGenerationError）
+  observability?: ObservabilityPort;    // observability 端口（recordWireBody / recordAttemptTarget / recordSkippedCandidate / endGenerationOk / endGenerationError）
   backgroundPath?: boolean;             // 标记后台路径（summary/title）—— true 时 overload 直 fail 不重试（防雪崩）
   onEvent?: (evt: StreamEvent) => void; // chunk 转发回调（agent loop emit 责任保留）
   providers: Map<string, LlmProviderConfig>;  // provider 查找表
@@ -216,6 +216,8 @@ LlmCaller.invoke(baseReq, ctx)
   │     若 {kind:"ok"} →
   │        ├─ errorState.clearRecentErrors()  ← 清空连续错误历史（成功 = 连续被打断）
   │        ├─ healthRegistry.recordSuccess(sessionId, provider, key, model)（清 consecutive，降级恢复）
+  │        ├─ recordSuccessTarget(sessionId, {providerId, providerName, modelId})（ctx.sessionId 存在时；写成功 target registry，
+  │        │   与 observability 平行的正路线——squad 用量统计归属，见 [P0]success_target_registry）
   │        └─ break attemptLoop, return resp
   │     若 {kind:"user_abort"} → break，throw ABORTED_BY_USER（保留 partial）
   │     若 max_tokens_finish → applyMaxTokensOverlay 决策（bump 重跑 / throw 硬上限）

@@ -30,6 +30,8 @@ import type {
 import { SESSION_PANEL_TOPIC } from './session-event-types';
 // [v0.0.101] PendingToolCall（reconcileSuspendedPending 校验 pendingToolCalls 一致性用）
 import type { PendingToolCall } from '../tools/types';
+// [v0.0.361 T4] markX 状态变化 reminder fanout（squad 全员；change_plan §1.5）
+import { notifyMemberState } from '../squad/squad-states-fanout';
 
 /**
  * 从 session record 移除 currentRunId 字段（语义 = null）。
@@ -64,6 +66,12 @@ export interface SessionStateMachineOptions {
   statusBus?: ReplayableEventBus;
   /** [dev-logs] agent 诊断日志（写 logs/agent.log；undefined 时不写，零开销） */
   logWriter?: LogWriter;
+  /**
+   * [v0.0.361 T4] reminder queue fs root（DATA_DIR 绝对路径）。设置后 markX 状态变化写
+   * member_state:{sessionId} 变化行 + fanout squad 全员（change_plan §1.5 member 状态机行）；
+   * 非 squad session（rec.squadId 缺省）跳过。缺省 undefined → 通知 no-op（UT/旧装配兼容）。
+   */
+  reminderFsRoot?: string;
 }
 
 /**
@@ -81,6 +89,21 @@ export class SessionStateMachine {
     this.crud = opts.crud;
     this.statusBus = opts.statusBus;
     this.logWriter = opts.logWriter;
+    this.reminderFsRoot = opts.reminderFsRoot;
+  }
+
+  /** [v0.0.361 T4] reminder queue fs root（undefined → markX 通知 no-op） */
+  private readonly reminderFsRoot?: string;
+
+  /**
+   * [v0.0.361 T4] markX 状态变化 reminder 通知（change_plan §1.5 member 状态机行）：
+   * 仅 squad session（rec.squadId 为 string）写 member_state:{sessionId} + fanout 全员
+   * （notifyMemberState 内解析 member name 渲染 `[squad:agents] {name} → {state}`）。
+   * fire-and-forget：不 await（不阻断状态机 CAS 主路径），失败静默（helper 内全 catch）。
+   */
+  private notifyReminder(sessionId: string, squadId: unknown, state: string): void {
+    if (!this.reminderFsRoot || typeof squadId !== 'string' || squadId.length === 0) return;
+    void notifyMemberState({ fsRoot: this.reminderFsRoot, squadId, sessionId, state });
   }
 
   /**
@@ -120,6 +143,7 @@ export class SessionStateMachine {
       currentRunId: newRunId,
     }));
     this.emitStatus(sessionId, { state: 'running', running: true, currentRunId: newRunId });
+    this.notifyReminder(sessionId, rec.squadId, 'running');
     this.logStateChange(sessionId, cur, 'running', newRunId, true);
     return true;
   }
@@ -177,6 +201,7 @@ export class SessionStateMachine {
     // [v0.0.38 T4] putAsync 串行化（spec §6.1 [wait]）
     await this.crud.putAsync(SessionSchema, stripEnvelope(unsetRunId({ ...rec, state: 'idle', running: false })));
     this.emitStatus(sessionId, { state: 'idle', running: false, currentRunId: null });
+    this.notifyReminder(sessionId, rec.squadId, 'idle');
     this.logStateChange(sessionId, cur, 'idle', expectedRunId, true);
     return true;
   }
@@ -196,6 +221,7 @@ export class SessionStateMachine {
     // [v0.0.38 T4] putAsync 串行化（spec §6.1 [wait]）
     await this.crud.putAsync(SessionSchema, stripEnvelope(unsetRunId({ ...rec, state: 'error', running: false })));
     this.emitStatus(sessionId, { state: 'error', running: false, currentRunId: null });
+    this.notifyReminder(sessionId, rec.squadId, 'error');
     this.logStateChange(sessionId, cur, 'error', expectedRunId, true);
     return true;
   }
@@ -223,6 +249,7 @@ export class SessionStateMachine {
     // [v0.0.38 T4] putAsync 串行化（spec §6.1 [wait]）：状态机一致性关键
     await this.crud.putAsync(SessionSchema, stripEnvelope(unsetRunId({ ...rec, state: 'suspended', running: false })));
     this.emitStatus(sessionId, { state: 'suspended', running: false, currentRunId: null });
+    this.notifyReminder(sessionId, rec.squadId, 'suspended');
     this.logStateChange(sessionId, cur, 'suspended', expectedRunId, true);
     return true;
   }

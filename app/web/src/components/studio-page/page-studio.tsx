@@ -16,7 +16,7 @@ import { useMemberPanelHandlers } from './use-member-panel-handlers';
 import { useStudioUnreadMeta } from './use-studio-unread-meta';
 import { useSquadMutations } from './use-squad-mutations';
 import { useSquadMeta, type SquadAggregate } from './use-squad-meta';
-import { StudioSidebar } from './section-studio-sidebar';
+import { StudioSidebar, sortSquads, readPins } from './section-studio-sidebar';
 import { StudioChatRouter } from './component-studio-chat-router';
 import { MemberPanel } from './section-member-panel';
 import { MemberCreate } from './section-member-create';
@@ -120,13 +120,16 @@ export function PageStudio() {
   );
 
   // 挂载：拉 squad 列表 + 自动选中第一个 → landing 'seats'（IA 决策 D7）
+  // [bugfix 2026-08-15] 默认选中=sidebar 视觉第一行（sortSquads 置顶优先+lastActiveAt desc），
+  //   不再取 API 原始序 list[0]（置顶 squad 被顶到最前但默认选中无视 pins 的分叉修复）
   useEffect(() => {
     void (async () => {
       try {
         const list = await listSquads();
         setSquads(list);
-        if (list.length > 0 && list[0]) {
-          const id = list[0].id;
+        const first = sortSquads(list, readPins())[0];
+        if (first) {
+          const id = first.id;
           setSelectedSquadId(id);
           await reloadDetail(id);
           setMainView({ kind: 'seats', squadId: id });

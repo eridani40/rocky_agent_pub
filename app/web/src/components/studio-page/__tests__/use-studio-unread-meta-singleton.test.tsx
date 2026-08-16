@@ -60,6 +60,8 @@ vi.mock(singletonPath, () => {
             };
           },
           isConnected: () => false,
+          // [v0.0.348] onResumed：注册断连回调返退订 fn（T1 三层 hydration 需要；句柄回收由 hydration 测试覆盖）
+          onResumed: () => () => {},
         };
       }
       return singleton;
@@ -78,11 +80,13 @@ vi.mock(sseClientPath, () => ({
 }));
 
 // mock markSessionRead（fire-and-forget POST /read，不跑真网络）
+// [v0.0.348] + mock listSessionsByBiz（hydrate GET 数据源；本文件不测 hydration，mock 空表防真 fetch）
 vi.mock(chatApiPath, async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../lib/chat-api')>();
   return {
     ...actual,
     markSessionRead: vi.fn(async () => ({ ok: true })),
+    listSessionsByBiz: vi.fn(async () => [] as Array<never>),
   };
 });
 

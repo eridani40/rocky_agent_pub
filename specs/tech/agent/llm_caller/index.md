@@ -2,7 +2,7 @@
 type: index
 title: LlmCaller 子系统总起
 priority: P0
-updated: 2026-06-30
+updated: 2026-08-15
 ---
 
 # LlmCaller 子系统总起
@@ -20,6 +20,7 @@ LlmCaller = LLM 调用的**策略层 / 编排层**——在 `LlmClient`（机制
 | **decide** | 读 err.hints + recentErrors 产 action（NO_RETRY/RETRY/ROTATE_KEY/FIX_AND_RETRY/FALLBACK） |
 | **Watchdog** | 分阶段超时（TTFB 45s / stall / wall 600s），composite AbortController |
 | **ProviderHealthRegistry** | 进程级 singleton，provider 健康 4 态机（healthy/degraded/cooled_down/dead），按 (sessionId,provider,key,model) 四元组 |
+| **SuccessTargetRegistry** | 进程级 singleton，记每 session「最近一次调用成功那一下」的物理 target（squad 用量统计归属最高优先源） |
 | **LlmErrorState** | RunState 级 overlay（跨 iteration 继承，不落盘），含 recentErrors / precompress / prefillPartial |
 | **LlmErrorCategory** | 错误归一化枚举（按恢复语义分组），classify 把任意 raw error → category + hints |
 | **fallback_chain** | 全局 provider 池 config（`llm_request` group），(providerId, keyRef, modelId) 三元组列表 |
@@ -32,6 +33,7 @@ LlmCaller = LLM 调用的**策略层 / 编排层**——在 `LlmClient`（机制
 | invoke / resolveTarget / buildRequest / attemptLoop / decide 编排 | LlmClient 4 件套绑定 / call / stream（→ `../providers_and_models/[P0]llm_client_interface.md`，不可变共享不动） |
 | 错误归一化（LlmErrorCategory / ClassifiedLlmError / classify / hints） | HTTP 调用细节 / fetchImpl 注入（归 LlmClient） |
 | ProviderHealthRegistry（进程级 singleton / 4 态机 / cooldown） | agent loop 消息驱动 / 状态机 / RunState 游标（→ `../agent_interface_and_loop/`） |
+| SuccessTargetRegistry（成功 target 进程级 singleton，用量统计归属源） | token_usage_stat 表 / subscriber 消费链（→ `../../persistence/[P1]token_usage_stat.md`） |
 | 退避算法（getRetryDelay）+ 分阶段超时看门狗 | config 持久化机制（→ `../../config/[P0]app_config.md`） |
 | Length 处理（MAX_TOKENS bump / CONTEXT_LENGTH 压缩 / prefill defer） | session store / usage 落盘（→ `../session/`） |
 | `llm_request` config group / LlmErrorState schema / fallback_chain 结构 | HTTP API 端点 / SSE wire（→ `specs/api/overall/02-llm-chat.md`） |
@@ -77,6 +79,7 @@ LlmCaller = LLM 调用的**策略层 / 编排层**——在 `LlmClient`（机制
 | **子模块** | | |
 | `[P0]error_normalization.md` | LlmErrorCategory 枚举 + ClassifiedLlmError + classify 函数 + Anthropic adapter 映射表 | [link]([P0]error_normalization.md) |
 | `[P0]provider_health_registry.md` | ProviderHealthRegistry（进程级 singleton / 4 态 discriminated union / 升级恢复 / account-wide quota 例外） | [link]([P0]provider_health_registry.md) |
+| `[P0]success_target_registry.md` | SuccessTargetRegistry（进程级「调用成功那一下」target 注册表；squad 用量统计归属最高优先源） | [link]([P0]success_target_registry.md) |
 | `[P0]retry_and_timeout.md` | 退避算法（半 jitter + retry-after cap）+ 分阶段看门狗（TTFB/stall/wall）+ composite abort + partial 保留 | [link]([P0]retry_and_timeout.md) |
 | `[P0]length_handling.md` | MAX_TOKENS bump / CONTEXT_LENGTH 压缩 / prefill defer + ModelCapability + STREAM_INCOMPLETE 区分 | [link]([P0]length_handling.md) |
 | `[P0]llm_request_config.md` | `llm_request` config group + LlmErrorState schema + fallback_chain + credentials 多 key 引用 | [link]([P0]llm_request_config.md) |

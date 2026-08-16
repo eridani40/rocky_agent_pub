@@ -22,6 +22,11 @@ export interface ProviderItem {
   id: string;
   label: string;
   /**
+   * [v0.0.350] provider 类型（ProviderName union；可选——旧响应缺省视为通用 anthropic_compatible）。
+   * 额度总览过滤（isNativeCodingPlan）与类型显示用。
+   */
+  name?: string;
+  /**
    * provider 启停（透传后端 GET /provider 已带的 enabled 字段）。
    * 可选 —— 运行时缺字段视为 enabled（对齐后端 `enabled !== false` 语义）。
    * 下游 picker / findProviderIdByModelId 据此过滤 disabled provider。
@@ -135,24 +140,31 @@ export function __resetProvidersCacheForTest(): void {
 }
 
 /**
- * React hook：每次组件挂载实时拉最新 providers（异步），返回 {providers, error}。
+ * React hook：每次组件挂载实时拉最新 providers（异步），返回 {providers, error, loaded}。
  * - 每次 mount 触发一次 fetchProviders（实时），配合 inFlight 并发去重。
  * - 不复用上次 mount 的结果 —— 用户在配置中心改了 provider/model，重新挂载即可见。
  * - 初始 providers 为空数组（测试桩存在时同步种入，便于单测确定性）。
+ * - [v0.0.349] loaded：首次拉取成功后置 true（区分「未加载」与「加载后为空」——
+ *   方案编辑器 dangling 预检在未加载时跳过，避免加载窗口误判全条目失效）。
  */
 export function useProviders(): {
   providers: ProviderItem[];
   error: string | null;
+  loaded: boolean;
 } {
   const [providers, setProviders] = useState<ProviderItem[]>(
     testProviders ?? [],
   );
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(testProviders !== null);
   useEffect(() => {
     let cancelled = false;
     fetchProviders()
       .then((list) => {
-        if (!cancelled) setProviders(list);
+        if (!cancelled) {
+          setProviders(list);
+          setLoaded(true);
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -161,7 +173,7 @@ export function useProviders(): {
       cancelled = true;
     };
   }, []);
-  return { providers, error };
+  return { providers, error, loaded };
 }
 
 /**

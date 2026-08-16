@@ -3,12 +3,12 @@
 ## 目录结构
 
 ```
-specs/ui/
+${SPECS_DIR}/ui/
 ├── overall/                    # 全量 UI 协议文档
-│   ├── {page-name}.md          # 按页面/组件组织
+│   ├── ${PAGE_NAME}.md          # 按页面/组件组织
 │   └── ...
 └── version_logs/
-    └── v{N}.{M}/change_log.md  # 版本增量
+    └── v${VERSION}/change_log.md  # 版本增量
 ```
 
 ## 用途
@@ -20,7 +20,7 @@ UI 协议文档是 **E2E 测试的唯一选择器来源**。E2E verifier 只读�
 ```markdown
 # {PageName}
 
-- **路由**: /{path}
+- **路由**: /${PATH}
 - **版本**: [v0.1]
 
 ## 页面结构
@@ -32,7 +32,7 @@ UI 协议文档是 **E2E 测试的唯一选择器来源**。E2E verifier 只读�
 | data-testid | 元素描述 | HTML 类型 | 可见条件 | 引入版本 |
 |-------------|---------|-----------|---------|---------|
 | sidebar-nav | 侧边栏导航容器 | nav | 始终可见 | [v0.1] |
-| sidebar-item-{name} | 导航项 | button | 始终可见 | [v0.1] |
+| sidebar-item-${NAME} | 导航项 | button | 始终可见 | [v0.1] |
 | chat-input | 聊天输入框 | textarea | 页面加载后 | [v0.1] |
 | chat-send-btn | 发送按钮 | button | 输入框非空时 | [v0.1] |
 | loading-spinner | 加载动画 | div | 请求进行中 | [v0.1] |
@@ -58,20 +58,20 @@ UI 协议文档是 **E2E 测试的唯一选择器来源**。E2E verifier 只读�
 
 ## data-testid 命名约定
 
-- 格式：`{component}-{element}`，kebab-case
+- 格式：`${COMPONENT}-${ELEMENT}`，kebab-case
 - 组件名与代码中的组件名对应，但用 kebab-case
-- 列表项用 `{component}-item-{identifier}` 模式
-- 动态 ID 用大括号标注：`chat-message-{id}`
+- 列表项用 `${COMPONENT}-item-${IDENTIFIER}` 模式
+- 动态 ID 用大括号标注：`chat-message-${ID}`
 
 ### 命名示例
 
 | 场景 | 命名 |
 |------|------|
-| 侧边栏 | `sidebar`, `sidebar-item-{name}` |
-| 聊天消息 | `chat-message-{id}`, `chat-message-content` |
-| 表单 | `form-{name}`, `form-{name}-submit` |
-| 模态框 | `modal-{name}`, `modal-{name}-close` |
-| 错误提示 | `error-{context}` |
+| 侧边栏 | `sidebar`, `sidebar-item-${NAME}` |
+| 聊天消息 | `chat-message-${ID}`, `chat-message-content` |
+| 表单 | `form-${NAME}`, `form-${NAME}-submit` |
+| 模态框 | `modal-${NAME}`, `modal-${NAME}-close` |
+| 错误提示 | `error-${CONTEXT}` |
 
 ## 核心规则
 

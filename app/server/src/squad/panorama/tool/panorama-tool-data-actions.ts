@@ -11,6 +11,7 @@ import type { PanoramaSchema, EntityDef } from '../dsl/types';
 import { validateInstance, validateTransition, applyFieldDefaults, coerceRecord } from '../validation';
 import { emitPanoramaEvent } from '../http/sse';
 import { afterTaskWrite } from '../builtin';
+import { notifyTaskTransition } from '../../squad-states-fanout';
 import {
   store, storeLike, msgId, okJson, validationFailed, readSquadSchema,
 } from './panorama-tool-actions';
@@ -111,6 +112,15 @@ export async function runTransition(
   // task transition（如 todo→done）→ 重算依赖该 task 的 waiting 解除（panorama_builtin §4）
   if (entity === 'task') {
     afterTaskWrite(s);
+    // [v0.0.361 T4] task 状态变化写 reminder queue + audience fanout（change_plan §1.5；
+    // done 也是状态变化照写；value 渲染/audience 过滤收敛在 helper，两入口同调不重复实现）
+    if (rtc.selfSquadId) {
+      await notifyTaskTransition(
+        { fsRoot: dataDir, squadId: rtc.selfSquadId, store: s },
+        { ...inst, [stateField!]: to },
+        to,
+      );
+    }
   }
   return okJson({ ok: true, from, to });
 }

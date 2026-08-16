@@ -1,13 +1,30 @@
 ---
 type: log
 title: Agent Interface & Loop KB 变更记录
-updated: 2026-08-12
+updated: 2026-08-15
 ---
 
 # Agent Interface & Loop KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-15 · v0.0.362（run-end 汇报去重 — mateExitNotify 跳过已汇报的退出通知）
+
+- **`[P0]agent_loop_unified.md §3.2`**：mateExitNotify 装配段补「run-end 汇报去重」语义——`hasRecentLeaderReport` 纯函数（snapshot.messages 过滤 assistant + lastAssistantContent 伪消息补末轮 → slice(-3) 窗口 → send_message target 三形态命中 leader → 跳过投递）；只看 tool_use 存在性；name 形态 AgentRef 不解析=已知限制。
+- 实现与 review 详情：`specs/tech/version_logs/v0.0.362/change_log.md`（T1 + review PASS + 已知限制 3 条）。
+
+## 2026-08-15 · v0.0.354（多 tool 结果逐个 SSE 推送 — executeAndEmit 逐个 emit/span）
+
+- **`[P0]agent_loop_base.md §2.2`**：executeTools emit 时机逐个化注记——executeAndEmit 经 engine `opts.onResult` 回调注入，每 result 到达即 emit 三帧 + start/endToolSpan（不再 await 全批后同 tick 连发）；span startTime 串行推导（上一 result 完成时刻），时长回归真实执行时长；返回值与帧序不变式不变。
+- **`[P0]agent_loop_base.md §7.2`**：帧序表工具执行行补 [v0.0.354] 注记（result 帧到达即逐个发出；每 result 三帧相邻、全部 result 帧先于 tool_execution_end）。
+- 前端/reducer 零改动（v0.0.19 独立 messageId 契约，逐帧到达即渲染）。
+- 详情：`specs/tech/version_logs/v0.0.354/change_log.md`
+
+## 2026-08-15 · v0.0.351（iteration 边界运行时配置刷新 refreshRuntimeConfig）
+
+- **`[P0]agent_loop_unified.md §1`**：主循环阶段 3 补 main run 配置刷新步骤——Prepare 后、callLLM 前 `await refreshRuntimeConfig(spec, deps)`（`loop-runtime-config.ts`）：重读 session 最新 providerId/modelId/effort/approvalMode，模型对变才 `buildLlmClient` 重建 client（不变保持引用稳定），effort/approvalMode 纯值覆盖；不重跑 buildSessionConfigFromDeps；非致命错误 log warn 沿用旧 config；刷新后复查 controller.aborted；旁路 run（summary/consolidate）跳过保持启动快照。
+- 详情：`specs/tech/version_logs/v0.0.351/chat-input-config-realtime/change_log.md`
 
 ## 2026-08-12 · v0.0.340（in 信封 sender 名反查 memberStore — 决策 1 读单一源注入面）
 
@@ -18,7 +35,7 @@ updated: 2026-08-12
 
 ## 2026-08-12 · v0.0.338（mate 退出通知 interrupted 提示）
 
-- **`[P0]agent_loop_unified.md §3.2`**：mateExitNotify 装配段通知内容补「退出原因行（`[v0.0.338]` 条件追加）」——`stopReason === 'interrupted'` → `退出原因: interrupted（由用户中断，如需要可向用户查证）`（老板钦定文案）；其余 6 种 reason（no_tool_call/no_new_messages/max_iterations/doom_loop/error/tool_pending）输出逐字节不变。
+- **`[P0]agent_loop_unified.md §3.2`**：mateExitNotify 装配段通知内容补「退出原因行（`[v0.0.338]` 条件追加）」——`stopReason === 'interrupted'` → `退出原因: interrupted（由用户主动中断，无需处理）`（老板钦定文案）；其余 6 种 reason（no_tool_call/no_new_messages/max_iterations/doom_loop/error/tool_pending）输出逐字节不变。
 - **实现**：`mate-exit-notify.ts` formatMateExitNotify 条件分支（:99-103）；UT +2（interrupted 含提示 + 其他 6 种 not.toContain）；全量 10373 passed 零回归。
 - **偏离记录**：change_plan M1 原文「可询问用户」→ 代码「可向用户查证」（leader 派单 + 老板钦定文案，commit message 载明）；以代码为准。
 - 详情：`specs/tech/version_logs/v0.0.338.mate_exit_interrupted_tip/change_plan.md` + `change_log.md`

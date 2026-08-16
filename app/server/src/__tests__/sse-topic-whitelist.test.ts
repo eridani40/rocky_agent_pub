@@ -22,6 +22,8 @@ import { AGENT_LOOP_TOPIC, SESSION_PANEL_TOPIC, PANORAMA_TOPIC } from '../bootst
 import { SESSION_META_TOPIC, APP_TASK_TOPIC } from '../agent/session-event-types';
 // [v0.0.305] squad_meta topic 真值（squad 层事件类型文件导出）
 import { SQUAD_META_TOPIC } from '../squad/squad-event-types';
+// [v0.0.363] provider_quota topic 真值（额度快照 SSE 广播）
+import { PROVIDER_QUOTA_TOPIC } from '../llm/quota-events';
 
 /** src 根目录（app/server/src）。__dirname = .../app/server/src/__tests__ */
 const SRC_ROOT = join(__dirname, '..');
@@ -41,6 +43,7 @@ const TOPIC_VALUE_BY_IDENT: Record<string, string> = {
   APP_TASK_TOPIC,
   PANORAMA_TOPIC,
   SQUAD_META_TOPIC,
+  PROVIDER_QUOTA_TOPIC,
 };
 
 /** 从 bootstrap-bus-phase.ts 源码提取全部 hub.registerTopic(IDENT, ...) 的标识符 */

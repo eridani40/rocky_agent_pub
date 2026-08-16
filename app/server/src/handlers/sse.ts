@@ -12,11 +12,11 @@ import type { SseChannel } from '../sse/sse-channel';
 import { ulid } from '../config/ulid';
 
 /**
- * 合法 topic 集合（agent_loop + session_panel + session_meta + app_task + panorama + squad_meta）。
+ * 合法 topic 集合（agent_loop + session_panel + session_meta + app_task + panorama + squad_meta + provider_quota）。
  * 与 bootstrap-bus-phase.ts 的 registerTopic 清单一一对应（两处手维护；
  * __tests__/sse-topic-whitelist.test.ts 有双向对齐断言防漏配）。
  */
-export const ALLOWED_TOPICS = new Set(['agent_loop', 'session_panel', 'session_meta', 'app_task', 'panorama', 'squad_meta']);
+export const ALLOWED_TOPICS = new Set(['agent_loop', 'session_panel', 'session_meta', 'app_task', 'panorama', 'squad_meta', 'provider_quota']);
 
 /** subscribe 请求体（specs/api §4.2） */
 interface SubscribeBody {

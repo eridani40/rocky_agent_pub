@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Squad Member 余额查询快捷入口 · 静态 Demo v2</title>
+<!--
+  v2 迭代（老板 12:18 拍板：「demo 质量不错，但展开有点太大。每个卡片 2 个状态」）
+  ① 收起态（默认）：窄卡片行 = 红绿灯状态点 + 头像 + provider name/model + 双档双环形进度圈（5小时余量 + 周余量 两档都展示）
+     每档：左环 = 用量百分比（圈内数字精确到 1%；烧快时环变琥珀色）；右环 = 重置时间进度（圈内数字 = 剩余时间）
+     时间单单位规则（老板 12:29）：圈内只显最大单位整数——≥1天→「X天」；≥1小时→「X小时」（不携分钟）；<60分→「Xm」；<1分→「0min」
+     余额型（DeepSeek）无环 → 直接显示余额金额 +「充值余额」；无周限额套餐（MiniMax）小卡只显 5 小时档一行
+  ② 展开态（点击卡片切换）：替换层 = v1 大卡片视图，主/副标题交换——
+     主标题 = provider name / model；副标题 = 套餐名（原主标题「Kimi Coding Plan」字样下沉）；补 base url 展示位
+  其余保持 v1 口径：入口位置/badge 无数字/状态点合并规则/数据写死不接数据
+  v1 对比版：specs/prd/squad-quota-entry-demo.html
+-->
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; background:#fafafa; color:#0a0a0a; font:14px/1.5 -apple-system,BlinkMacSystemFont,'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-family:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace; }
+  .page { max-width:820px; margin:0 auto; padding:36px 20px 64px; }
+  h1 { font-size:18px; font-weight:700; margin:0 0 6px; }
+  .meta { font-size:12px; color:#71717a; margin:0 0 6px; }
+  .caption { font-size:12px; font-weight:600; color:#71717a; margin:28px 0 8px; }
+  .frame { border:1px dashed #d4d4d8; border-radius:10px; padding:16px 14px 8px; }
+
+  /* —— ① 入口示意：chat float menu 竖向工具条（对齐 component-chat-float-menu，同 v1）—— */
+  .stage { display:flex; gap:28px; align-items:flex-start; padding:8px 0; }
+  .chatmock { flex:1; min-height:180px; border:1px solid #e4e4e7; border-radius:12px; background:#fff; position:relative; }
+  .chatmock .hint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; color:#a1a1aa; }
+  .menu { display:flex; flex-direction:column; gap:4px; border:1px solid #e4e4e7; border-radius:12px; background:#fff; padding:4px; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+  .mbtn { position:relative; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:8px; color:#71717a; font-size:15px; cursor:pointer; }
+  .mbtn:hover { background:#f4f4f5; color:#18181b; }
+  .mbtn .num { position:absolute; top:-4px; right:-4px; min-width:16px; height:16px; padding:0 4px; border-radius:99px; background:#16a34a; color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .mbtn.new { background:#dcfce7; color:#16a34a; border:1.5px dashed #16a34a; }
+  .arrow-note { font-size:11px; color:#b45309; background:#fef3c7; border-radius:6px; padding:3px 8px; align-self:center; white-space:nowrap; }
+
+  /* —— ② 弹层（对齐 component-todo-modal L3 modal 壳，同 v1）—— */
+  .overlay { background:rgba(30,25,20,0.45); backdrop-filter:blur(2px); border-radius:12px; padding:28px 0; display:flex; justify-content:center; }
+  .modal { width:720px; max-width:100%; background:#fff; border:1px solid #e4e4e7; border-radius:14px; box-shadow:0 8px 30px rgba(0,0,0,0.18); display:flex; flex-direction:column; max-height:82vh; }
+  .mhead { display:flex; align-items:center; gap:8px; padding:16px 22px 10px; }
+  .mtitle { font-size:15px; font-weight:700; flex:1; }
+  .xbtn { width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:6px; color:#71717a; cursor:pointer; font-size:14px; }
+  .xbtn:hover { background:#f4f4f5; color:#18181b; }
+  .mbody { overflow-y:auto; padding:0 22px 18px; }
+  .planbar { display:flex; align-items:center; gap:8px; padding:8px 10px; background:#f4f4f5; border-radius:8px; margin-bottom:12px; }
+  .planbar .pname { font-size:12.5px; font-weight:600; color:#3f3f46; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:#71717a; margin-left:auto; }
+  .hintline { font-size:11px; color:#a1a1aa; text-align:center; margin:2px 0 10px; }
+
+  /* 状态点（时间过滤 + 熔断三态 → 合并单点，同 v1） */
+  .dot-st { width:10px; height:10px; border-radius:99px; flex:none; display:inline-block; }
+  .st-work { background:#16a34a; box-shadow:0 0 0 3px #dcfce7; }
+  .st-open { background:#dc2626; box-shadow:0 0 0 3px #fee2e2; }
+  .st-half { background:#f59e0b; box-shadow:0 0 0 3px #fef3c7; }
+  .st-off  { background:#e4e4e7; box-shadow:0 0 0 3px #fafafa; border:1px solid #d4d4d8; }
+  .logo { width:28px; height:28px; border-radius:7px; background:#dcfce7; color:#16a34a; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .bdg { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; border-radius:4px; padding:2px 6px; white-space:nowrap; }
+  .bdg-plan { background:#dcfce7; color:#16a34a; }
+  .bdg-fast { background:#fef3c7; color:#b45309; }
+  .stword { font-size:11px; font-weight:600; }
+  .stword.w-work { color:#16a34a; } .stword.w-open { color:#dc2626; } .stword.w-half { color:#b45309; } .stword.w-off { color:#a1a1aa; }
+
+  /* —— provider 卡：两态（收起行 / 展开替换层）—— */
+  .pcard { background:#f4f4f5; border:1px solid #e4e4e7; border-radius:10px; margin-bottom:8px; }
+  .pcard .expand { display:none; padding:12px 16px; cursor:pointer; }
+  .pcard.open .row { display:none; }
+  .pcard.open .expand { display:block; }
+  .chev { color:#a1a1aa; font-size:12px; flex:none; }
+  /* ① 收起态窄行 */
+  .row { display:flex; align-items:center; gap:10px; padding:9px 14px; cursor:pointer; }
+  .row:hover { background:#ededf0; border-radius:10px; }
+  .rinfo { flex:1; min-width:0; }
+  .rname { font-size:12.5px; font-weight:600; }
+  .rmodel { font-size:11px; color:#71717a; margin-top:1px; }
+  .rmodel .mono { font-size:10.5px; background:#fff; border:1px solid #e4e4e7; border-radius:5px; padding:0 5px; }
+  /* 双档左右排列（老板 12:40）；每档环上、标签下 */
+  .rings { display:flex; flex-direction:row; align-items:flex-start; gap:10px; margin-left:auto; }
+  .rtier { display:flex; flex-direction:column; align-items:center; gap:3px; }
+  .rtlab { font-size:10px; color:#71717a; white-space:nowrap; }
+  .rpair { display:flex; gap:5px; }
+  .rlabel { font-size:10px; color:#71717a; }
+  .ring { width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; position:relative; }
+  .ring::before { content:''; position:absolute; inset:5px; border-radius:50%; background:#fff; }
+  .ring .rv { position:relative; font-size:8px; font-weight:700; letter-spacing:-.03em; color:#3f3f46; }
+  .r-used { background:conic-gradient(#18181b calc(var(--p)*1%), #e4e4e7 0); }
+  .r-used.fast { background:conic-gradient(#f59e0b calc(var(--p)*1%), #e4e4e7 0); }
+  .r-time { background:conic-gradient(#a1a1aa calc(var(--p)*1%), #e4e4e7 0); }
+  .rval { font-size:13px; font-weight:700; }
+
+  /* ② 展开态（v1 大卡重排：主标题 = provider name/model，副标题 = 套餐名，补 base url） */
+  .chead { display:flex; align-items:center; gap:10px; }
+  .cinfo { flex:1; min-width:0; }
+  .clabel { font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .clabel .mmodel { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11.5px; background:#fff; border:1px solid #e4e4e7; border-radius:5px; padding:1px 6px; font-weight:500; }
+  .csub { font-size:11px; color:#71717a; margin-top:2px; }
+  .csub2 { font-size:10.5px; color:#a1a1aa; margin-top:1px; }
+  .itemrow { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11.5px; color:#52525b; }
+  .itemrow .mname { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; background:#fff; border:1px solid #e4e4e7; border-radius:5px; padding:1px 6px; }
+  .itemrow .tc { color:#71717a; }
+  .cd { margin-left:auto; font-size:10.5px; color:#dc2626; font-weight:600; }
+  .tier { margin-top:10px; }
+  .thead { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; gap:8px; }
+  .tname { font-size:11.5px; font-weight:600; color:#3f3f46; display:flex; align-items:center; gap:8px; }
+  .treset { font-size:10.5px; color:#71717a; }
+  .trow { display:grid; grid-template-columns:30px 1fr 40px; align-items:center; gap:8px; margin-top:4px; }
+  .tlab { font-size:10.5px; color:#71717a; }
+  .bar { height:6px; border-radius:3px; background:#e4e4e7; overflow:hidden; }
+  .fill { height:100%; border-radius:3px; }
+  .f-used { background:#18181b; } .f-used.fast { background:#f59e0b; } .f-time { background:#a1a1aa; }
+  .tval { font-size:10.5px; color:#3f3f46; text-align:right; }
+  .tval.fast { color:#b45309; font-weight:700; }
+  .amount { margin-left:auto; font-size:15px; font-weight:700; }
+  .lastok { font-size:11px; color:#a1a1aa; text-align:right; margin:10px 2px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Squad Member 余额查询快捷入口 · 静态 Demo <span style="color:#16a34a">v2</span></h1>
+  <p class="meta">v2（老板 12:18 拍板）：默认收起窄卡（双环）· 点击展开替换大卡 · 数据写死 2026-08-15 12:18 · 不接数据 · v1 对比版保留同目录</p>
+
+  <!-- ============ 一、入口示意（同 v1：todo 上方倒数第二，无数字 badge）============ -->
+  <p class="caption">① 入口位置 — member 对话右侧功能区竖向工具条，插在「团队状态」与「待办」之间（todo 上方，倒数第二位）· 无数字 badge</p>
+  <div class="frame">
+    <div class="stage">
+      <div class="chatmock"><div class="hint">member 对话区（示意）</div></div>
+      <div class="menu">
+        <div class="mbtn" title="长期记忆">🧠<span class="num">3</span></div>
+        <div class="mbtn" title="定时任务">⏰<span class="num">2</span></div>
+        <div class="mbtn" title="Skills">⭐</div>
+        <div class="mbtn" title="团队状态">👥<span class="num">4</span></div>
+        <div class="mbtn new" title="余额查询">🔋</div>
+        <div class="mbtn" title="待办">☑️<span class="num">5</span></div>
+      </div>
+      <div class="arrow-note">← 新增「余额查询」入口：倒数第二位 · 图标不带数字</div>
+    </div>
+  </div>
+
+  <!-- ============ 二、弹层 v2：默认全部收起 · 点击卡片切换 展开/收起 ============ -->
+  <p class="caption">② 点击后弹层 — 卡片两态：<b>收起态（默认）</b>窄行 + 双档双环（5小时+周；左=用量 1% 精确，右=重置剩余时间·单单位）· <b>展开态</b>替换为大卡（主标题=provider/model，副标题=套餐名+base url）· 点击卡片可切换（demo 可点）</p>
+  <div class="frame">
+    <div class="overlay">
+      <div class="modal">
+        <div class="mhead"><span class="mtitle">模型方案额度</span><div class="xbtn">✕</div></div>
+        <div class="mbody">
+          <div class="planbar">
+            <span class="dot-st st-work"></span>
+            <span class="pname">当前方案：主力+兜底</span>
+            <div class="legend">
+              <span><b style="color:#16a34a">●</b> 工作中</span>
+              <span><b style="color:#dc2626">●</b> 熔断</span>
+              <span><b style="color:#f59e0b">●</b> 观察中</span>
+              <span><b style="color:#a1a1aa">●</b> 不在时间内</span>
+            </div>
+          </div>
+          <div class="hintline">点击卡片展开详情，再次点击收起</div>
+
+          <!-- Kimi：绿=工作中 -->
+          <div class="pcard">
+            <div class="row">
+              <span class="dot-st st-work"></span>
+              <div class="logo">K</div>
+              <div class="rinfo">
+                <div class="rname">Kimi</div>
+                <div class="rmodel"><span class="mono">kimi-for-coding</span> · <span class="stword w-work">工作中</span></div>
+              </div>
+              <div class="rings">
+                <div class="rtier">
+                  <div class="rpair">
+                    <div class="ring r-used" style="--p:3"><span class="rv">3%</span></div>
+                    <div class="ring r-time" style="--p:11"><span class="rv">5小时</span></div>
+                  </div>
+                  <span class="rtlab">5小时额度</span>
+                </div>
+                <div class="rtier">
+                  <div class="rpair">
+                    <div class="ring r-used fast" style="--p:39"><span class="rv">39%</span></div>
+                    <div class="ring r-time" style="--p:27"><span class="rv">6天</span></div>
+                  </div>
+                  <span class="rtlab">周额度</span>
+                </div>
+              </div>
+              <span class="chev">▾</span>
+            </div>
+            <div class="expand">
+              <div class="chead">
+                <span class="dot-st st-work"></span>
+                <div class="logo">K</div>
+                <div class="cinfo">
+                  <div class="clabel">Kimi <span class="mmodel">kimi-for-coding</span> <span class="bdg bdg-plan">套餐</span></div>
+                  <div class="csub">Kimi Coding Plan</div>
+                  <div class="csub2 mono">https://api.kimi.com/coding</div>
+                </div>
+                <span class="chev">▴</span>
+              </div>
+              <div class="itemrow">
+                <span class="dot-st st-work"></span>
+                <span class="mname">kimi-for-coding</span>
+                <span class="tc">02:00-23:00 · 当前命中</span>
+                <span class="stword w-work">工作中</span>
+              </div>
+              <div class="tier">
+                <div class="thead"><span class="tname">5 小时额度</span><span class="treset mono">重置 周六 16:26 · 剩 5h 19m</span></div>
+                <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:3%"></div></div><span class="tval mono">3%</span></div>
+                <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:11%"></div></div><span class="tval mono">11%</span></div>
+              </div>
+              <div class="tier">
+                <div class="thead"><span class="tname">本周额度 <span class="bdg bdg-fast">⚠ 消耗偏快</span></span><span class="treset mono">重置 周四 13:38 · 剩 6 天 2 小时</span></div>
+                <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used fast" style="width:39%"></div></div><span class="tval mono fast">39%</span></div>
+                <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:27%"></div></div><span class="tval mono">27%</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- GLM：红=熔断（倒计时） -->
+          <div class="pcard">
+            <div class="row">
+              <span class="dot-st st-open"></span>
+              <div class="logo">智</div>
+              <div class="rinfo">
+                <div class="rname">智谱 GLM</div>
+                <div class="rmodel"><span class="mono">glm-5.2</span> · <span class="stword w-open">熔断 42s</span></div>
+              </div>
+              <div class="rings">
+                <div class="rtier">
+                  <div class="rpair">
+                    <div class="ring r-used" style="--p:21"><span class="rv">21%</span></div>
+                    <div class="ring r-time" style="--p:42"><span class="rv">3小时</span></div>
+                  </div>
+                  <span class="rtlab">5小时额度</span>
+                </div>
+                <div class="rtier">
+                  <div class="rpair">
+                    <div class="ring r-used" style="--p:68"><span class="rv">68%</span></div>
+                    <div class="ring r-time" style="--p:77"><span class="rv">1天</span></div>
+                  </div>
+                  <span class="rtlab">周额度</span>
+                </div>
+              </div>
+              <span class="chev">▾</span>
+            </div>
+            <div class="expand">
+              <div class="chead">
+                <span class="dot-st st-open"></span>
+                <div class="logo">智</div>
+                <div class="cinfo">
+                  <div class="clabel">智谱 GLM <span class="mmodel">glm-5.2</span> <span class="bdg bdg-plan">套餐</span></div>
+                  <div class="csub">GLM Coding Plan</div>
+                  <div class="csub2 mono">https://open.bigmodel.cn/api/anthropic</div>
+                </div>
+                <span class="chev">▴</span>
+              </div>
+              <div class="itemrow">
+                <span class="dot-st st-open"></span>
+                <span class="mname">glm-5.2</span>
+                <span class="tc">不限时</span>
+                <span class="stword w-open">熔断</span>
+                <span class="cd mono">42 秒后自动重试</span>
+              </div>
+              <div class="tier">
+                <div class="thead"><span class="tname">5 小时额度</span><span class="treset mono">重置 周六 14:35 · 剩 3h 28m</span></div>
+                <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:21%"></div></div><span class="tval mono">21%</span></div>
+                <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:42%"></div></div><span class="tval mono">42%</span></div>
+              </div>
+              <div class="tier">
+                <div class="thead"><span class="tname">本周额度</span><span class="treset mono">重置 周一 00:00 · 剩 1 天 13 小时</span></div>
+                <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:68%"></div></div><span class="tval mono">68%</span></div>
+                <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:77%"></div></div><span class="tval mono">77%</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- MiniMax：橙=观察中；剩 47 分（60 分钟内用 m 格式示例） -->
+          <div class="pcard">
+            <div class="row">
+              <span class="dot-st st-half"></span>
+              <div class="logo">M</div>
+              <div class="rinfo">
+                <div class="rname">MiniMax</div>
+                <div class="rmodel"><span class="mono">MiniMax-M2.7</span> · <span class="stword w-half">观察中</span></div>
+              </div>
+              <!-- 该套餐无周限额：小卡只显 5 小时档一组（47m = <60 分钟单单位示例） -->
+              <div class="rings">
+                <div class="rtier">
+                  <div class="rpair">
+                    <div class="ring r-used" style="--p:12"><span class="rv">12%</span></div>
+                    <div class="ring r-time" style="--p:84"><span class="rv">47m</span></div>
+                  </div>
+                  <span class="rtlab">5小时额度</span>
+                </div>
+              </div>
+              <span class="chev">▾</span>
+            </div>
+            <div class="expand">
+              <div class="chead">
+                <span class="dot-st st-half"></span>
+                <div class="logo">M</div>
+                <div class="cinfo">
+                  <div class="clabel">MiniMax <span class="mmodel">MiniMax-M2.7</span> <span class="bdg bdg-plan">套餐</span></div>
+                  <div class="csub">MiniMax Coding Plan</div>
+                  <div class="csub2 mono">https://api.minimaxi.com/anthropic</div>
+                </div>
+                <span class="chev">▴</span>
+              </div>
+              <div class="itemrow">
+                <span class="dot-st st-half"></span>
+                <span class="mname">MiniMax-M2.7</span>
+                <span class="tc">不限时</span>
+                <span class="stword w-half">观察中</span>
+                <span class="cd mono" style="color:#b45309">半开探测中</span>
+              </div>
+              <div class="tier">
+                <div class="thead"><span class="tname">5 小时额度</span><span class="treset mono">重置 周六 13:05 · 剩 47m</span></div>
+                <div class="trow"><span class="tlab">已用</span><div class="bar"><div class="fill f-used" style="width:12%"></div></div><span class="tval mono">12%</span></div>
+                <div class="trow"><span class="tlab">时间</span><div class="bar"><div class="fill f-time" style="width:84%"></div></div><span class="tval mono">84%</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DeepSeek：灰白=不在时间内；余额型无环 → 收起态直接显示金额 -->
+          <div class="pcard">
+            <div class="row">
+              <span class="dot-st st-off"></span>
+              <div class="logo">D</div>
+              <div class="rinfo">
+                <div class="rname">DeepSeek</div>
+                <div class="rmodel"><span class="mono">deepseek-v4-pro</span> · <span class="stword w-off">不在时间内</span></div>
+              </div>
+              <div class="rings">
+                <div class="rval mono">¥ 9,118.81</div>
+                <div class="rlabel">充值余额</div>
+              </div>
+              <span class="chev">▾</span>
+            </div>
+            <div class="expand">
+              <div class="chead">
+                <span class="dot-st st-off"></span>
+                <div class="logo">D</div>
+                <div class="cinfo">
+                  <div class="clabel">DeepSeek <span class="mmodel">deepseek-v4-pro</span></div>
+                  <div class="csub">按量付费（充值余额）</div>
+                  <div class="csub2 mono">https://api.deepseek.com/anthropic</div>
+                </div>
+                <span class="amount mono">¥ 9,118.81</span>
+                <span class="chev">▴</span>
+              </div>
+              <div class="itemrow">
+                <span class="dot-st st-off"></span>
+                <span class="mname">deepseek-v4-pro</span>
+                <span class="tc">00:00-08:00 · 当前未命中</span>
+                <span class="stword w-off">不在时间内</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="lastok">上次更新 12:15 · 每 5 分钟自动刷新 · 失败保留上次成功值</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 展开替换层：点击卡片切换 收起行 ↔ 大卡（独立 toggle，默认全部收起）
+    document.querySelectorAll('.pcard').forEach(function (c) {
+      c.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        c.classList.toggle('open');
+      });
+    });
+  </script>
+
+  <!--
+    v2 固化规则（含 12:29 微调，正式 PRD 时落）：
+      收起态双档双环（5小时余量 + 周余量 都在小卡，左右并列两组（老板 12:40）；每组环在上、档位标签「5小时额度/周额度」在下；无周限额套餐只显 5 小时档一组）：
+        每档左环=已用%（圈数字精确 1%；烧快时环变琥珀色）；右环=时间进度（圈数字=剩余重置时间）
+        时间单单位规则：圈内只显最大单位整数——≥1天→「X天」；≥1小时→「X小时」（不携分钟）；<60分→「Xm」；<1分→「0min」
+      余额型（DeepSeek）收起态无环：直接显示余额金额 +「充值余额」标签
+      展开态卡头：主标题 = provider name / model；副标题 = 套餐名（原主标题下沉）；base url = 副标题下 mono 行
+      展开/收起 = 同卡片内替换层（非手风琴，卡片间独立 toggle）；默认全部收起
+    保留 v1 口径：
+      状态点合并规则：灰白=时间未命中；绿=在时间内+Closed；红=Open（展示剩余倒计时）；橙=HalfOpen
+      停用条目（enabled=false）不参与路由，弹层不展示（或正式 PRD 定灰白+「已停用」）
+      呈现词待定：demo 用「工作中/熔断」（老板原话）；模型页 D16 为「正常/异常/观察中」——正式 PRD 统一
+      badge 无数字；入口插「团队状态」与「待办」之间
+  -->
+</div>
+</body>
+</html>

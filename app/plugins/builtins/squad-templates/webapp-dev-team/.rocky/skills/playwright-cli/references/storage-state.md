@@ -9,7 +9,7 @@ Save and restore complete browser state including cookies and storage.
 ### Save Storage State
 
 ```bash
-# Save to auto-generated filename (storage-state-{timestamp}.json)
+# Save to auto-generated filename (storage-state-${TIMESTAMP}.json)
 playwright-cli state-save
 
 # Save to specific filename
@@ -235,7 +235,7 @@ playwright-cli run-code "async page => {
 # Step 1: Login and save state
 playwright-cli open https://app.example.com/login
 playwright-cli snapshot
-playwright-cli fill e1 "user@example.com"
+playwright-cli fill e1 "user.com"
 playwright-cli fill e2 "password123"
 playwright-cli click e3
 

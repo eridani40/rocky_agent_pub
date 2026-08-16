@@ -1,0 +1,139 @@
+# mr_tc3 — [v0.0.347] squad 挂载 modelRoutingPlanId：挂载/解除/校验 + status 端点基态
+#
+# 覆盖契约：specs/api/overall/21-model-routing.md §2.5（PATCH /squad/:id modelRoutingPlanId）
+#           + §2.6（GET /model-routing/plans/:planId/status）+ change_plan
+#           （squad schema required:false / PATCH !== undefined 才写 / null 清空 / 校验 400）
+#  1. PATCH 挂载合法 planId → 200 回显 + GET 落盘一致
+#  2. PATCH planId 不存在 → 400 plan not found
+#  3. PATCH null → 清空（响应/落盘均无字段）
+#  4. PATCH 不含 modelRoutingPlanId（改 name）→ undefined 不写（不误清空已挂载方案）
+#  5. GET status 基态：closed → presentation normal，无 remainingSeconds；404/400
+#
+# 全确定性 HTTP 事务，零 LLM（status 基态无需真实调用）。teardown 解散 squad + 删方案。
+case: mr_tc3
+module: model-routing
+timeout: 60
+
+setup:
+  - name: 建 squad（modelDefault 必填，minimax）
+    requests:
+      - method: POST
+        path: /squad
+        body:
+          name: "zz-mr-tc3-squad"
+          modelDefault: "MiniMax-M3"
+          leader:
+            name: "zz-mr-tc3-leader"
+    save:
+      squad_id: .id
+    check:
+      - .id exists
+      - .leaderId exists
+
+  - name: PUT 方案 A（2 条目，status 端点用）
+    requests:
+      - method: PUT
+        path: /config/app
+        body:
+          group: "model_routing_plans"
+          key: "zz-mr-tc3-plan"
+          data:
+            id: "zz-mr-tc3-plan"
+            name: "zz-mr-tc3-plan"
+            items:
+              - providerId: "01KVJMPG2EZ1078MCT9JH4J5HG"
+                modelId: "MiniMax-M3"
+                priority: 1
+                enabled: true
+              - providerId: "01KVX1JBFHG51E2X0KXPBG9B15"
+                modelId: "glm-5.2"
+                priority: 2
+                enabled: true
+    check:
+      - .ok == true
+
+steps:
+  - name: PATCH 挂载合法方案 → 200 回显 modelRoutingPlanId
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}
+        body:
+          modelRoutingPlanId: "zz-mr-tc3-plan"
+    check:
+      - .modelRoutingPlanId == "zz-mr-tc3-plan"
+
+  - name: GET squad 回读 — 落盘一致（挂载持久）
+    requests:
+      - GET /squad/{squad_id}
+    check:
+      - .modelRoutingPlanId == "zz-mr-tc3-plan"
+
+  - name: PATCH planId 不存在 → 400 plan not found
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}
+        status: [400]
+        body:
+          modelRoutingPlanId: "01KZZZZZZZZZZZZZZZZZZZZZZZX"
+    check:
+      - .error ~= "plan not found"
+
+  - name: PATCH 不含 modelRoutingPlanId（改 name）→ undefined 不写，挂载保留
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}
+        body:
+          name: "zz-mr-tc3-renamed"
+    check:
+      - .name == "zz-mr-tc3-renamed"
+      - .modelRoutingPlanId == "zz-mr-tc3-plan"
+
+  - name: PATCH null 清空 → 200 响应无字段
+    requests:
+      - method: PATCH
+        path: /squad/{squad_id}
+        body:
+          modelRoutingPlanId: null
+    check:
+      - .modelRoutingPlanId absent
+
+  - name: GET squad 回读 — null 清空落盘（无字段省略）
+    requests:
+      - GET /squad/{squad_id}
+    check:
+      - .modelRoutingPlanId absent
+
+  - name: GET status 基态 — closed → presentation normal，无 remainingSeconds
+    requests:
+      - GET /model-routing/plans/zz-mr-tc3-plan/status
+    check:
+      - .planId == "zz-mr-tc3-plan"
+      - .items[1] exists
+      - .items[] all .circuitState == "closed"
+      - .items[] all .presentation == "normal"
+      - .items[] all .remainingSeconds absent
+
+  - name: GET status 方案不存在 → 404
+    requests:
+      - method: GET
+        path: /model-routing/plans/01KZZZZZZZZZZZZZZZZZZZZZZZX/status
+        status: [404]
+    check:
+      - .error exists
+
+teardown:
+  - name: 解散 squad
+    requests:
+      - method: DELETE
+        path: /squad/{squad_id}
+        status: [200, 404]
+    check:
+      - .deleted == true
+
+  - name: 删除方案
+    requests:
+      - method: DELETE
+        path: /config/app?group=model_routing_plans&key=zz-mr-tc3-plan
+        status: [200, 404]
+    check:
+      - .ok == true

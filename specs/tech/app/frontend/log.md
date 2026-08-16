@@ -1,10 +1,16 @@
 ---
 type: log
 title: Frontend KB 变更记录
-updated: 2026-08-12
+updated: 2026-08-14
 ---
 
 # Frontend KB 变更记录（ISO 倒序，最新在前）
+
+## 2026-08-14 · v0.0.348（队员面板状态不实时修复 — useStudioUnreadMeta 四层 hydration）
+
+- **`[P0]component_data_map.md` §2 L39**：`useStudioUnreadMeta` 行——数据形扩 `KeyedMap<sid,bool>×3 + metaMap<sid,updatedAt>`；读 API 加 `GET /session?biz=studio`（hydrate 基线 + onResumed 校正）；触发改「SSE + GET 补水」；契约补四层：onInit 同步订阅 + fire-and-forget hydrate + onResumed 注册（退订句柄 onDestroy 回收，严于 use-squad-meta 先例）+ onEvent 同步写 metaMap；hydrate 经 `mergeFromSessions` 纯函数（重建语义 + updatedAt 竞态仲裁，GET 后到不回退先到新帧）经 mutate 写回。根因：v0.0.165 删初始拉取 + 无重连校正 → 仅 SSE 增量在订阅冷启动/断连窗口丢帧后永久错态。详见 `specs/tech/version_logs/v0.0.348/change_plan.md` 决策①③④⑥⑦⑧。
+- **代码**：`use-studio-unread-meta.ts`（StudioMetaCtx 第四张 metaMap + mergeFromSessions + onInit/onEvent/onDestroy 四层接线）+ `session-api.ts` 新增 `listSessionsByBiz(biz)`（GET /session?biz=xxx 前端封装；listSessions 原签名零改动，3 现有调用方不动；biz 参数为 v0.0.56 既有 server 契约，API spec 零变化）。
+- **消费方 spec 同步**：`specs/ui/overall/06-studio.md` §3 数据行 + `component-seats-panel.md`「为什么需要」段补四层 hydration 注记（seat-card/seat-row 仅派生源指针不动）。
 
 ## 2026-08-12 · v0.0.339（文件打开分流 — CSV/TSV 无条件系统打开 + 文本 >5MB 系统打开）
 

@@ -1,13 +1,25 @@
 ---
 type: log
 title: Observability KB 变更记录
-updated: 2026-08-05
+updated: 2026-08-15
 ---
 
 # Observability KB 变更记录（ISO 倒序，最新在前）
 
 > 本目录级变更日志（位置轴）。跨版本发布说明（版本轴）见 `specs/tech/version_logs/vX.Y/change_log.md`。
 > 一行一 feature；版本块尾指向该版本 change_log 详情。
+
+## 2026-08-15 · v0.0.354（tool span 时长修复 — start 逐个化不含排队）
+
+- **`[P0]observability_interface.md §5.4`**：`ToolSpanMetadata.durationMs` 注释补语义——真实执行时长（startToolSpan 逐个化：startTime=该 tool 串行开始时刻，即上一 result 完成时刻；不再被批量预起的 t0 拉长到含批内排队等待）。接口/字段零变化，仅语义注释。
+- 详情：`specs/tech/version_logs/v0.0.354/change_log.md`
+
+## 2026-08-15 · v0.0.353（Langfuse 逻辑/物理两层语义校准）
+
+- **`[P0]observability_interface.md §5.1 TraceMetadata`**：增 `routingPlan?: { planId, planName? }`（有方案才带，记录 run 级生效方案快照）。
+- **`[P0]observability_interface.md §5.2 GenStart/GenMetadata`**：增 `routingPlan`（logical/ skipped gen 携带）、`providerId/providerName`（physical 真实；logical 显式 null）、`logicalView`（A1 治理）、`skipped/skipReason`（D9 被跳候选成对 gen 标记）。
+- **`[P0]llm_caller.md §2.1`**：`ObservabilityPort` 注释补 `recordAttemptTarget` / `recordSkippedCandidate`。
+- 详情：`specs/tech/version_logs/v0.0.353/model-routing-trace-correctness/change_log.md`
 
 ## 2026-08-05 · v0.0.258（episode 落 performance.log — 修 prod console 蒸发）
 

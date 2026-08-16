@@ -20,12 +20,10 @@ groups:
           - context_files
           - memory_user
           - memory_session
+          - session_states            # [v0.0.361] env/workspace/团队盘路径静态段（平移自退役 reminder provider）
       - pointId: system_reminder
         # 去掉 squad_charter/squad_tasks/squad_board/squad_workspace/squad_team_status 5 项
         impls:
-          - env
-          - time
-          - workspace
           - tool_error
           - todo
           - squad_agents_status

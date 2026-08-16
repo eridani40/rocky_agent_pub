@@ -73,6 +73,8 @@ interface DropdownProps {
   options: SelectorOption[];
   multiple?: boolean;
   nullable?: boolean;
+  /** [v0.0.347] nullable 空值选项文案（缺省「（野生 / 不挂 KR）」——旧语义；消费方可按上下文覆盖，如挂载方案 = 「未挂载」） */
+  nullableLabel?: string;
   onChange: (v: string | string[] | null) => void;
   /** ET 稳定语义锚点 data-action-key：trigger 渲 `{actionKey}`、选项渲 `{actionKey}-option`
    *  （命名见 _conventions §12；同 key 多选项靠文案区分），缺省不渲染 */
@@ -80,7 +82,7 @@ interface DropdownProps {
 }
 
 /** 自定义下拉（trigger 按钮 + popover 列表 + 键盘导航 + 外部点击关闭；多选 trigger 区 chip 回显） */
-export function Dropdown({ value, options, multiple, nullable, onChange, actionKey }: DropdownProps) {
+export function Dropdown({ value, options, multiple, nullable, nullableLabel, onChange, actionKey }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -96,8 +98,8 @@ export function Dropdown({ value, options, multiple, nullable, onChange, actionK
   }, [open]);
 
   const fullOptions = useMemo<SelectorOption[]>(
-    () => (nullable ? [{ value: NULL_VALUE, label: '（野生 / 不挂 KR）', hint: '野生需求' }, ...options] : options),
-    [options, nullable],
+    () => (nullable ? [{ value: NULL_VALUE, label: nullableLabel ?? '（野生 / 不挂 KR）' }, ...options] : options),
+    [options, nullable, nullableLabel],
   );
 
   const selectedValues = useMemo<Set<string>>(() => {
@@ -107,17 +109,18 @@ export function Dropdown({ value, options, multiple, nullable, onChange, actionK
 
   /** trigger 区显示：单选 = 选项 label；多选 = chip 列表 */
   const triggerLabel = useMemo(() => {
+    const nullLabel = nullableLabel ?? '（野生 / 不挂 KR）';
     if (multiple) {
       const arr = Array.isArray(value) ? value : [];
       if (arr.length === 0) return '选择…';
       return arr
         .map((v) => fullOptions.find((o) => o.value === v)?.label ?? v)
-        .filter((s) => s !== '（野生 / 不挂 KR）')
+        .filter((s) => s !== nullLabel)
         .join(', ');
     }
-    if (!value) return nullable ? '（野生 / 不挂 KR）' : '选择…';
+    if (!value) return nullable ? nullLabel : '选择…';
     return fullOptions.find((o) => o.value === value)?.label ?? (value as string);
-  }, [value, multiple, nullable, fullOptions]);
+  }, [value, multiple, nullable, nullableLabel, fullOptions]);
 
   /** 切换某选项 */
   function toggle(optValue: string) {

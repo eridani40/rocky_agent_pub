@@ -82,7 +82,8 @@ export async function ingestAndAssemble(
   state: RunState,
   cursor: 'ingestUpTo' | 'llmUpTo',
 ): Promise<ContextSnapshot> {
-  await contextEngine.ingest(config, newMessages, scopeId);
+  // [v0.0.361 §1.4 T3] runState passthrough (injector dual-mode switching; forked/fictional call sites without state don't pass, always full)
+  await contextEngine.ingest(config, newMessages, scopeId, false, undefined, state);
   state[cursor] = newMessages[newMessages.length - 1]!.id;
   bus.clearReplay(groupKeyForRunKind(config.sessionId, runKind));
   // [v0.0.66 §2.6] 删 buffer 参数（统一走 prevSnapshot + EP-selected store）

@@ -1,0 +1,104 @@
+# chat_runtime_config_realtime — [v0.0.351] 运行中改配置下轮 iteration 生效（P-A/B/C 黑盒）
+#
+# 覆盖契约：specs/api/overall/04-agent-session.md §2.5（PUT /session modelId/effort/approvalMode，
+#           v0.0.148 enum）+ §4（agent_loop SSE group session_id:{sid}_amt:main，runKind 枚举
+#           main/summary/consolidate——spec "_amt:current" 措辞与代码不符，以代码实证为准）
+#           + states/v0.0.351/tests/test-plan.md §3.2 规格 + change_plan T1（iteration 边界刷新配置）
+#  P-A/B/C 核心路径：
+#   1. 建会话（minimax/M3 预绑定）→ 订阅 agent_loop 流（先订阅后触发）
+#   2. 发消息引导 bash 工具调用（sleep 1 制造 iteration 窗口：第一轮 callLLM → 工具 → 第二轮 callLLM）
+#   3. poll 进入 running → PUT /session 改 providerId+modelId（deepseek/deepseek-v4-pro）+ effort=high
+#      + approvalMode=greenlight → 200 三字段回显（配置写成功 = 黑盒 P-B）
+#   4. wait run_end(status=done) → run 正常结束（新配置未致崩）
+#   5. oracle（Langfuse）：后续 generation 用新 model（deepseek-v4-pro）= 新配置真实生效证据（P-C）
+#
+# 设计修正（vs test-plan §3.2 规格，框架实证）：
+#   ① step2 run 原语改 POST /messages 202 + poll：run 同步等终态会堵死「运行中改配置」窗口
+#     （agent_spawn_sync 先例同款）；② PUT 补 providerId 同改（fallback 模型挂 fallback provider，
+#     只改 modelId 会致 minimax 上解析不到 glm-5.2）；③ oracle 断 .model（langfuse generation 标准
+#     字段），effort 无标准 trace 字段由 UT 白盒覆盖（test-plan P-C effort 面归 UT）。
+#
+# 真调 LLM（minimax 两轮）；429/529/503 框架自动 skip；oracle 缺凭证自动 skip 不算 fail。
+# provider/model 硬编码字面量（框架 {var} 仅 save 变量插值无 env 注入，照 mr_tc1 先例）：
+# 初始 = minimax/MiniMax-M3；切换目标 = deepseek/deepseek-v4-pro（provider 池实测唯一确定性可用
+# 备选——volcengine CodingPlan 订阅过期出站 400（test.env 注释+复跑实证）、glm provider
+# enabled=false，均不可作切换目标；minimax 内无第二个 enabled model）。
+# ⚠️ providerId 必须用 data.id（01KW6CPB0BRHQXH2B9P8QR82MG）非外层文件 id
+# （01KW6CPB0C5766W8H64P7BTA08.json 文件名）——成功路径全用 data.id，ET-1 PUT 回显实证。
+case: chat_runtime_config_realtime
+module: chat
+timeout: 120
+
+setup:
+  - name: 建会话（预绑定 provider/model，effort/approvalMode 落默认值）
+    requests:
+      - 'POST /session {"title": "runtime-config-realtime", "providerId": "01KVJMPG2EZ1078MCT9JH4J5HG", "modelId": "MiniMax-M3"}'
+    save: { sid: .id }
+    check:
+      - .id exists
+      - .state == "idle"
+
+steps:
+  - name: 订阅 agent_loop 流（主对话 mode；先订阅后触发）
+    sse:
+      sub:
+        - { topic: agent_loop, group: "session_id:{sid}_amt:main", as: main }
+
+  - name: 发消息触发 bash 工具调用（fire-and-forget 202，制造第一轮→工具→第二轮 iteration 窗口）
+    requests:
+      - method: POST
+        path: /session/{sid}/messages
+        body:
+          content: "请先用 bash 工具执行命令 sleep 1 && echo a，拿到工具结果后再用一句话总结输出。必须调用 bash 工具，不要提问，直接执行。"
+        status: [202]
+    save: { run_id: .runId }
+    check:
+      - .runId exists
+
+  - name: poll 进入 running（改配置窗口确认）
+    poll:
+      request: GET /session/{sid}
+      until: '.state == "running"'
+      every: 1
+      timeout: 15
+    check:
+      - .state == "running"
+
+  - name: 运行中 PUT /session 改配置（P-B：model/effort/approvalMode 三改 + provider 同改）
+    requests:
+      - method: PUT
+        path: /session/{sid}
+        body:
+          providerId: "01KW6CPB0BRHQXH2B9P8QR82MG"
+          modelId: "deepseek-v4-pro"
+          effort: "high"
+          approvalMode: "greenlight"
+    check:
+      - .providerId == "01KW6CPB0BRHQXH2B9P8QR82MG"
+      - .modelId == "deepseek-v4-pro"
+      - .effort == "high"
+      - .approvalMode == "greenlight"
+
+  - name: 等 run 正常结束（新配置未致崩；stopReason=no_tool_call 过滤防 running/工具中帧误计——run_end 无 status 字段，executor 帧实证）
+    wait:
+      stream: main
+      until: "main.count(type=run_end,stopReason=no_tool_call) == 1"
+      timeout: 60
+    check:
+      - main.count(type=run_start) == 1
+      - main.absent(type=error)
+
+  - name: oracle — Langfuse trace 后续 generation 用新 model（P-C 生效证据；缺凭证自动 skip）
+    oracle:
+      langfuse:
+        timeout: 45
+        ready_when: '.observations[] any .model == "deepseek-v4-pro"'
+    check:
+      - .observations[] any .model == "deepseek-v4-pro"
+
+teardown:
+  - name: 删除会话
+    requests:
+      - method: DELETE
+        path: /session/{sid}
+        status: [200, 204, 404]

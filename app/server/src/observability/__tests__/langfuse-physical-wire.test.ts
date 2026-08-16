@@ -171,6 +171,35 @@ describe('mapGenMetadata (v0.0.25 BUG-001 §3)', () => {
     });
     expect(out['retry_chain']).toBeUndefined();
   });
+
+  // [v0.0.353 T2] provider 真实记录（调用谁记录谁）
+  it('[T2] providerId/providerName/modelId 透传（physical generation 真实信息）', () => {
+    const out = mapGenMetadata({
+      iteration: 1, step: 1, cacheReadTokens: 0, cacheWriteTokens: 0,
+      providerId: 'p1', providerName: 'anthropic_compatible', modelId: 'real-m1',
+    });
+    expect(out['providerId']).toBe('p1');
+    expect(out['providerName']).toBe('anthropic_compatible');
+    expect(out['modelId']).toBe('real-m1');
+  });
+
+  it('[T2] logicalView 标识透传（A1 治理）', () => {
+    const out = mapGenMetadata({
+      iteration: 1, step: 1, cacheReadTokens: 0, cacheWriteTokens: 0,
+      logicalView: true,
+    });
+    expect(out['logicalView']).toBe(true);
+  });
+
+  it('[T2] provider 字段未传时不写入（向后兼容）', () => {
+    const out = mapGenMetadata({
+      iteration: 1, step: 1, cacheReadTokens: 0, cacheWriteTokens: 0,
+    });
+    expect(out['providerId']).toBeUndefined();
+    expect(out['providerName']).toBeUndefined();
+    expect(out['modelId']).toBeUndefined();
+    expect(out['logicalView']).toBeUndefined();
+  });
 });
 
 // ============================================================
